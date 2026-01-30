@@ -17,6 +17,12 @@ pub struct TransposePlugin {
 struct TransposeParams {
     #[id = "semitones"]
     pub semitones: IntParam,
+
+    #[id = "latency"]
+    pub latency_ms: FloatParam,
+
+    #[id = "smoothness"]
+    pub smoothness_ms: FloatParam,
 }
 
 impl Default for TransposePlugin {
@@ -39,12 +45,36 @@ impl Default for TransposeParams {
                 IntRange::Linear { min: -12, max: 12 },
             )
             .with_unit(" st"),
+
+            latency_ms: FloatParam::new(
+                "Latency",
+                5.0,
+                FloatRange::Skewed {
+                    min: 2.0,
+                    max: 50.0,
+                    factor: FloatRange::skew_factor(-1.0), // More resolution at low end
+                },
+            )
+            .with_unit(" ms")
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
+
+            smoothness_ms: FloatParam::new(
+                "Smoothness",
+                2.0,
+                FloatRange::Skewed {
+                    min: 0.5,
+                    max: 10.0,
+                    factor: FloatRange::skew_factor(-1.0),
+                },
+            )
+            .with_unit(" ms")
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
         }
     }
 }
 
 impl Plugin for TransposePlugin {
-    const NAME: &'static str = "Transpose Plugin v4";
+    const NAME: &'static str = "Transpose Plugin v5";
     const VENDOR: &'static str = "Transpose";
     const URL: &'static str = "";
     const EMAIL: &'static str = "";
@@ -101,9 +131,15 @@ impl Plugin for TransposePlugin {
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         let semitones = self.params.semitones.value();
+        let latency_ms = self.params.latency_ms.value();
+        let smoothness_ms = self.params.smoothness_ms.value();
 
         self.pitch_shifter_l.set_semitones(semitones);
         self.pitch_shifter_r.set_semitones(semitones);
+        self.pitch_shifter_l.set_latency_ms(latency_ms, self.sample_rate);
+        self.pitch_shifter_r.set_latency_ms(latency_ms, self.sample_rate);
+        self.pitch_shifter_l.set_smoothness_ms(smoothness_ms, self.sample_rate);
+        self.pitch_shifter_r.set_smoothness_ms(smoothness_ms, self.sample_rate);
 
         let num_channels = buffer.channels();
 
@@ -136,7 +172,7 @@ impl ClapPlugin for TransposePlugin {
 }
 
 impl Vst3Plugin for TransposePlugin {
-    const VST3_CLASS_ID: [u8; 16] = *b"TransposePlug004";
+    const VST3_CLASS_ID: [u8; 16] = *b"TransposePlug005";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
         Vst3SubCategory::Fx,
         Vst3SubCategory::PitchShift,

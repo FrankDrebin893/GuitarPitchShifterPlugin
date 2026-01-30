@@ -29,6 +29,11 @@ pub struct PitchShifter {
 
     // Samples processed (for initial fill)
     samples_processed: usize,
+
+    // Whether buffer needs resize (deferred to avoid audio glitches)
+    needs_resize: bool,
+    pending_buffer_size: usize,
+    pending_crossfade_len: usize,
 }
 
 impl PitchShifter {
@@ -54,17 +59,37 @@ impl PitchShifter {
             is_crossfading: false,
             target_latency,
             samples_processed: 0,
+            needs_resize: false,
+            pending_buffer_size: buffer_size,
+            pending_crossfade_len: crossfade_len,
         }
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
-        // Adjust latency based on sample rate (~5ms)
+        // Adjust latency based on sample rate (~5ms default)
         self.target_latency = (sample_rate * 0.005) as usize;
         self.buffer_size = self.target_latency * 8;
         self.buffer.resize(self.buffer_size, 0.0);
         self.crossfade_len = (sample_rate * 0.002) as usize; // ~2ms crossfade
         self.crossfade_buffer.resize(self.crossfade_len, 0.0);
         self.reset();
+    }
+
+    pub fn set_latency_ms(&mut self, latency_ms: f32, sample_rate: f32) {
+        let new_latency = ((sample_rate * latency_ms / 1000.0) as usize).max(64);
+        if new_latency != self.target_latency {
+            self.target_latency = new_latency;
+            self.pending_buffer_size = self.target_latency * 8;
+            self.needs_resize = true;
+        }
+    }
+
+    pub fn set_smoothness_ms(&mut self, smoothness_ms: f32, sample_rate: f32) {
+        let new_crossfade_len = ((sample_rate * smoothness_ms / 1000.0) as usize).max(16);
+        if new_crossfade_len != self.crossfade_len {
+            self.pending_crossfade_len = new_crossfade_len;
+            self.needs_resize = true;
+        }
     }
 
     pub fn set_semitones(&mut self, semitones: i32) {
@@ -84,7 +109,36 @@ impl PitchShifter {
         self.samples_processed = 0;
     }
 
+    fn apply_pending_resize(&mut self) {
+        if !self.needs_resize {
+            return;
+        }
+
+        // Only resize when not crossfading to avoid glitches
+        if self.is_crossfading {
+            return;
+        }
+
+        if self.pending_buffer_size != self.buffer_size {
+            self.buffer_size = self.pending_buffer_size;
+            self.buffer.resize(self.buffer_size, 0.0);
+            // Reset positions to avoid out-of-bounds
+            self.write_pos = self.write_pos % self.buffer_size;
+            self.read_pos = self.read_pos % self.buffer_size as f64;
+        }
+
+        if self.pending_crossfade_len != self.crossfade_len {
+            self.crossfade_len = self.pending_crossfade_len;
+            self.crossfade_buffer.resize(self.crossfade_len, 0.0);
+        }
+
+        self.needs_resize = false;
+    }
+
     pub fn process_sample(&mut self, input: f32) -> f32 {
+        // Apply any pending buffer resizes
+        self.apply_pending_resize();
+
         // Write input to buffer
         self.buffer[self.write_pos] = input;
         self.write_pos = (self.write_pos + 1) % self.buffer_size;
