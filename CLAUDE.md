@@ -14,6 +14,9 @@ cargo xtask bundle transpose_plugin --release
 
 # Quick compile check
 cargo check
+
+# Run tests (always run before committing!)
+cargo test
 ```
 
 Output location: `target/bundled/TransposePlugin_vX.vst3`
@@ -53,8 +56,20 @@ When iterating on the plugin:
 
 This allows testing multiple versions side-by-side in DAW.
 
+## Testing
+
+**Always run `cargo test` before committing changes.**
+
+Tests are in `src/pitch_shifter.rs` and cover:
+- Passthrough behavior at 0 semitones
+- Pitch shifting frequency accuracy
+- Parameter changes
+- Buffer/state management
+- Stability under rapid parameter changes
+
 ## Code Conventions
 
+- Always run tests before committing
 - Optimize for low latency over audio quality
 - Defer buffer resizes to avoid audio glitches
 - Keep DSP code in pitch_shifter.rs separate from plugin boilerplate
