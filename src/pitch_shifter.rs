@@ -24,16 +24,24 @@ pub struct PitchShifter {
     crossfade_len: usize,
     is_crossfading: bool,
 
+    // Target latency in samples (distance between write and read)
+    target_latency: usize,
+
     // Samples processed (for initial fill)
     samples_processed: usize,
 }
 
 impl PitchShifter {
-    pub fn new(block_size: usize) -> Self {
-        // Buffer size should be large enough to handle the range of pitch shifts
-        // For -12 to +12 semitones, we need at least 2x buffer for safety
-        let buffer_size = block_size * 16;
-        let crossfade_len = block_size / 4; // ~5ms at 44.1kHz with 512 block size
+    pub fn new(_block_size: usize) -> Self {
+        // Target ~15ms latency at 44.1kHz = ~660 samples
+        let target_latency = 660;
+
+        // Buffer needs to be large enough for pitch shifting range
+        // At 0.5x rate (octave down), we need 2x the latency window
+        let buffer_size = target_latency * 6;
+
+        // Crossfade length ~3ms for smooth transitions
+        let crossfade_len = 128;
 
         Self {
             buffer: vec![0.0; buffer_size],
@@ -45,12 +53,19 @@ impl PitchShifter {
             crossfade_pos: 0,
             crossfade_len,
             is_crossfading: false,
+            target_latency,
             samples_processed: 0,
         }
     }
 
-    pub fn set_sample_rate(&mut self, _sample_rate: f32) {
-        // Could adjust crossfade length based on sample rate if needed
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        // Adjust latency based on sample rate (~15ms)
+        self.target_latency = (sample_rate * 0.015) as usize;
+        self.buffer_size = self.target_latency * 6;
+        self.buffer.resize(self.buffer_size, 0.0);
+        self.crossfade_len = (sample_rate * 0.003) as usize; // ~3ms crossfade
+        self.crossfade_buffer.resize(self.crossfade_len, 0.0);
+        self.reset();
     }
 
     pub fn set_semitones(&mut self, semitones: i32) {
@@ -76,8 +91,8 @@ impl PitchShifter {
         self.write_pos = (self.write_pos + 1) % self.buffer_size;
         self.samples_processed += 1;
 
-        // During initial fill, output silence to build up latency buffer
-        if self.samples_processed < self.crossfade_len * 2 {
+        // During initial fill, output silence to build up minimal latency buffer
+        if self.samples_processed < self.target_latency {
             return 0.0;
         }
 
@@ -94,8 +109,8 @@ impl PitchShifter {
 
         // Check if we need to resync (read too close to or too far from write)
         let distance = self.calculate_distance();
-        let min_distance = self.crossfade_len as f64 * 2.0;
-        let max_distance = (self.buffer_size - self.crossfade_len * 2) as f64;
+        let min_distance = self.crossfade_len as f64 + 64.0;
+        let max_distance = (self.buffer_size - self.crossfade_len - 64) as f64;
 
         if !self.is_crossfading && (distance < min_distance || distance > max_distance) {
             self.start_crossfade();
@@ -139,9 +154,8 @@ impl PitchShifter {
             self.crossfade_buffer[i] = self.read_interpolated(pos);
         }
 
-        // Jump read position to a safe distance behind write
-        let target_distance = self.buffer_size as f64 / 4.0;
-        self.read_pos = (self.write_pos as f64 - target_distance + self.buffer_size as f64)
+        // Jump read position to target latency behind write
+        self.read_pos = (self.write_pos as f64 - self.target_latency as f64 + self.buffer_size as f64)
             % self.buffer_size as f64;
 
         self.crossfade_pos = 0;
