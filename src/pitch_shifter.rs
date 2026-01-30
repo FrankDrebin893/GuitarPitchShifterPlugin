@@ -33,15 +33,14 @@ pub struct PitchShifter {
 
 impl PitchShifter {
     pub fn new(_block_size: usize) -> Self {
-        // Target ~15ms latency at 44.1kHz = ~660 samples
-        let target_latency = 660;
+        // Target ~5ms latency at 44.1kHz = ~220 samples
+        let target_latency = 220;
 
         // Buffer needs to be large enough for pitch shifting range
-        // At 0.5x rate (octave down), we need 2x the latency window
-        let buffer_size = target_latency * 6;
+        let buffer_size = target_latency * 8;
 
-        // Crossfade length ~3ms for smooth transitions
-        let crossfade_len = 128;
+        // Crossfade length ~2ms for smooth transitions
+        let crossfade_len = 88;
 
         Self {
             buffer: vec![0.0; buffer_size],
@@ -59,11 +58,11 @@ impl PitchShifter {
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
-        // Adjust latency based on sample rate (~15ms)
-        self.target_latency = (sample_rate * 0.015) as usize;
-        self.buffer_size = self.target_latency * 6;
+        // Adjust latency based on sample rate (~5ms)
+        self.target_latency = (sample_rate * 0.005) as usize;
+        self.buffer_size = self.target_latency * 8;
         self.buffer.resize(self.buffer_size, 0.0);
-        self.crossfade_len = (sample_rate * 0.003) as usize; // ~3ms crossfade
+        self.crossfade_len = (sample_rate * 0.002) as usize; // ~2ms crossfade
         self.crossfade_buffer.resize(self.crossfade_len, 0.0);
         self.reset();
     }
