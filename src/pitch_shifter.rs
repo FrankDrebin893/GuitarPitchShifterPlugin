@@ -145,7 +145,7 @@ impl PitchShifter {
         self.samples_processed += 1;
 
         // During initial fill, output silence to build up minimal latency buffer
-        if self.samples_processed < self.target_latency {
+        if self.samples_processed <= self.target_latency {
             return 0.0;
         }
 
@@ -228,5 +228,293 @@ impl PitchShifter {
         }
 
         output
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::f32::consts::PI;
+
+    const SAMPLE_RATE: f32 = 44100.0;
+
+    fn generate_sine_wave(frequency: f32, sample_rate: f32, num_samples: usize) -> Vec<f32> {
+        (0..num_samples)
+            .map(|i| (2.0 * PI * frequency * i as f32 / sample_rate).sin())
+            .collect()
+    }
+
+    fn process_buffer(shifter: &mut PitchShifter, input: &[f32]) -> Vec<f32> {
+        input.iter().map(|&s| shifter.process_sample(s)).collect()
+    }
+
+    fn rms(samples: &[f32]) -> f32 {
+        (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt()
+    }
+
+    fn estimate_frequency(samples: &[f32], sample_rate: f32) -> f32 {
+        // Count zero crossings to estimate frequency
+        let mut crossings = 0;
+        for i in 1..samples.len() {
+            if (samples[i - 1] >= 0.0) != (samples[i] >= 0.0) {
+                crossings += 1;
+            }
+        }
+        // Each cycle has 2 zero crossings
+        (crossings as f32 / 2.0) * sample_rate / samples.len() as f32
+    }
+
+    #[test]
+    fn test_passthrough_at_zero_semitones() {
+        let mut shifter = PitchShifter::new(512);
+        shifter.set_sample_rate(SAMPLE_RATE);
+        shifter.set_semitones(0);
+
+        let input = generate_sine_wave(440.0, SAMPLE_RATE, 4000);
+        let output = process_buffer(&mut shifter, &input);
+
+        // Skip initial latency period
+        let skip = shifter.target_latency + 100;
+        let input_segment = &input[..input.len() - skip];
+        let output_segment = &output[skip..];
+
+        // Compare RMS levels (should be similar)
+        let input_rms = rms(input_segment);
+        let output_rms = rms(output_segment);
+
+        assert!(
+            (input_rms - output_rms).abs() < 0.1,
+            "RMS mismatch: input={}, output={}",
+            input_rms,
+            output_rms
+        );
+
+        // Check frequency is preserved
+        let input_freq = estimate_frequency(input_segment, SAMPLE_RATE);
+        let output_freq = estimate_frequency(output_segment, SAMPLE_RATE);
+
+        assert!(
+            (input_freq - output_freq).abs() < 20.0,
+            "Frequency mismatch: input={}, output={}",
+            input_freq,
+            output_freq
+        );
+    }
+
+    #[test]
+    fn test_pitch_up_octave() {
+        let mut shifter = PitchShifter::new(512);
+        shifter.set_sample_rate(SAMPLE_RATE);
+        shifter.set_semitones(12); // +12 = octave up = 2x frequency
+
+        let input_freq = 220.0;
+        let input = generate_sine_wave(input_freq, SAMPLE_RATE, 8000);
+        let output = process_buffer(&mut shifter, &input);
+
+        // Skip initial latency and some settling time
+        let skip = 1000;
+        let output_segment = &output[skip..];
+
+        // Should have signal (not silent)
+        let output_rms = rms(output_segment);
+        assert!(output_rms > 0.1, "Output is too quiet: RMS={}", output_rms);
+
+        // Frequency should be approximately doubled
+        let output_freq = estimate_frequency(output_segment, SAMPLE_RATE);
+        let expected_freq = input_freq * 2.0;
+
+        assert!(
+            (output_freq - expected_freq).abs() < expected_freq * 0.15,
+            "Expected ~{}Hz, got {}Hz",
+            expected_freq,
+            output_freq
+        );
+    }
+
+    #[test]
+    fn test_pitch_down_octave() {
+        let mut shifter = PitchShifter::new(512);
+        shifter.set_sample_rate(SAMPLE_RATE);
+        shifter.set_semitones(-12); // -12 = octave down = 0.5x frequency
+
+        let input_freq = 880.0;
+        let input = generate_sine_wave(input_freq, SAMPLE_RATE, 8000);
+        let output = process_buffer(&mut shifter, &input);
+
+        // Skip initial latency
+        let skip = 1000;
+        let output_segment = &output[skip..];
+
+        // Should have signal
+        let output_rms = rms(output_segment);
+        assert!(output_rms > 0.1, "Output is too quiet: RMS={}", output_rms);
+
+        // Frequency should be approximately halved
+        let output_freq = estimate_frequency(output_segment, SAMPLE_RATE);
+        let expected_freq = input_freq * 0.5;
+
+        assert!(
+            (output_freq - expected_freq).abs() < expected_freq * 0.15,
+            "Expected ~{}Hz, got {}Hz",
+            expected_freq,
+            output_freq
+        );
+    }
+
+    #[test]
+    fn test_produces_output_all_semitones() {
+        for semitones in -12..=12 {
+            let mut shifter = PitchShifter::new(512);
+            shifter.set_sample_rate(SAMPLE_RATE);
+            shifter.set_semitones(semitones);
+
+            let input = generate_sine_wave(440.0, SAMPLE_RATE, 4000);
+            let output = process_buffer(&mut shifter, &input);
+
+            // Skip latency
+            let skip = 500;
+            let output_segment = &output[skip..];
+            let output_rms = rms(output_segment);
+
+            assert!(
+                output_rms > 0.05,
+                "Semitones={}: Output is silent (RMS={})",
+                semitones,
+                output_rms
+            );
+        }
+    }
+
+    #[test]
+    fn test_reset_clears_state() {
+        let mut shifter = PitchShifter::new(512);
+        shifter.set_sample_rate(SAMPLE_RATE);
+        shifter.set_semitones(5);
+
+        // Process some audio
+        let input = generate_sine_wave(440.0, SAMPLE_RATE, 2000);
+        let _ = process_buffer(&mut shifter, &input);
+
+        // Reset
+        shifter.reset();
+
+        // Check state is cleared
+        assert_eq!(shifter.write_pos, 0);
+        assert_eq!(shifter.read_pos, 0.0);
+        assert_eq!(shifter.samples_processed, 0);
+        assert!(!shifter.is_crossfading);
+    }
+
+    #[test]
+    fn test_latency_parameter_change() {
+        let mut shifter = PitchShifter::new(512);
+        shifter.set_sample_rate(SAMPLE_RATE);
+
+        let initial_latency = shifter.target_latency;
+
+        // Change latency
+        shifter.set_latency_ms(20.0, SAMPLE_RATE);
+
+        // Process some samples to apply the change
+        for _ in 0..1000 {
+            shifter.process_sample(0.5);
+        }
+
+        assert_ne!(
+            shifter.target_latency, initial_latency,
+            "Latency should have changed"
+        );
+
+        let expected_latency = (SAMPLE_RATE * 0.020) as usize;
+        assert_eq!(shifter.target_latency, expected_latency);
+    }
+
+    #[test]
+    fn test_smoothness_parameter_change() {
+        let mut shifter = PitchShifter::new(512);
+        shifter.set_sample_rate(SAMPLE_RATE);
+
+        let initial_crossfade = shifter.crossfade_len;
+
+        // Change smoothness
+        shifter.set_smoothness_ms(5.0, SAMPLE_RATE);
+
+        // Process some samples to apply the change
+        for _ in 0..1000 {
+            shifter.process_sample(0.5);
+        }
+
+        assert_ne!(
+            shifter.crossfade_len, initial_crossfade,
+            "Crossfade length should have changed"
+        );
+
+        let expected_crossfade = (SAMPLE_RATE * 0.005) as usize;
+        assert_eq!(shifter.crossfade_len, expected_crossfade);
+    }
+
+    #[test]
+    fn test_playback_rate_calculation() {
+        let mut shifter = PitchShifter::new(512);
+
+        shifter.set_semitones(0);
+        assert!((shifter.playback_rate - 1.0).abs() < 0.001);
+
+        shifter.set_semitones(12);
+        assert!((shifter.playback_rate - 2.0).abs() < 0.001);
+
+        shifter.set_semitones(-12);
+        assert!((shifter.playback_rate - 0.5).abs() < 0.001);
+
+        shifter.set_semitones(7); // Perfect fifth
+        let expected = 2.0_f64.powf(7.0 / 12.0); // ~1.498
+        assert!((shifter.playback_rate - expected).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_initial_latency_silence() {
+        let mut shifter = PitchShifter::new(512);
+        shifter.set_sample_rate(SAMPLE_RATE);
+        shifter.set_semitones(0);
+
+        let latency = shifter.target_latency;
+
+        // First `latency` samples should be silent
+        for i in 0..latency {
+            let output = shifter.process_sample(1.0);
+            assert_eq!(
+                output, 0.0,
+                "Sample {} should be silent during initial latency",
+                i
+            );
+        }
+
+        // After latency, should produce output
+        let output = shifter.process_sample(1.0);
+        assert!(output.abs() > 0.0, "Should produce output after latency");
+    }
+
+    #[test]
+    fn test_no_crash_on_rapid_parameter_changes() {
+        let mut shifter = PitchShifter::new(512);
+        shifter.set_sample_rate(SAMPLE_RATE);
+
+        let input = generate_sine_wave(440.0, SAMPLE_RATE, 10000);
+
+        for (i, &sample) in input.iter().enumerate() {
+            // Rapidly change parameters
+            if i % 100 == 0 {
+                shifter.set_semitones((i as i32 % 25) - 12);
+            }
+            if i % 200 == 0 {
+                shifter.set_latency_ms((i % 30) as f32 + 2.0, SAMPLE_RATE);
+            }
+            if i % 300 == 0 {
+                shifter.set_smoothness_ms((i % 8) as f32 + 1.0, SAMPLE_RATE);
+            }
+
+            // Should not panic
+            let _ = shifter.process_sample(sample);
+        }
     }
 }
