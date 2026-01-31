@@ -74,7 +74,7 @@ impl Default for TransposeParams {
 }
 
 impl Plugin for TransposePlugin {
-    const NAME: &'static str = "Transpose Plugin v6";
+    const NAME: &'static str = "Transpose Plugin v7";
     const VENDOR: &'static str = "Transpose";
     const URL: &'static str = "";
     const EMAIL: &'static str = "";
@@ -172,7 +172,7 @@ impl ClapPlugin for TransposePlugin {
 }
 
 impl Vst3Plugin for TransposePlugin {
-    const VST3_CLASS_ID: [u8; 16] = *b"TransposePlug006";
+    const VST3_CLASS_ID: [u8; 16] = *b"TransposePlug007";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
         Vst3SubCategory::Fx,
         Vst3SubCategory::PitchShift,
