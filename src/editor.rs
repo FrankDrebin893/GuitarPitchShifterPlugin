@@ -59,19 +59,14 @@ pub fn create(params: Arc<TransposeParams>, editor_state: Arc<EguiState>) -> Opt
                             );
                         });
 
-                        ui.add_space(25.0);
+                        ui.add_space(20.0);
 
                         // Smaller dials for latency and smoothness
-                        ui.horizontal(|ui| {
-                            let available_width = ui.available_width();
-                            let spacing = available_width / 3.0;
-
-                            ui.add_space(spacing / 2.0 - 30.0);
-
-                            // Latency dial
-                            ui.vertical(|ui| {
+                        ui.columns(2, |columns| {
+                            // Latency dial (left column)
+                            columns[0].vertical_centered(|ui| {
                                 let latency = params.latency_ms.value();
-                                let response = dial(ui, 45.0, latency, 2.0, 50.0, false);
+                                let response = dial(ui, 40.0, latency, 2.0, 50.0, false);
 
                                 if response.dragged() {
                                     let delta = -response.drag_delta().y * 0.2;
@@ -94,12 +89,10 @@ pub fn create(params: Arc<TransposeParams>, editor_state: Arc<EguiState>) -> Opt
                                 );
                             });
 
-                            ui.add_space(spacing - 90.0);
-
-                            // Smoothness dial
-                            ui.vertical(|ui| {
+                            // Smoothness dial (right column)
+                            columns[1].vertical_centered(|ui| {
                                 let smoothness = params.smoothness_ms.value();
-                                let response = dial(ui, 45.0, smoothness, 0.5, 10.0, false);
+                                let response = dial(ui, 40.0, smoothness, 0.5, 10.0, false);
 
                                 if response.dragged() {
                                     let delta = -response.drag_delta().y * 0.05;
