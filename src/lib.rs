@@ -1,6 +1,8 @@
 use nih_plug::prelude::*;
+use nih_plug_egui::EguiState;
 use std::sync::Arc;
 
+mod editor;
 mod pitch_shifter;
 use pitch_shifter::PitchShifter;
 
@@ -14,7 +16,10 @@ pub struct TransposePlugin {
 }
 
 #[derive(Params)]
-struct TransposeParams {
+pub struct TransposeParams {
+    #[persist = "editor-state"]
+    pub editor_state: Arc<EguiState>,
+
     #[id = "semitones"]
     pub semitones: IntParam,
 
@@ -39,6 +44,8 @@ impl Default for TransposePlugin {
 impl Default for TransposeParams {
     fn default() -> Self {
         Self {
+            editor_state: editor::default_state(),
+
             semitones: IntParam::new(
                 "Semitones",
                 0,
@@ -74,7 +81,7 @@ impl Default for TransposeParams {
 }
 
 impl Plugin for TransposePlugin {
-    const NAME: &'static str = "Transpose Plugin v7";
+    const NAME: &'static str = "Transpose Plugin v8";
     const VENDOR: &'static str = "Transpose";
     const URL: &'static str = "";
     const EMAIL: &'static str = "";
@@ -103,6 +110,10 @@ impl Plugin for TransposePlugin {
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
+    }
+
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        editor::create(self.params.clone(), self.params.editor_state.clone())
     }
 
     fn initialize(
@@ -172,7 +183,7 @@ impl ClapPlugin for TransposePlugin {
 }
 
 impl Vst3Plugin for TransposePlugin {
-    const VST3_CLASS_ID: [u8; 16] = *b"TransposePlug007";
+    const VST3_CLASS_ID: [u8; 16] = *b"TransposePlug008";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
         Vst3SubCategory::Fx,
         Vst3SubCategory::PitchShift,
