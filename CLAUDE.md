@@ -1,16 +1,16 @@
-# Transpose Plugin
+# Guitar Pitch Shifter Plugin
 
 Real-time guitar pitch-shifting VST3/CLAP plugin built with Rust and nih-plug framework.
 
 ## Purpose
 
-Transpose guitar audio by semitones (-12 to +12) with minimal latency for live playing. Uses variable-rate playback with crossfade resync algorithm.
+Shift guitar audio by semitones (-12 to +12) with minimal latency for live playing. Uses variable-rate playback with crossfade resync algorithm.
 
 ## Build Commands
 
 ```bash
 # Build release VST3 and CLAP bundles
-cargo xtask bundle transpose_plugin --release
+cargo xtask bundle guitar_pitch_shifter_plugin --release
 
 # Quick compile check
 cargo check
@@ -19,13 +19,13 @@ cargo check
 cargo test
 ```
 
-Output location: `target/bundled/TransposePlugin_vX.vst3`
+Output location: `target/bundled/GuitarPitchShifterPlugin_vX.vst3`
 
 ## Install
 
 Copy VST3 to system folder (requires admin):
 ```
-xcopy /E /I /Y "target\bundled\TransposePlugin_vX.vst3" "C:\Program Files\Common Files\VST3\TransposePlugin_vX.vst3"
+xcopy /E /I /Y "target\bundled\GuitarPitchShifterPlugin_vX.vst3" "C:\Program Files\Common Files\VST3\GuitarPitchShifterPlugin_vX.vst3"
 ```
 
 ## Architecture
@@ -50,7 +50,7 @@ xcopy /E /I /Y "target\bundled\TransposePlugin_vX.vst3" "C:\Program Files\Common
 ## Versioning
 
 When iterating on the plugin:
-1. Increment version in `bundler.toml` (name = "TransposePlugin_vX")
+1. Increment version in `bundler.toml` (name = "GuitarPitchShifterPlugin_vX")
 2. Update `NAME` constant in `src/lib.rs`
 3. Update `VST3_CLASS_ID` in `src/lib.rs` (change last digit)
 

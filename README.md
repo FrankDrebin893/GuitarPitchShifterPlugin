@@ -1,10 +1,10 @@
-# Transpose Plugin
+# Guitar Pitch Shifter Plugin
 
 A real-time guitar pitch-shifting VST3/CLAP plugin built with Rust and the [nih-plug](https://github.com/robbert-vdh/nih-plug) framework.
 
 ## What It Does
 
-Transpose shifts your guitar audio by semitones (-12 to +12) with minimal latency, making it suitable for live playing. Drop your tuning without retuning your guitar, or shift up for capo effects.
+Guitar Pitch Shifter shifts your guitar audio by semitones (-12 to +12) with minimal latency, making it suitable for live playing. Drop your tuning without retuning your guitar, or shift up for capo effects.
 
 ## How It Works
 
@@ -31,7 +31,7 @@ Requires [Rust](https://rustup.rs/) to be installed.
 
 ```bash
 # Build release VST3 and CLAP bundles
-cargo xtask bundle transpose_plugin --release
+cargo xtask bundle guitar_pitch_shifter_plugin --release
 ```
 
 Output will be in `target/bundled/`.
@@ -43,23 +43,19 @@ Output will be in `target/bundled/`.
 Copy the VST3 bundle to your system VST3 folder (requires administrator privileges):
 
 ```cmd
-xcopy /E /I /Y "target\bundled\TransposePlugin_v9.vst3" "C:\Program Files\Common Files\VST3\TransposePlugin_v9.vst3"
+xcopy /E /I /Y "target\bundled\GuitarPitchShifterPlugin_v9.vst3" "C:\Program Files\Common Files\VST3\GuitarPitchShifterPlugin_v9.vst3"
 ```
 
 ### macOS
 
 ```bash
-cp -r target/bundled/TransposePlugin_v9.vst3 ~/Library/Audio/Plug-Ins/VST3/
+cp -r target/bundled/GuitarPitchShifterPlugin_v9.vst3 ~/Library/Audio/Plug-Ins/VST3/
 ```
 
 ### Linux
 
 ```bash
-cp -r target/bundled/TransposePlugin_v9.vst3 ~/.vst3/
+cp -r target/bundled/GuitarPitchShifterPlugin_v9.vst3 ~/.vst3/
 ```
 
 Then rescan plugins in your DAW.
-
-## License
-
-[PolyForm Noncommercial 1.0.0](LICENSE)

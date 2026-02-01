@@ -8,15 +8,15 @@ use pitch_shifter::PitchShifter;
 
 const BLOCK_SIZE: usize = 512;
 
-pub struct TransposePlugin {
-    params: Arc<TransposeParams>,
+pub struct GuitarPitchShifterPlugin {
+    params: Arc<GuitarPitchShifterParams>,
     pitch_shifter_l: PitchShifter,
     pitch_shifter_r: PitchShifter,
     sample_rate: f32,
 }
 
 #[derive(Params)]
-pub struct TransposeParams {
+pub struct GuitarPitchShifterParams {
     #[persist = "editor-state"]
     pub editor_state: Arc<EguiState>,
 
@@ -30,10 +30,10 @@ pub struct TransposeParams {
     pub smoothness_ms: FloatParam,
 }
 
-impl Default for TransposePlugin {
+impl Default for GuitarPitchShifterPlugin {
     fn default() -> Self {
         Self {
-            params: Arc::new(TransposeParams::default()),
+            params: Arc::new(GuitarPitchShifterParams::default()),
             pitch_shifter_l: PitchShifter::new(BLOCK_SIZE),
             pitch_shifter_r: PitchShifter::new(BLOCK_SIZE),
             sample_rate: 44100.0,
@@ -41,7 +41,7 @@ impl Default for TransposePlugin {
     }
 }
 
-impl Default for TransposeParams {
+impl Default for GuitarPitchShifterParams {
     fn default() -> Self {
         Self {
             editor_state: editor::default_state(),
@@ -80,9 +80,9 @@ impl Default for TransposeParams {
     }
 }
 
-impl Plugin for TransposePlugin {
-    const NAME: &'static str = "Transpose Plugin v9";
-    const VENDOR: &'static str = "Transpose";
+impl Plugin for GuitarPitchShifterPlugin {
+    const NAME: &'static str = "Guitar Pitch Shifter v9";
+    const VENDOR: &'static str = "Guitar Pitch Shifter";
     const URL: &'static str = "";
     const EMAIL: &'static str = "";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -169,8 +169,8 @@ impl Plugin for TransposePlugin {
     }
 }
 
-impl ClapPlugin for TransposePlugin {
-    const CLAP_ID: &'static str = "com.transpose.transpose-plugin";
+impl ClapPlugin for GuitarPitchShifterPlugin {
+    const CLAP_ID: &'static str = "com.guitarpitchshifter.guitar-pitch-shifter";
     const CLAP_DESCRIPTION: Option<&'static str> = Some("A low-latency pitch transposition plugin");
     const CLAP_MANUAL_URL: Option<&'static str> = None;
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
@@ -182,13 +182,13 @@ impl ClapPlugin for TransposePlugin {
     ];
 }
 
-impl Vst3Plugin for TransposePlugin {
-    const VST3_CLASS_ID: [u8; 16] = *b"TransposePlug009";
+impl Vst3Plugin for GuitarPitchShifterPlugin {
+    const VST3_CLASS_ID: [u8; 16] = *b"GuitarPShift0009";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
         Vst3SubCategory::Fx,
         Vst3SubCategory::PitchShift,
     ];
 }
 
-nih_export_clap!(TransposePlugin);
-nih_export_vst3!(TransposePlugin);
+nih_export_clap!(GuitarPitchShifterPlugin);
+nih_export_vst3!(GuitarPitchShifterPlugin);

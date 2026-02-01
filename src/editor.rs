@@ -3,7 +3,7 @@ use nih_plug_egui::egui::{self, Color32, Pos2, Response, Sense, Stroke, Ui, Vec2
 use nih_plug_egui::{create_egui_editor, EguiState};
 use std::sync::Arc;
 
-use crate::TransposeParams;
+use crate::GuitarPitchShifterParams;
 
 const WINDOW_WIDTH: u32 = 400;
 const WINDOW_HEIGHT: u32 = 300;
@@ -12,7 +12,7 @@ pub fn default_state() -> Arc<EguiState> {
     EguiState::from_size(WINDOW_WIDTH, WINDOW_HEIGHT)
 }
 
-pub fn create(params: Arc<TransposeParams>, editor_state: Arc<EguiState>) -> Option<Box<dyn Editor>> {
+pub fn create(params: Arc<GuitarPitchShifterParams>, editor_state: Arc<EguiState>) -> Option<Box<dyn Editor>> {
     create_egui_editor(
         editor_state,
         (),
@@ -26,7 +26,7 @@ pub fn create(params: Arc<TransposeParams>, editor_state: Arc<EguiState>) -> Opt
 
                         // Title
                         ui.label(
-                            egui::RichText::new("TRANSPOSE")
+                            egui::RichText::new("PITCH SHIFTER")
                                 .size(24.0)
                                 .color(Color32::from_rgb(200, 200, 210)),
                         );

@@ -2,11 +2,11 @@
 members = ["xtask"]
 
 [package]
-name = "transpose_plugin"
+name = "guitar_pitch_shifter_plugin"
 version = "0.1.0"
 edition = "2021"
 authors = ["Transpose Plugin"]
-license-file = "LICENSE"
+license = "UNLICENSED"
 
 [lib]
 crate-type = ["cdylib"]
