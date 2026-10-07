@@ -61,9 +61,9 @@ pub fn create(params: Arc<GuitarPitchShifterParams>, editor_state: Arc<EguiState
 
                         ui.add_space(20.0);
 
-                        // Smaller dials for latency and smoothness
+                        // Smaller dials for max latency and smoothness
                         ui.columns(2, |columns| {
-                            // Latency dial (left column)
+                            // Max latency dial (left column)
                             columns[0].vertical_centered(|ui| {
                                 let latency = params.latency_ms.value();
                                 let response = dial(ui, 40.0, latency, 2.0, 50.0, false);
@@ -83,7 +83,7 @@ pub fn create(params: Arc<GuitarPitchShifterParams>, editor_state: Arc<EguiState
                                         .color(Color32::from_rgb(180, 180, 190)),
                                 );
                                 ui.label(
-                                    egui::RichText::new("Latency")
+                                    egui::RichText::new("Max Latency")
                                         .size(10.0)
                                         .color(Color32::from_rgb(120, 120, 130)),
                                 );
