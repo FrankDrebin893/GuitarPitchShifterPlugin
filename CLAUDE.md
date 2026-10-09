@@ -5,7 +5,7 @@ A suite of VST3/CLAP plugins built with Rust and the nih-plug framework. The sui
 ## Layout
 
 - `plugins/pitch_shifter/` - Real-time guitar pitch shifter (effect)
-- `plugins/drums/` - Synthesized drum instrument (skeleton: kick only)
+- `plugins/drums/` - Synthesized drum instrument (full kit, Rock/Jazz/Metal)
 - `crates/suite_common/` - Shared code: `VENDOR` constant, `ui` module (dial widget, theme colours)
 - `xtask/` - nih-plug bundler
 - `bundler.toml` - Bundle name per plugin package
@@ -75,19 +75,50 @@ Its CLAP ID, VST3 class ID scheme and bundle name predate the suite and are kept
 
 ### Drum Synth (`plugins/drums`)
 
-Fully synthesized drums: no sample files, nothing loaded from disk. MIDI in, stereo out, General MIDI drum map.
+Fully synthesized drums: no sample files, nothing loaded from disk. MIDI in, stereo out, General MIDI drum map. Three kits: Rock, Jazz, Metal.
 
-- `src/lib.rs` - Plugin entry point, parameters, MIDI event handling
-- `src/kick.rs` - DSP: sine oscillator with exponential pitch sweep and amp decay
-- `src/editor.rs` - egui GUI with gain dial
+- `src/lib.rs` - Plugin entry point, parameters, MIDI events
+- `src/drum_kit.rs` - The instrument: owns all voices, note map, stereo mix, room send, output limiter
+- `src/kit.rs` - `Kit` enum and one `KitPreset` per kit: all the constants that make the kits differ
+- `src/voices/` - `kick.rs`, `snare.rs`, `tom.rs`, `cymbal.rs`, and `mod.rs` (`Hit`, `Voice`, `VoicePair`)
+- `src/dsp.rs` - Shared building blocks: noise, filters, membrane modes, clippers
+- `src/reverb.rs` - Room: 8-line feedback delay network
+- `src/editor.rs` - egui GUI: kit buttons, dials
 
-| MIDI note | Voice |
-|-----------|-------|
-| 36 (C1) | Kick |
+How the voices work:
+
+1. Kick: sine body with a pitch sweep, one shell mode, band-passed noise click for the beater, saturation
+2. Snare and toms: inharmonic membrane modes (`dsp::Modes`) sharing a pitch bend, plus noise for the
+   snare wires and the stick. The side stick is the snare voice with short, high modes and no wires
+3. Cymbals: a bank of up to 64 two-pole resonators at fixed inharmonic frequencies, plus a band-limited
+   noise wash. A hit adds a sine of random phase to each resonator, so repeated hits build up instead
+   of restarting. One `Cymbal` serves closed, pedal and open hi-hat: the closed presets have a short
+   decay, which is what chokes the open sound
+4. Velocity changes the sound, not only the level: pitch bend depth, overtone level, noise brightness
+5. Every hit varies slightly in pitch and overtone levels (each voice has its own noise generator)
+6. Drums have two voices each (`VoicePair`): a new hit takes the idle one and the previous fades in 3 ms
+7. A kit change, Tune and Damping apply to the next hits. Ringing voices keep their sound
+8. `dsp::bus_clip` on the output leaves single hits untouched and rounds off the peaks of busy patterns
+
+| MIDI note | Voice | MIDI note | Voice |
+|-----------|-------|-----------|-------|
+| 35, 36 | Kick | 42 / 44 / 46 | Hi-hat closed / pedal / open |
+| 38, 40 | Snare | 49, 57 | Crash 1, Crash 2 |
+| 37 | Side stick | 51, 59 / 53 | Ride / Ride bell |
+| 41, 43, 45, 47, 48, 50 | Toms, low to high | 52, 55 | China, Splash |
 
 | Parameter | Range | Default | Description |
 |-----------|-------|---------|-------------|
+| Kit | Rock / Jazz / Metal | Rock | Sound of every piece and of the room |
 | Gain | -30 to +6 dB | -6 dB | Output level |
+| Room | 0-100 % | 25 % | Room reverb amount |
+| Tune | -6 to +6 st | 0 | Pitch of kick, snare and toms |
+| Damping | 0-100 % | 0 % | Shortens the decay of drums and cymbals |
+| Kick, Snare, Toms, Hi-Hat, Cymbals | -30 to +6 dB | 0 dB | Level per group |
+
+Stereo positions are from the drummer's seat (hi-hat left, floor tom right).
+
+Not there yet: separate outputs per drum, hi-hat openness from CC4, cymbal choke on note-off.
 
 ## Adding a Plugin
 
@@ -128,7 +159,20 @@ cargo test -p pitch_shifter --release quality_report -- --ignored --nocapture
 cargo test -p pitch_shifter --release render_wavs -- --ignored
 ```
 
-Drum tests are in `plugins/drums/src/kick.rs` and cover voice triggering, decay, velocity scaling and output bounds.
+Drum tests sit next to the code in `plugins/drums/src`. The ones for the whole instrument are in
+`drum_kit.rs` and cover the note map, decay to silence, output bounds at all sample rates, velocity
+changing level and brightness, hi-hat choke, the kits differing measurably, Tune, Damping, stereo
+placement and the room.
+
+Two ignored tests are tools for working on the drum sound:
+
+```bash
+# Table of peak, level, decay time and brightness per piece and kit. Compare before/after a change.
+cargo test -p drums --release kit_report -- --ignored --nocapture
+
+# WAV files in target/renders for listening: per kit, every piece at three velocities and a groove.
+cargo test -p drums --release render_wavs -- --ignored
+```
 
 ## Code Conventions
 
@@ -136,5 +180,6 @@ Drum tests are in `plugins/drums/src/kick.rs` and cover voice triggering, decay,
 - Optimize for low latency over audio quality
 - Never allocate or resize buffers on the audio thread (all buffers are fixed-size)
 - Measure pitch shifter DSP changes with `quality_report` before judging them by ear
+- Drum sounds are tuned in `plugins/drums/src/kit.rs`; check `kit_report` and listen to `render_wavs`
 - Keep DSP code separate from plugin boilerplate
 - nih-plug is pinned to one revision in the root `Cargo.toml` (`[workspace.dependencies]`); bump it there for all plugins at once
