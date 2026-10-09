@@ -1122,7 +1122,7 @@ mod tests {
     #[test]
     #[ignore]
     fn render_wavs() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target").join("renders");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/renders");
         std::fs::create_dir_all(&dir).unwrap();
 
         let latency_ms: Option<f32> = std::env::var("PITCH_SHIFTER_LATENCY_MS")

@@ -76,7 +76,7 @@ impl Default for GuitarPitchShifterParams {
 
 impl Plugin for GuitarPitchShifterPlugin {
     const NAME: &'static str = "Guitar Pitch Shifter v10";
-    const VENDOR: &'static str = "Guitar Pitch Shifter";
+    const VENDOR: &'static str = suite_common::VENDOR;
     const URL: &'static str = "";
     const EMAIL: &'static str = "";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");

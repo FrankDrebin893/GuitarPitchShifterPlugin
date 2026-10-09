@@ -1,12 +1,19 @@
-# Guitar Pitch Shifter Plugin
+# Audio Plugin Suite
 
-A real-time guitar pitch-shifting VST3/CLAP plugin built with Rust and the [nih-plug](https://github.com/robbert-vdh/nih-plug) framework.
+A suite of VST3/CLAP plugins built with Rust and the [nih-plug](https://github.com/robbert-vdh/nih-plug) framework.
 
-## What It Does
+| Plugin | Type | Location |
+|--------|------|----------|
+| Guitar Pitch Shifter | Effect | `plugins/pitch_shifter` |
+| Drum Synth | Instrument (early skeleton) | `plugins/drums` |
 
-Guitar Pitch Shifter shifts your guitar audio by semitones (-12 to +12) with minimal latency, making it suitable for live playing. Drop your tuning without retuning your guitar, or shift up for capo effects.
+Shared code (vendor string, dial widget, colour theme) lives in `crates/suite_common`.
 
-## How It Works
+## Guitar Pitch Shifter
+
+Shifts your guitar audio by semitones (-12 to +12) with minimal latency, making it suitable for live playing. Drop your tuning without retuning your guitar, or shift up for capo effects.
+
+### How It Works
 
 The pitch shifter uses **variable-rate playback with waveform-matched splices**:
 
@@ -19,7 +26,7 @@ Between splices the output is a plain resampled copy of the input, and at 0 semi
 
 The delay follows the note being played: about one pitch period at most (12 ms on the low E string, under 3 ms high up the neck), not a fixed amount.
 
-## Parameters
+### Parameters
 
 | Parameter | Range | Default | Description |
 |-----------|-------|---------|-------------|
@@ -32,18 +39,30 @@ Tips:
 - Single notes need Max Latency to cover one period of the lowest note: about 12 ms for low E, 14 ms for drop D. Lower settings still work but the low strings get rougher.
 - Chords have a much longer combined period (about 24 ms for a power chord on the low E string). Raising Max Latency to 25-30 ms makes chords noticeably cleaner. Single notes keep their short delay either way.
 
+## Drum Synth
+
+A fully synthesized drum instrument: every sound is generated in the plugin, so there are no sample files to install or locate. It takes MIDI in and follows the General MIDI drum map.
+
+This is an early skeleton. Only the kick is implemented so far, on MIDI note 36 (C1), with a single Gain control (-30 to +6 dB).
+
 ## Building
 
 Requires [Rust](https://rustup.rs/) to be installed.
 
 ```bash
 # Build release VST3 and CLAP bundles
-cargo xtask bundle guitar_pitch_shifter_plugin --release
+cargo xtask bundle pitch_shifter --release
+cargo xtask bundle drums --release
+
+# Run all tests
+cargo test --workspace
 ```
 
 Output will be in `target/bundled/`.
 
 ## Installing
+
+Bundle names: `GuitarPitchShifterPlugin_v10.vst3`, `DrumSynth_v1.vst3`. The examples below use the pitch shifter; do the same for the others.
 
 ### Windows
 
