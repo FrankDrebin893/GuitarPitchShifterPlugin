@@ -1,19 +1,18 @@
 [workspace]
-members = ["xtask"]
+resolver = "2"
+members = ["xtask", "crates/*", "plugins/*"]
 
-[package]
-name = "guitar_pitch_shifter_plugin"
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 authors = ["Transpose Plugin"]
 license = "UNLICENSED"
 
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git" }
-nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+[workspace.dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95" }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95" }
+nih_plug_xtask = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95" }
+suite_common = { path = "crates/suite_common" }
 
 [profile.release]
 lto = "thin"

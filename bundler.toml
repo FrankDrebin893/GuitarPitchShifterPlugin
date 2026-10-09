@@ -1,2 +1,5 @@
-[guitar_pitch_shifter_plugin]
+[pitch_shifter]
 name = "GuitarPitchShifterPlugin_v9"
+
+[drums]
+name = "DrumSynth_v1"
