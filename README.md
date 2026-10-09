@@ -85,3 +85,8 @@ cp -r target/bundled/GuitarPitchShifterPlugin_v10.vst3 ~/.vst3/
 ```
 
 Then rescan plugins in your DAW.
+
+
+## License
+
+Copyright (c) 2026 Rasmus Højte. All rights reserved. The source is public for reference only; see [LICENSE](LICENSE). Third-party dependencies keep their own licenses.

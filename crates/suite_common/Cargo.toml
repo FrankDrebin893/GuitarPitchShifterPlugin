@@ -3,7 +3,7 @@ name = "suite_common"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+license-file.workspace = true
 
 [dependencies]
 nih_plug_egui = { workspace = true }
