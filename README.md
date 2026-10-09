@@ -15,22 +15,29 @@ Shifts your guitar audio by semitones (-12 to +12) with minimal latency, making 
 
 ### How It Works
 
-The pitch shifter uses a **variable-rate playback** algorithm:
+The pitch shifter uses **variable-rate playback with waveform-matched splices**:
 
 1. **Circular buffer** - Incoming audio is written to a ring buffer
-2. **Variable-rate reading** - Audio is read back at a different rate based on the pitch shift (rate = 2^(semitones/12))
-3. **Linear interpolation** - Smooths the output when reading between sample positions
-4. **Crossfade resync** - When the read and write positions drift too far apart, the algorithm crossfades to a new position to avoid discontinuities
+2. **Variable-rate reading** - Audio is read back at a different rate based on the pitch shift (rate = 2^(semitones/12)), with cubic interpolation between samples
+3. **Splice only when needed** - The read position slowly drifts away from (or towards) the write position. It only jumps when it has drifted as far as it may
+4. **Waveform-matched jumps** - Each jump lands where the waveform lines up with itself, normally exactly one pitch period away, and is bridged by a short crossfade. A sustained note therefore continues without a seam
 
-This approach prioritizes low latency over perfect audio quality, which is ideal for live performance.
+Between splices the output is a plain resampled copy of the input, and at 0 semitones the signal passes through untouched.
+
+The delay follows the note being played: about one pitch period at most (12 ms on the low E string, under 3 ms high up the neck), not a fixed amount.
 
 ### Parameters
 
 | Parameter | Range | Default | Description |
 |-----------|-------|---------|-------------|
 | Semitones | -12 to +12 | 0 | Pitch shift in semitones |
-| Latency | 2-50 ms | 5 ms | Trade-off: lower = more responsive but more artifacts |
-| Smoothness | 0.5-10 ms | 2 ms | Crossfade duration for resync |
+| Max Latency | 2-50 ms | 15 ms | Upper limit for the delay, and the longest waveform period that can be spliced cleanly |
+| Smoothness | 0.5-10 ms | 2 ms | Crossfade duration at each splice |
+
+Tips:
+
+- Single notes need Max Latency to cover one period of the lowest note: about 12 ms for low E, 14 ms for drop D. Lower settings still work but the low strings get rougher.
+- Chords have a much longer combined period (about 24 ms for a power chord on the low E string). Raising Max Latency to 25-30 ms makes chords noticeably cleaner. Single notes keep their short delay either way.
 
 ## Drum Synth
 
@@ -55,26 +62,26 @@ Output will be in `target/bundled/`.
 
 ## Installing
 
-Bundle names: `GuitarPitchShifterPlugin_v9.vst3`, `DrumSynth_v1.vst3`. The examples below use the pitch shifter; do the same for the others.
+Bundle names: `GuitarPitchShifterPlugin_v10.vst3`, `DrumSynth_v1.vst3`. The examples below use the pitch shifter; do the same for the others.
 
 ### Windows
 
 Copy the VST3 bundle to your system VST3 folder (requires administrator privileges):
 
 ```cmd
-xcopy /E /I /Y "target\bundled\GuitarPitchShifterPlugin_v9.vst3" "C:\Program Files\Common Files\VST3\GuitarPitchShifterPlugin_v9.vst3"
+xcopy /E /I /Y "target\bundled\GuitarPitchShifterPlugin_v10.vst3" "C:\Program Files\Common Files\VST3\GuitarPitchShifterPlugin_v10.vst3"
 ```
 
 ### macOS
 
 ```bash
-cp -r target/bundled/GuitarPitchShifterPlugin_v9.vst3 ~/Library/Audio/Plug-Ins/VST3/
+cp -r target/bundled/GuitarPitchShifterPlugin_v10.vst3 ~/Library/Audio/Plug-Ins/VST3/
 ```
 
 ### Linux
 
 ```bash
-cp -r target/bundled/GuitarPitchShifterPlugin_v9.vst3 ~/.vst3/
+cp -r target/bundled/GuitarPitchShifterPlugin_v10.vst3 ~/.vst3/
 ```
 
 Then rescan plugins in your DAW.

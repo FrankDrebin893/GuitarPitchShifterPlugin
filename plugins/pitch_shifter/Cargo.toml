@@ -12,3 +12,6 @@ crate-type = ["cdylib"]
 nih_plug = { workspace = true }
 nih_plug_egui = { workspace = true }
 suite_common = { workspace = true }
+
+[dev-dependencies]
+hound = "3.5"
