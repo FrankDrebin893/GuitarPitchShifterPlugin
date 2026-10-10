@@ -110,7 +110,7 @@ pub fn create(params: Arc<GuitarAmpParams>, editor_state: Arc<EguiState>) -> Opt
                     setter.end_set_parameter(&params.bypass);
                 }
 
-                let pedals: [Pedal; 3] = [
+                let pedals: [Pedal; PEDAL_SLOTS] = [
                     (
                         "Gate",
                         &params.gate_on,
@@ -122,6 +122,12 @@ pub fn create(params: Arc<GuitarAmpParams>, editor_state: Arc<EguiState>) -> Opt
                         &[(&params.drive_gain, "Drive"), (&params.drive_tone, "Tone"), (&params.drive_level, "Level")],
                     ),
                     ("Cab", &params.cab_on, &[(&params.cab_mic, "Mic"), (&params.cab_res, "Res")]),
+                    (
+                        "Delay",
+                        &params.delay_on,
+                        &[(&params.delay_time, "Time"), (&params.delay_feedback, "Repeat"), (&params.delay_mix, "Mix")],
+                    ),
+                    ("Reverb", &params.reverb_on, &[(&params.reverb_decay, "Decay"), (&params.reverb_mix, "Mix")]),
                 ];
                 for (slot, (title, on, knobs)) in pedals.into_iter().enumerate() {
                     let left = BENCH_MARGIN + (PEDAL_WIDTH + BENCH_MARGIN) * slot as f32;
