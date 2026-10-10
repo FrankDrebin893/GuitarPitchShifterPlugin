@@ -117,20 +117,41 @@ pub const BAND_EDGES_HZ: [f32; 8] = [62.5, 125.0, 250.0, 500.0, 1000.0, 2000.0, 
 
 /// Level in each octave band between `BAND_EDGES_HZ`, in dB relative to the whole signal
 pub fn band_levels_db(signal: &[f32], sample_rate: f32) -> Vec<f32> {
-    let total = rms(signal);
     BAND_EDGES_HZ
         .windows(2)
-        .map(|edges| {
-            let mut filters = [Biquad::new(); 4];
-            filters[0].set(BiquadCoeffs::highpass(edges[0], 0.541, sample_rate));
-            filters[1].set(BiquadCoeffs::highpass(edges[0], 1.307, sample_rate));
-            filters[2].set(BiquadCoeffs::lowpass(edges[1], 0.541, sample_rate));
-            filters[3].set(BiquadCoeffs::lowpass(edges[1], 1.307, sample_rate));
-            let band: Vec<f32> = signal
-                .iter()
-                .map(|&sample| filters.iter_mut().fold(sample as f64, |signal, filter| filter.process(signal)) as f32)
-                .collect();
-            to_db(rms(&band) / total.max(1e-10))
+        .map(|edges| band_level_db(signal, sample_rate, Some(edges[0]), Some(edges[1])))
+        .collect()
+}
+
+/// Level of what a signal has between two frequencies, in dB relative to the whole signal.
+/// `None` leaves that side open
+pub fn band_level_db(signal: &[f32], sample_rate: f32, from_hz: Option<f32>, to_hz: Option<f32>) -> f32 {
+    let mut filters = [Biquad::new(); 4];
+    if let Some(from_hz) = from_hz {
+        filters[0].set(BiquadCoeffs::highpass(from_hz, 0.541, sample_rate));
+        filters[1].set(BiquadCoeffs::highpass(from_hz, 1.307, sample_rate));
+    }
+    if let Some(to_hz) = to_hz {
+        filters[2].set(BiquadCoeffs::lowpass(to_hz, 0.541, sample_rate));
+        filters[3].set(BiquadCoeffs::lowpass(to_hz, 1.307, sample_rate));
+    }
+    let band: Vec<f32> = signal
+        .iter()
+        .map(|&sample| filters.iter_mut().fold(sample as f64, |signal, filter| filter.process(signal)) as f32)
+        .collect();
+    to_db(rms(&band) / rms(signal).max(1e-10))
+}
+
+/// Edges of the bands `tight_levels_db` reports, in Hz: sub lows, low mids (where mud
+/// gathers), mids, upper mids, fizz
+pub const TIGHT_EDGES_HZ: [f32; 4] = [100.0, 400.0, 1600.0, 6400.0];
+
+/// Level below, between and above `TIGHT_EDGES_HZ`, in dB relative to the whole signal
+pub fn tight_levels_db(signal: &[f32], sample_rate: f32) -> Vec<f32> {
+    (0..=TIGHT_EDGES_HZ.len())
+        .map(|band| {
+            let from_hz = band.checked_sub(1).map(|index| TIGHT_EDGES_HZ[index]);
+            band_level_db(signal, sample_rate, from_hz, TIGHT_EDGES_HZ.get(band).copied())
         })
         .collect()
 }
@@ -243,6 +264,44 @@ pub fn power_chords(sample_rate: f32, seconds: f32) -> Vec<f32> {
     recording
 }
 
+// Roots of the lowest power chords in two drop tunings
+const DROP_ROOTS_HZ: [f32; 2] = [65.41, 73.42];
+const PALM_MUTE_STEP_S: f32 = 0.15;
+
+/// Palm-muted power chords in a drop tuning, a bar of eight on each of two low roots. At
+/// -18 dBFS RMS, or lower if its peaks would not fit
+pub fn palm_mutes(sample_rate: f32, seconds: f32) -> Vec<f32> {
+    let mut recording = vec![0.0; (seconds * sample_rate) as usize];
+    let mut beat = 0;
+    while beat as f32 * PALM_MUTE_STEP_S < seconds {
+        let root = DROP_ROOTS_HZ[(beat / 8) % DROP_ROOTS_HZ.len()];
+        let start = beat as f32 * PALM_MUTE_STEP_S;
+        for (string, ratio) in [1.0, 1.4983, 2.0].iter().enumerate() {
+            let at = start + string as f32 * 0.003;
+            add_note(&mut recording, sample_rate, at, PALM_MUTE_STEP_S - 0.01, root * ratio, Pluck::MUTED, 1.0);
+        }
+        beat += 1;
+    }
+    set_rms_db(&mut recording, -18.0);
+    fit_peak(&mut recording);
+    recording
+}
+
+/// What an overdrive pedal in front of the amp does to a signal, roughly: the lows cut, the
+/// mids pushed forward, and all of it louder. Peaks are rounded off at full scale
+pub fn boosted(signal: &[f32], sample_rate: f32) -> Vec<f32> {
+    let mut filters = [Biquad::new(); 2];
+    filters[0].set(BiquadCoeffs::highpass(300.0, 0.707, sample_rate));
+    filters[1].set(BiquadCoeffs::peak(800.0, 0.7, 6.0, sample_rate));
+    signal
+        .iter()
+        .map(|&sample| {
+            let shaped = filters.iter_mut().fold(sample as f64, |signal, filter| filter.process(signal));
+            (4.0 * shaped).tanh() as f32
+        })
+        .collect()
+}
+
 /// A direct guitar recording, made up: single notes on the low strings, palm-muted power
 /// chords, an open chord that rings out, and a few high notes. At -18 dBFS RMS, or lower
 /// if its peaks would not fit
@@ -276,13 +335,18 @@ pub fn guitar_di(sample_rate: f32) -> Vec<f32> {
     }
 
     set_rms_db(&mut recording, -18.0);
-    let top = peak(&recording);
+    fit_peak(&mut recording);
+    recording
+}
+
+/// Turns a recording down if its peaks are above `DI_PEAK`
+fn fit_peak(recording: &mut [f32]) {
+    let top = peak(recording);
     if top > DI_PEAK {
         for sample in recording.iter_mut() {
             *sample *= DI_PEAK / top;
         }
     }
-    recording
 }
 
 /// Writes a 16-bit WAV file with one channel per slice
@@ -352,6 +416,11 @@ mod tests {
         assert_eq!(levels.len(), 7);
         assert!(levels[3].abs() < 1.0, "Own band: {:.1} dB", levels[3]);
         assert!(levels[1] < -30.0 && levels[5] < -30.0);
+
+        let tight = tight_levels_db(&sine(700.0, 0.5, SAMPLE_RATE, 24_000), SAMPLE_RATE);
+        assert_eq!(tight.len(), 5);
+        assert!(tight[2].abs() < 1.0, "Own band: {:.1} dB", tight[2]);
+        assert!(tight[0] < -30.0 && tight[4] < -30.0);
     }
 
     #[test]
@@ -374,6 +443,12 @@ mod tests {
         let chords = power_chords(SAMPLE_RATE, 2.0);
         assert!((to_db(rms(&chords)) + 18.0).abs() < 0.1);
         assert!(peak(&chords) < 1.0, "Peak: {}", peak(&chords));
+
+        let mutes = palm_mutes(SAMPLE_RATE, 2.4);
+        assert!((-24.0..=-17.9).contains(&to_db(rms(&mutes))), "Level: {:.1} dBFS", to_db(rms(&mutes)));
+        assert!(peak(&mutes) <= DI_PEAK * 1.001, "Peak: {}", peak(&mutes));
+        // Low roots: more below 100 Hz than the open power chords have
+        assert!(tight_levels_db(&mutes, SAMPLE_RATE)[0] > tight_levels_db(&chords, SAMPLE_RATE)[0]);
 
         let di = guitar_di(SAMPLE_RATE);
         assert!((-21.0..=-17.9).contains(&to_db(rms(&di))), "Level: {:.1} dBFS", to_db(rms(&di)));

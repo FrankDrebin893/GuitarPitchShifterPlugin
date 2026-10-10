@@ -17,13 +17,10 @@ const LEVEL_PROBES: usize = 32;
 // Two second-order sections with these Qs make a maximally flat 24 dB per octave slope
 const ROLLOFF_QS: [f32; 2] = [0.541, 1.307];
 
-// A last, gentler slope above the roll-off, as a cone loses what little is left up there
-const AIR_RATIO: f32 = 1.7;
-
 const BREAKUP_Q: [f32; 2] = [6.0, 16.0];
 
 // Crossfade when the impulse response is swapped while playing
-const SWAP_MS: f32 = 30.0;
+const SWAP_MS: f32 = 10.0;
 
 /// Number of samples of an impulse response at a sample rate
 pub fn ir_len(sample_rate: f32) -> usize {
@@ -40,7 +37,8 @@ pub fn design_ir(model: &CabModel, sample_rate: f32) -> Vec<f32> {
         BiquadCoeffs::peak(model.bite[0], model.bite[1], model.bite[2], sample_rate),
         BiquadCoeffs::lowpass(model.rolloff_hz, ROLLOFF_QS[0], sample_rate),
         BiquadCoeffs::lowpass(model.rolloff_hz, ROLLOFF_QS[1], sample_rate),
-        BiquadCoeffs::lowpass(model.rolloff_hz * AIR_RATIO, 0.707, sample_rate),
+        // A last, gentler slope above the roll-off, as a cone loses what little is left up there
+        BiquadCoeffs::lowpass(model.rolloff_hz * model.air_ratio, 0.707, sample_rate),
     ];
 
     // Cone breakup: one narrow peak or notch per slice of the range, placed by the seed
@@ -187,13 +185,29 @@ impl Cabinet {
         self.fade = 1.0;
     }
 
-    /// Loads an impulse response and crossfades to it
-    // Not called by the plugin until it has a second amp
-    #[allow(dead_code)]
+    /// Loads an impulse response and crossfades to it. Only while `is_swapping` is false:
+    /// there are two slots, and during a crossfade both are heard
     pub fn swap_ir(&mut self, ir: &[f32]) {
         self.active = 1 - self.active;
         self.load(self.active, ir);
         self.fade = 0.0;
+    }
+
+    /// True while the crossfade started by `swap_ir` is running
+    pub fn is_swapping(&self) -> bool {
+        self.fade < 1.0
+    }
+
+    /// Samples after which a crossfade is sure to be over
+    pub fn swap_len(&self) -> usize {
+        (1.0 / self.fade_step).ceil() as usize + 1
+    }
+
+    /// Address and capacity of every buffer, for checking that nothing is allocated anew
+    #[cfg(test)]
+    pub fn buffers(&self) -> [(usize, usize); 3] {
+        let describe = |buffer: &Vec<f32>| (buffer.as_ptr() as usize, buffer.capacity());
+        [describe(&self.history), describe(&self.taps[0]), describe(&self.taps[1])]
     }
 
     fn load(&mut self, slot: usize, ir: &[f32]) {
