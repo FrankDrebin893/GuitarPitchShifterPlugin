@@ -6,6 +6,7 @@ A suite of VST3/CLAP plugins built with Rust and the nih-plug framework. The bra
 
 - `plugins/pitch_shifter/` - Real-time guitar pitch shifter (effect)
 - `plugins/drums/` - Synthesized drum instrument (full kit, Rock/Jazz/Metal)
+- `plugins/amp/` - Guitar amp simulator (effect). In progress on branch `amp-sim`: see `docs/amp-progress.md`
 - `crates/suite_common/` - Shared code: `VENDOR` and `BRAND` constants, `ui` module (the pedal look, see Look below)
 - `crates/suite_common/assets/fonts/` - Embedded fonts (SIL OFL) with their licence files
 - `xtask/` - nih-plug bundler
@@ -19,6 +20,7 @@ Each plugin keeps DSP in its own module(s), separate from `lib.rs` (plugin entry
 # Build release VST3 and CLAP bundles (one plugin at a time)
 cargo xtask bundle pitch_shifter --release
 cargo xtask bundle drums --release
+cargo xtask bundle amp --release
 
 # Quick compile check
 cargo check --workspace
@@ -29,6 +31,7 @@ cargo test --workspace
 # Open a plugin's editor as a program, without a DAW (no audio: dummy backend)
 cargo run -p pitch_shifter --features standalone -- --backend dummy
 cargo run -p drums --features standalone -- --backend dummy
+cargo run -p amp --features standalone -- --backend dummy
 ```
 
 Output location: `target/bundled/<BundleName>.vst3`
@@ -50,7 +53,9 @@ Every plugin is drawn as a painted stompbox. All of it is vector, drawn with egu
 - `widgets.rs` - `param_knob` (fluted knob, name, value on label tape), `footswitch`, `led`,
   `silk_frame`, `silk_label`, and `badge` (the HØJT logo: the Ø is a knob, its slash the pointer)
 - `frame.rs` - `pedal`: enclosure, screws, jack captions, tilted name band, model number, logo.
-  A plugin describes itself with a `PedalStyle`
+  A plugin describes itself with a `PedalStyle`. For a window with several enclosures: `rig`
+  (the bare bench), `head` (wide enclosure with everything a pedal has printed on it) and
+  `mini_pedal` (small enclosure with only a title)
 
 Controls are placed at fixed positions relative to the window's top left corner. Knobs: drag up and
 down, Shift for fine steps, double-click for the default.
@@ -63,7 +68,7 @@ controls, portrait) or `plugins/drums/src/editor.rs` (many controls, landscape) 
 - **One pedal per plugin.** The whole window is one enclosure from `ui::pedal`. No panels, tabs,
   menus or default egui widgets on top of it
 - **Paint:** each plugin has its own saturated paint colour, a `PAINT_*` constant in `theme.rs`.
-  Taken: orange (Pitch Shifter), teal (Drum Synth). A new one must be clearly different from those
+  Taken: orange (Pitch Shifter), teal (Drum Synth), oxblood red (Guitar Amp). A new one must be clearly different from those
   and dark enough for cream print to read on it
 - **Print on the paint is always `SILK` (cream).** Black is only for knobs, label tape and the logo plate.
   `BRAND_ORANGE` is only the pointer in the logo
@@ -85,6 +90,12 @@ controls, portrait) or `plugins/drums/src/editor.rs` (many controls, landscape) 
   landscape about 660 wide for more
 - **Clean factory paint:** no wear, textures, gradients or images
 - **New shared pieces go in `suite_common::ui`,** not in a plugin's editor, so every plugin gets them
+
+- **Rigs:** a plugin made of several components (the Guitar Amp) is the one exception to one
+  pedal per plugin. Its window is a `rig`: one `head` across the top, which carries the name band,
+  model number and logo, and from left to right in signal order a row of `mini_pedal`s below it.
+  All of them have the plugin's one paint colour. On a head and on mini pedals the switches are
+  `small_footswitch` with the LED beside or above it; everything else in this guide applies
 
 After changing an editor, run it standalone (see Build Commands) and look at it before bundling.
 
@@ -173,6 +184,34 @@ How the voices work:
 Stereo positions are from the drummer's seat (hi-hat left, floor tom right).
 
 Not there yet: separate outputs per drum, hi-hat openness from CC4, cymbal choke on note-off.
+
+### Guitar Amp (`plugins/amp`)
+
+In progress on branch `amp-sim`. `docs/amp-progress.md` has the plan, the frozen parameter ids,
+the decisions and the state of the work; read it before touching the plugin.
+
+A guitar amp with our own amps and components: own names, no real makers' names, trademarks or
+circuit names anywhere. So far one amp, Brøl (crunch), with its cabinet.
+
+- `src/lib.rs` - Plugin entry point, parameters. Reads them once per block into `AmpSettings`
+- `src/chain.rs` - `AmpChain`: the whole signal chain, dial smoothing, bypass crossfade
+- `src/amp/` - `model.rs` (`Amp` and one `AmpModel` of constants per amp), `preamp.rs`,
+  `tonestack.rs`, `poweramp.rs`
+- `src/cab.rs` - Cabinet: impulse response designed in code per sample rate, direct FIR
+- `src/dsp/` - `filters.rs` (f64 biquads), `oversample.rs` (4x, minimum-phase IIR half-bands),
+  `shaper.rs` (antialiased clippers)
+- `src/editor.rs` - egui GUI: oxblood amp head
+
+Mono through amp and cabinet (a stereo input is averaged). The nonlinear stages run 4x
+oversampled with antialiased clippers. Latency is about 0.2 ms and nothing is reported to the host.
+
+```bash
+# Levels, distortion, aliasing, cabinet response, latency and CPU time per amp. Run before and after a DSP change.
+cargo test -p amp --release amp_report -- --ignored --nocapture
+
+# A DI guitar through each amp, as WAV files in target/renders. Optional: AMP_INPUT_WAV=<recording>
+cargo test -p amp --release render_wavs -- --ignored
+```
 
 ## Adding a Plugin
 
