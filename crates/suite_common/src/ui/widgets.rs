@@ -1,6 +1,6 @@
 use nih_plug::prelude::{BoolParam, Param, ParamSetter};
 use nih_plug_egui::egui::{
-    vec2, Align2, Color32, CornerRadius, Id, Painter, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2,
+    vec2, Align2, Color32, CornerRadius, Id, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, Vec2,
 };
 
 use super::theme::*;
@@ -22,6 +22,12 @@ const LABEL_SPACING: f32 = 0.14;
 // Diameter of a footswitch's washer
 const FOOTSWITCH_SIZE: f32 = 74.0;
 const SMALL_FOOTSWITCH_SIZE: f32 = 50.0;
+
+// The display of a stepper: a strip of label tape with a push button at each end
+const STEPPER_TEXT_SIZE: f32 = 13.0;
+const STEPPER_TAPE_HEIGHT: f32 = 22.0;
+const STEPPER_BUTTON_RADIUS: f32 = 11.0;
+const STEPPER_BUTTON_GAP: f32 = 9.0;
 
 fn polar(center: Pos2, radius: f32, angle: f32) -> Pos2 {
     Pos2::new(center.x + angle.cos() * radius, center.y + angle.sin() * radius)
@@ -148,6 +154,69 @@ pub fn label_tape(painter: &Painter, top_center: Pos2, text: &str, size: f32) {
     painter.rect_filled(rect.translate(vec2(0.0, 2.0)), 2.0, SHADOW);
     painter.rect_filled(rect, 2.0, TAPE);
     painter.galley(rect.min + padding, galley, TAPE_TEXT);
+}
+
+/// Which way a `stepper` was asked to go
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Step {
+    Previous,
+    Next,
+}
+
+/// Display for picking one of a list: `text` on a strip of label tape `width` wide, centred
+/// on `center`, with a small chrome push button at each end for the previous and the next
+/// entry. A click on the tape also asks for the next one. The caller owns the list: it
+/// passes the current entry's text and moves on when a step comes back.
+///
+/// The tape does not grow with the text: choose `width` for the longest entry.
+pub fn stepper(ui: &mut Ui, center: Pos2, width: f32, text: &str, id_source: &str) -> Option<Step> {
+    let tape = Rect::from_center_size(center, vec2(width, STEPPER_TAPE_HEIGHT));
+    let reach = width / 2.0 + STEPPER_BUTTON_GAP + STEPPER_BUTTON_RADIUS;
+    let tape_clicked = ui.interact(tape, Id::new(("stepper", id_source, "tape")), Sense::click()).clicked();
+
+    let mut step = tape_clicked.then_some(Step::Next);
+    for (direction, side) in [(Step::Previous, -1.0), (Step::Next, 1.0)] {
+        let button = center + vec2(side * reach, 0.0);
+        let rect = Rect::from_center_size(button, Vec2::splat(STEPPER_BUTTON_RADIUS * 2.0 + 4.0));
+        let response = ui.interact(rect, Id::new(("stepper", id_source, side > 0.0)), Sense::click());
+        push_button(ui.painter(), button, side, response.is_pointer_button_down_on());
+        if response.clicked() {
+            step = Some(direction);
+        }
+    }
+
+    let painter = ui.painter();
+    painter.rect_filled(tape.translate(vec2(0.0, 2.0)), 2.0, SHADOW);
+    painter.rect_filled(tape, 2.0, TAPE);
+    let galley = layout(painter, &text.to_uppercase(), mono(STEPPER_TEXT_SIZE), TAPE_TEXT, 0.1);
+    // The letter spacing also follows the last letter: leave it out of the centring
+    let text_width = galley.size().x - STEPPER_TEXT_SIZE * 0.1;
+    painter.galley(Pos2::new(center.x - text_width / 2.0, center.y - galley.size().y / 2.0), galley, TAPE_TEXT);
+
+    step
+}
+
+/// Small chrome push button with an arrow head engraved in its cap. `side` is -1 for the
+/// arrow pointing left, 1 for right
+fn push_button(painter: &Painter, center: Pos2, side: f32, pressed: bool) {
+    let radius = STEPPER_BUTTON_RADIUS;
+    let ring = Stroke::new(1.0, Color32::from_black_alpha(110));
+    painter.circle_filled(center + vec2(0.0, 2.5), radius + 0.5, SHADOW);
+    painter.circle_filled(center, radius, CHROME_LIGHT);
+    painter.circle_stroke(center, radius, ring);
+
+    let cap = if pressed { center + vec2(0.0, 1.0) } else { center };
+    painter.circle_filled(cap, radius - 2.5, CHROME_DARK);
+    painter.circle_filled(cap + vec2(-0.5, -0.8), radius - 3.5, if pressed { CHROME } else { CHROME_LIGHT });
+    painter.circle_stroke(cap, radius - 2.5, ring);
+
+    let tip = cap + vec2(side * 4.0, 0.0);
+    let base = cap - vec2(side * 2.5, 0.0);
+    painter.add(Shape::convex_polygon(
+        vec![tip, base + vec2(0.0, -4.2), base + vec2(0.0, 4.2)],
+        INK,
+        Stroke::NONE,
+    ));
 }
 
 /// Chrome stomp switch. Returns the click response.
