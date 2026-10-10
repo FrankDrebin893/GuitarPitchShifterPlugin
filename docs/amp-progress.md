@@ -31,13 +31,17 @@ for something destructive or something that truly needs Rasmus.
 | M5 Tuning and cost | done 2026-10-10 |
 | Backlog 1: factory presets | done 2026-10-10 |
 | Backlog 3: tuner | done 2026-10-10 |
+| Backlog 2: user IR loader | done 2026-10-10 |
 
 ## Next
 
-The planned milestones, the presets and the tuner are done. Continue with the backlog at the
-end of this file. Next up: the user IR loader (backlog 2). It needs a file dialog, which
-means a new dependency (the suite has none beyond nih-plug): keep it to one small crate and
-write down the choice, or use nih-plug's own means if it has any.
+The planned milestones, the presets, the tuner and the IR loader are done. Continue with the
+backlog at the end of this file. Next up: more amps and pedals (backlog 4). Adding an amp
+means a new `Amp` variant with its own `#[id]` appended after `torden` (never reorder), a
+model in `amp/model.rs`, a place for a fourth switch on the head (the bottom row is full:
+this needs a layout decision, for example the amp choice as a `stepper`), presets for it.
+Adding a pedal means a sixth slot on the board (the window is 960 wide with five pedals of
+180: a wider window or a second row).
 
 Before more DSP: nobody has listened to anything yet. If Rasmus has listened and left notes,
 they come first.
@@ -45,6 +49,8 @@ they come first.
 Quick wins by the numbers:
 - Torden with the drive at 10 / 10 / 10 at 44.1 kHz aliases at -67.6 dB (target -70)
 - Gate thresholds in the metal presets (-46 to -50 dB) may chop quiet playing
+- A 40 ms user cabinet at 192 kHz takes the plugin from 7.2 % to 15.7 % of a core. Capping
+  taps instead of milliseconds would halve that but change the low end per rate
 
 ## What was decided with Rasmus
 
@@ -190,6 +196,21 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
 - 2026-10-10 Tuner: the amp switches moved 40 px left (x 255 / 385 / 515) so the Tuner switch
   at x 680 does not read as a fourth amp
 - 2026-10-10 Klar presets trimmed back to level with Master (Glas 5.0, Varm 4.8, Tåge 4.9)
+- 2026-10-10 IR loader: no file dialog (the style guide forbids pop-ups, and it would be a
+  new GUI dependency). WAV files in `Documents/Hojt Audio/Cabinets` are stepped through on
+  the Cab pedal. The folder is created on the first step, never by loading the plugin.
+  `HOJT_CABINETS_DIR` overrides the folder
+- 2026-10-10 IR loader: `hound` moved from a test dependency to a runtime one. Documents is
+  found through the Windows known-folder call by a hand-written FFI declaration (follows
+  OneDrive), no crate
+- 2026-10-10 IR loader: user IRs run in the same direct FIR (zero latency), cut to 40 ms at
+  every rate so the sound is the same everywhere, trimmed so the sound arrives within 0.2 ms,
+  levelled like the built-in ones. The amp's speaker-resonance filter is not applied to them
+- 2026-10-10 IR loader: taps reach the audio thread through one pre-allocated buffer with an
+  atomic state (empty, writing, ready, taking); the audio thread copies them into the
+  cabinet's free slot when no crossfade runs
+- 2026-10-10 IR loader: the choice is a persisted file name, not a parameter, not in presets,
+  and stays when the amp is switched
 - 2026-10-10 Worktrees for subagents start from `main`, not from `amp-sim`. Tell each agent to
   run `git merge --ff-only amp-sim` first
 
@@ -259,6 +280,22 @@ worst latency 0.317 ms (Torden, 44.1 kHz, everything on). Run `amp_report` for t
 - Tuner: `non_automatable` and the state filter that keeps a project from opening muted were
   not checked in a real host
 
+- User cabinets: nobody has heard one, and only the exported built-in cabinets and synthetic
+  responses were loaded, no third-party IR files
+- User cabinets: not exercised: mouse clicks on the stepper, saving and restoring the choice
+  in a DAW project, the background executor in VST3/CLAP hosts, macOS/Linux folders, a real
+  OneDrive-redirected Documents folder
+- User cabinets: the tape holds 10 characters (`BRØL ~INET`); `BAD FILE` hides which file;
+  nothing in the window says where the folder is; an empty folder just stays on `OWN`
+- User cabinets: only the file name is stored, so a project on another machine needs the same
+  file there; the host is not told the state changed, and host undo does not cover it
+- User cabinets: stereo files use the left channel; 8-bit and 64-bit float are rejected;
+  `initialize` reads the file synchronously (a slow disk delays activation)
+- User cabinets: the built-in designs differ between sample rates by up to 3 dB at 8 kHz (in
+  the roll-off, where the filters warp). Found while testing the resampler; below 4 kHz they
+  agree within 0.16 dB
+- Mic and Res use the selected amp's frequencies also under a user cabinet
+
 ## Last report
 
 After M5 and the presets (2026-10-10). Run the reports for the full tables.
@@ -300,7 +337,7 @@ Idle after the last note: 3.5 s at default effects, 63 s at delay 1000 ms / 90 %
 ## Backlog after M5 (top to bottom)
 
 1. Factory preset browser (done)
-2. User IR loader
+2. User IR loader (done)
 3. Tuner (done)
 4. More amps and pedals (compressor, fuzz, chorus)
 5. Mic choices per cabinet

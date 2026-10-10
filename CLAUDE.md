@@ -110,6 +110,14 @@ controls, portrait) or `plugins/drums/src/editor.rs` (many controls, landscape) 
   `*` on the tape means a control was moved since loading
 - **A preset choice is never a parameter.** The editor sets the real parameters through the
   `ParamSetter` and keeps only the index in a `#[persist]` field
+- **Pick a file (cabinets):** files are never picked in a dialog. They live in one folder and are
+  stepped through in name order with a `stepper` under a `silk_label` caption, the built-in choice
+  first (`OWN`). On a mini pedal the stepper takes the place of the third knob of a trio: two
+  radius-17 knobs with the LED between them, caption at y+174, tape 100 px wide at y+198. The
+  tape shows at most 10 characters: no extension, capitals, long names as the first 5 and last 4
+  with `~` between. `BAD FILE` for a file that cannot be used, `?` in front of the name of one
+  that is not there
+- **A file choice is never a parameter.** Keep the file name (not the path) in a `#[persist]` field
 - **Tuner:** a `small_footswitch` with `rig_led` and a `silk_label` on the head, beside the On
   switch and further from the amp switches than they are from each other. While it is on, a
   `tuner_display` under its own caption takes the place of the preset `stepper`: note name in
@@ -222,6 +230,9 @@ gain). They share the six dials.
   `tonestack.rs`, `poweramp.rs`
 - `src/cab.rs` - Cabinet: impulse response designed in code per sample rate, direct FIR, Mic and
   Resonance filters behind it
+- `src/user_cab.rs` - The player's own cabinets: folder, WAV reading, resampler, trim, cut, level
+- `src/cab_stage.rs` - `CabStage` (lock-free hand-off of a cabinet to the audio thread) and
+  `CabLoader` (reads the chosen file on a background task)
 - `src/delay.rs`, `src/reverb.rs` - Stereo delay; stereo reverb (8-line feedback delay network)
 - `src/dsp/` - `filters.rs` (f64 biquads), `oversample.rs` (minimum-phase IIR half-bands),
   `shaper.rs` (antialiased clippers)
@@ -261,6 +272,18 @@ How it behaves:
   costs nothing when off and under 3 us in its worst 64-sample block when on
 - The tuner reads 48 Hz to 1420 Hz against A = 440 Hz (`REFERENCE_A_HZ`), a new reading every
   30 ms, none for silence, noise or chords. A loaded project never opens with the tuner on
+- Besides its own cabinet an amp can play through a WAV impulse response from
+  `Documents/Hojt Audio/Cabinets` (or the folder in `HOJT_CABINETS_DIR`), picked on the Cab pedal.
+  Mono or the left channel of stereo, 16/24/32-bit integer or 32-bit float, any rate; resampled,
+  trimmed so the sound arrives within 0.2 ms, cut to 40 ms, levelled like the built-in ones.
+  Latency stays the same
+- The cabinet choice is a persisted file name, not a parameter and not part of a preset. It
+  stays when another amp is picked. A missing or unusable file plays the amp's own cabinet
+- Files are read on a background task (and in `initialize`), never on the audio thread; the taps
+  reach it through `CabStage` without allocating, freeing or waiting
+- The folder is created the first time the stepper is used, not by loading the plugin
+- A 40 ms cabinet adds about 0.3 % of a core at 48 kHz, 2.3 % at 96 kHz, 8.5 % at 192 kHz
+- `hound` is the amp's one dependency besides nih-plug; it reads the WAV files
 - `lib.rs` takes every parameter default and range from `AmpSettings::default` and the limits in
   the DSP modules; a test pins the values
 - A preset holds everything except Bypass, Input and Output, so every preset must fit at
@@ -312,6 +335,12 @@ cargo test -p amp --release preset_report -- --ignored --nocapture
 
 # Tuner: error in cents per note and signal, time to the first reading, drift, cost.
 cargo test -p amp --release tuner_report -- --ignored --nocapture
+
+# The player's cabinets: cost per length and rate, latency, what loading does to a response.
+cargo test -p amp --release user_cab_report -- --ignored --nocapture
+
+# The three built-in cabinets as 48 kHz WAV files in target/renders/cabinets.
+cargo test -p amp --release export_cabinets -- --ignored --nocapture
 
 # A DI guitar through each amp and setting, as WAV files in target/renders (amp_*.wav).
 # Optional: AMP_INPUT_WAV=<recording>. render_effects writes the effects alone (amp_fx_*.wav)
