@@ -2,6 +2,9 @@
 // difference quotient would divide rounding noise by almost nothing
 const MIN_STEP: f64 = 1e-6;
 
+// The same for the second-order shaper, which divides by the step twice
+const MIN_STEP_2: f64 = 1e-5;
+
 // Where the power clipper reaches its ceiling of 1.0
 const POWER_CLIP_CORNER: f64 = 1.5;
 
@@ -19,10 +22,15 @@ fn asym_curve(x: f64, positive: f64, negative: f64) -> f64 {
     x / (1.0 + ratio * ratio).sqrt()
 }
 
-/// Integral of `asym_curve` from zero
+/// Integral of `asym_curve` from zero, and the integral of that
 #[cfg(test)]
 fn asym_integral(x: f64, positive: f64, negative: f64) -> f64 {
     AsymLimits::new(positive, negative).integral(x)
+}
+
+#[cfg(test)]
+fn asym_second_integral(x: f64, positive: f64, negative: f64) -> f64 {
+    AsymLimits::new(positive, negative).second_integral(x)
 }
 
 /// The two limits of `asym_curve` with what the integral needs of them worked out once: a
@@ -46,11 +54,26 @@ impl AsymLimits {
         }
     }
 
+    fn curve(&self, x: f64) -> f64 {
+        asym_curve(x, self.positive, self.negative)
+    }
+
     /// Integral of `asym_curve` from zero
     fn integral(&self, x: f64) -> f64 {
         let side = (x < 0.0) as usize;
         let ratio = x * self.inverse[side];
         self.square[side] * ((1.0 + ratio * ratio).sqrt() - 1.0)
+    }
+
+    /// Integral of `integral` from zero
+    fn second_integral(&self, x: f64) -> f64 {
+        let side = (x < 0.0) as usize;
+        let limit = if side == 0 { self.positive } else { self.negative };
+        let ratio = x * self.inverse[side];
+        let root = (1.0 + ratio * ratio).sqrt();
+        // The inverse hyperbolic sine of `ratio`, with the root that is already there
+        let arsinh = (ratio.abs() + root).ln().copysign(ratio);
+        self.square[side] * (0.5 * (x * root + limit * arsinh) - x)
     }
 }
 
@@ -121,39 +144,108 @@ impl Averager {
     }
 }
 
-/// `asym_clip`, antialiased
+/// `asym_clip`, antialiased, to the first order like the `Averager` or to the second.
+///
+/// Second order: the output is the curve weighted over the path through the last three
+/// inputs (a triangle instead of a box), worked out from the curve's second integral,
+/// differenced twice. What folds back is weaker again by about as much as the first order
+/// gained, for one sample of delay instead of half, and about four times the work
 #[derive(Clone, Copy)]
 pub struct AsymClipper {
     limits: AsymLimits,
-    averager: Averager,
+    second_order: bool,
+    // The input one and two samples ago
+    last_input: f64,
+    earlier_input: f64,
+    // The integral at the last input: the first one, or the second in second order
+    last_integral: f64,
+    // Second order: the last difference quotient of the second integral
+    last_quotient: f64,
 }
 
 impl AsymClipper {
     pub fn new() -> Self {
         Self {
             limits: AsymLimits::new(1.0, 1.0),
-            averager: Averager::new(),
+            second_order: false,
+            last_input: 0.0,
+            earlier_input: 0.0,
+            last_integral: 0.0,
+            last_quotient: 0.0,
         }
     }
 
+    /// Call `reset` after either of these
     pub fn set_limits(&mut self, positive: f32, negative: f32) {
         self.limits = AsymLimits::new(positive as f64, negative as f64);
     }
 
+    pub fn set_second_order(&mut self, second_order: bool) {
+        self.second_order = second_order;
+    }
+
     /// `rest` is the input the clipper sits at in silence (the stage's operating point)
     pub fn reset(&mut self, rest: f32) {
-        self.averager = Averager {
-            last_input: rest as f64,
-            last_integral: self.limits.integral(rest as f64),
-        };
+        let rest = rest as f64;
+        self.last_input = rest;
+        self.earlier_input = rest;
+        if self.second_order {
+            self.last_integral = self.limits.second_integral(rest);
+            self.last_quotient = self.limits.integral(rest);
+        } else {
+            self.last_integral = self.limits.integral(rest);
+        }
     }
 
     pub fn process(&mut self, input: f32) -> f32 {
-        let limits = self.limits;
         let input = input as f64;
-        self.averager
-            .process(input, limits.integral(input), |x| asym_curve(x, limits.positive, limits.negative))
-            as f32
+        let output = if self.second_order { self.second_order(input) } else { self.first_order(input) };
+        self.last_input = input;
+        output as f32
+    }
+
+    fn first_order(&mut self, input: f64) -> f64 {
+        let integral = self.limits.integral(input);
+        let step = input - self.last_input;
+        let output = if step.abs() > MIN_STEP {
+            (integral - self.last_integral) / step
+        } else {
+            self.limits.curve(0.5 * (input + self.last_input))
+        };
+        self.last_integral = integral;
+        output
+    }
+
+    fn second_order(&mut self, input: f64) -> f64 {
+        let limits = &self.limits;
+        let second = limits.second_integral(input);
+
+        let step = input - self.last_input;
+        let quotient = if step.abs() > MIN_STEP_2 {
+            (second - self.last_integral) / step
+        } else {
+            limits.integral(0.5 * (input + self.last_input))
+        };
+
+        let span = input - self.earlier_input;
+        let output = if span.abs() > MIN_STEP_2 {
+            2.0 * (quotient - self.last_quotient) / span
+        } else {
+            // The input turned around, or stands still: the same weighting, written for
+            // the point halfway between this input and the one before last
+            let middle = 0.5 * (input + self.earlier_input);
+            let offset = middle - self.last_input;
+            if offset.abs() > MIN_STEP_2 {
+                2.0 / offset * (limits.integral(middle) + (self.last_integral - limits.second_integral(middle)) / offset)
+            } else {
+                limits.curve(0.5 * (middle + self.last_input))
+            }
+        };
+
+        self.earlier_input = self.last_input;
+        self.last_integral = second;
+        self.last_quotient = quotient;
+        output
     }
 }
 
@@ -226,7 +318,11 @@ mod tests {
             assert!((asym_slope - asym_curve(x, 1.2, 0.8)).abs() < 1e-6, "asym at {}", x);
             let power_slope = (power_integral(x + step) - power_integral(x - step)) / (2.0 * step);
             assert!((power_slope - power_curve(x)).abs() < 1e-6, "power at {}", x);
+            let second_slope =
+                (asym_second_integral(x + step, 1.2, 0.8) - asym_second_integral(x - step, 1.2, 0.8)) / (2.0 * step);
+            assert!((second_slope - asym_integral(x, 1.2, 0.8)).abs() < 1e-6, "asym, second, at {}", x);
         }
+        assert_eq!(asym_second_integral(0.0, 1.2, 0.8), 0.0);
     }
 
     #[test]
@@ -255,19 +351,56 @@ mod tests {
     fn test_antialiased_clippers_follow_their_curves_on_slow_signals() {
         let mut asym = AsymClipper::new();
         asym.set_limits(1.0, 1.6);
+        let mut second = second_order_clipper(1.0, 1.6, 0.0);
         let mut power = PowerClipper::new();
 
-        // Half a sample late, so compare with the curve at the midpoint
+        // First order is half a sample late, so compare with the curve at the midpoint.
+        // Second order is a whole sample late, once it has seen even steps
         let input = sine(100.0, 3.0, 192_000.0, 4000);
-        for pair in input.windows(2) {
+        for (index, pair) in input.windows(2).enumerate() {
             let middle = 0.5 * (pair[0] + pair[1]);
             asym.process(pair[0]);
+            second.process(pair[0]);
             power.process(pair[0]);
             let mut asym_next = asym;
+            let mut second_next = second;
             let mut power_next = power;
             assert!((asym_next.process(pair[1]) - asym_clip(middle, 1.0, 1.6)).abs() < 1e-3);
+            assert!(index < 2 || (second_next.process(pair[1]) - asym_clip(pair[0], 1.0, 1.6)).abs() < 1e-3);
             assert!((power_next.process(pair[1]) - power_clip(middle)).abs() < 1e-3);
         }
+    }
+
+    fn second_order_clipper(positive: f32, negative: f32, rest: f32) -> AsymClipper {
+        let mut clipper = AsymClipper::new();
+        clipper.set_limits(positive, negative);
+        clipper.set_second_order(true);
+        clipper.reset(rest);
+        clipper
+    }
+
+    #[test]
+    fn test_second_order_clipper_is_exact_on_quiet_and_on_still_signals() {
+        // Where the steps are too small to divide by, and where they are just large enough
+        for level in [1e-7, 1e-5, 1e-3, 0.1] {
+            let mut asym = second_order_clipper(1.0, 1.6, 0.1);
+            let input: Vec<f32> = sine(220.0, level, 192_000.0, 4000).iter().map(|s| s + 0.1).collect();
+            // From the third sample on: until then the steps from rest are uneven
+            for (index, pair) in input.windows(2).enumerate() {
+                asym.process(pair[0]);
+                if index < 2 {
+                    continue;
+                }
+                let mut next = asym;
+                let error = (next.process(pair[1]) - asym_clip(pair[0], 1.0, 1.6)).abs();
+                assert!(error < 1e-6 + 1e-3 * level, "Level {}: off by {}", level, error);
+            }
+        }
+        // A step and then nothing: the output settles on the curve
+        let mut asym = second_order_clipper(1.0, 1.6, 0.0);
+        let outputs: Vec<f32> = (0..4).map(|_| asym.process(2.0)).collect();
+        assert!(outputs.iter().all(|s| s.is_finite()));
+        assert_eq!(outputs[3], asym_clip(2.0, 1.0, 1.6));
     }
 
     #[test]
@@ -289,21 +422,27 @@ mod tests {
             let energy: f64 = levels[harmonics.len()..].iter().map(|level| level * level).sum();
             10.0 * (energy / (levels[0] * levels[0])).log10()
         };
-        let (plain_db, antialiased_db) = (folded_db(&plain), folded_db(&antialiased));
+        let mut second = second_order_clipper(1.0, 1.6, 0.0);
+        let second: Vec<f32> = input.iter().map(|&s| second.process(s)).collect();
+
+        let (plain_db, antialiased_db, second_db) = (folded_db(&plain), folded_db(&antialiased), folded_db(&second));
         assert!(
-            antialiased_db < plain_db - 15.0,
-            "Plain {:.1} dB, antialiased {:.1} dB",
+            antialiased_db < plain_db - 15.0 && second_db < antialiased_db - 10.0,
+            "Plain {:.1} dB, antialiased {:.1} dB, to the second order {:.1} dB",
             plain_db,
-            antialiased_db
+            antialiased_db,
+            second_db
         );
     }
 
     #[test]
     fn test_silence_gives_silence() {
         let mut asym = AsymClipper::new();
+        let mut second = second_order_clipper(1.0, 1.6, 0.0);
         let mut power = PowerClipper::new();
         for _ in 0..16 {
             assert_eq!(asym.process(0.0), 0.0);
+            assert_eq!(second.process(0.0), 0.0);
             assert_eq!(power.process(0.0), 0.0);
         }
     }

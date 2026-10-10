@@ -1,7 +1,7 @@
 use super::model::{AmpModel, StageModel, MAX_STAGES};
 use crate::dsp::filters::{Biquad, BiquadCoeffs, OnePoleHp, OnePoleLp, ANTI_DENORMAL};
 use crate::dsp::shaper::{asym_clip, AsymClipper};
-use crate::dsp::{curve, db_to_gain, lerp, smoothing_coeff, Ramp};
+use crate::dsp::{curve, db_to_gain, smoothing_coeff, Ramp};
 
 // Flat up to the corner
 const FIZZ_Q: f32 = 0.707;
@@ -48,6 +48,7 @@ impl Stage {
         self.coupling.set(model.coupling_hz, sample_rate);
         self.lowpass.set(model.lowpass_hz, sample_rate);
         self.clipper.set_limits(model.headroom[0], model.headroom[1]);
+        self.clipper.set_second_order(model.second_order);
         self.headroom = model.headroom;
         self.bias = model.bias;
         self.bias_shift = model.bias_shift;
@@ -143,8 +144,7 @@ impl Preamp {
     /// Moves to a Gain dial position over the next `steps` samples
     pub fn set_gain(&mut self, model: &AmpModel, gain: f32, steps: u32) {
         for (stage, stage_model) in self.stages.iter_mut().zip(&model.stages) {
-            let gain_db = lerp(stage_model.gain_db[0], stage_model.gain_db[1], gain);
-            stage.gain.set_target(db_to_gain(gain_db), steps);
+            stage.gain.set_target(db_to_gain(curve(&stage_model.gain_db, gain)), steps);
         }
 
         // Odd numbers of inverting stages are turned back, so the amp keeps the polarity
@@ -226,7 +226,7 @@ mod tests {
         for amp in Amp::ALL {
             let model = amp.model();
             let stages = &model.stages[..model.stage_count];
-            for (gain, end) in [(0.0, 0), (1.0, 1)] {
+            for (gain, end) in [(0.0, 0), (1.0, 2)] {
                 let input = sine(1000.0, 1e-5, SAMPLE_RATE, LEN);
                 let mut preamp = Preamp::new();
                 preamp.configure(model, SAMPLE_RATE);
@@ -234,7 +234,7 @@ mod tests {
                 preamp.set_gain(model, gain, 0);
                 let mut output = input.clone();
                 preamp.process(&mut output);
-                let measured = to_db(rms(&output[LEN / 2..]) / rms(&input[LEN / 2..])) - model.level_db[end * 4];
+                let measured = to_db(rms(&output[LEN / 2..]) / rms(&input[LEN / 2..])) - model.level_db[end * 2];
                 let expected: f32 = stages.iter().map(|stage| stage.gain_db[end]).sum();
                 // The bright lift at gain 0 and the focus add to it; the low-passes take a little
                 assert!(
@@ -279,10 +279,11 @@ mod tests {
     #[test]
     fn test_loudness_stays_within_reach_across_the_gain_dial() {
         for amp in Amp::ALL {
+            // With what the model makes up after the power stage
             let input = sine(440.0, 0.15, SAMPLE_RATE, LEN);
             let levels: Vec<f32> = [0.0, 0.25, 0.5, 0.75, 1.0]
                 .iter()
-                .map(|&gain| to_db(rms(&run(amp, gain, &input)[LEN / 2..])))
+                .map(|&gain| to_db(rms(&run(amp, gain, &input)[LEN / 2..])) + curve(&amp.model().makeup_db, gain))
                 .collect();
             let loudest = levels.iter().cloned().fold(f32::MIN, f32::max);
             let quietest = levels.iter().cloned().fold(f32::MAX, f32::min);

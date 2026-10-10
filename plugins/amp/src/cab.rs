@@ -22,6 +22,21 @@ const BREAKUP_Q: [f32; 2] = [6.0, 16.0];
 // Crossfade when the impulse response is swapped while playing
 const SWAP_MS: f32 = 10.0;
 
+// Mic dial: a shelf above the cabinet's bite, this many dB at either end of the dial. Its
+// corner is the bite frequency times these, at the dark and at the bright end
+const MIC_DB: f32 = 7.0;
+const MIC_CORNER_RATIO: [f32; 2] = [0.8, 1.1];
+const MIC_Q: f32 = 0.6;
+// And a little the other way below this, as a microphone at the edge of the cone hears it
+const MIC_LOW_HZ: f32 = 350.0;
+const MIC_LOW_DB: f32 = 1.5;
+// Level in dB added at the dark end and taken away at the bright end, to keep the loudness
+const MIC_TRIM_DB: f32 = 0.4;
+
+// Resonance dial: a bell at the speaker's resonance, this many dB at either end
+const THUMP_DB: f32 = 6.0;
+const THUMP_Q: f32 = 1.4;
+
 /// Number of samples of an impulse response at a sample rate
 pub fn ir_len(sample_rate: f32) -> usize {
     ((IR_MS * 0.001 * sample_rate).round() as usize).clamp(16, MAX_IR_LEN)
@@ -245,6 +260,101 @@ impl Cabinet {
     }
 }
 
+/// The Mic and Resonance dials: filters after the convolution. With a dial at its centre
+/// its filters are skipped, and the cabinet is the impulse response as designed
+pub struct CabVoicing {
+    mic_high: Biquad,
+    mic_low: Biquad,
+    thump: Biquad,
+    mic_centred: bool,
+    thump_centred: bool,
+}
+
+impl CabVoicing {
+    pub fn new() -> Self {
+        Self {
+            mic_high: Biquad::new(),
+            mic_low: Biquad::new(),
+            thump: Biquad::new(),
+            mic_centred: true,
+            thump_centred: true,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.mic_high.reset();
+        self.mic_low.reset();
+        self.thump.reset();
+    }
+
+    /// `mic` and `resonance` are dial positions, 0.0 to 1.0. Below 0.5 the microphone moves
+    /// to the edge of the cone (darker, a little fuller), above it to the centre (brighter,
+    /// a little leaner). `resonance` is how much the cabinet thumps at its own resonance
+    pub fn set(&mut self, model: &CabModel, mic: f32, resonance: f32, sample_rate: f32) {
+        let (mic_coeffs, mic_centred) = Self::mic_coeffs(model, mic, sample_rate);
+        // Coming from the centre the filters start from rest
+        if self.mic_centred && !mic_centred {
+            self.mic_high.reset();
+            self.mic_low.reset();
+        }
+        self.mic_high.set(mic_coeffs[0]);
+        self.mic_low.set(mic_coeffs[1]);
+        self.mic_centred = mic_centred;
+
+        let (thump_coeffs, thump_centred) = Self::thump_coeffs(model, resonance, sample_rate);
+        if self.thump_centred && !thump_centred {
+            self.thump.reset();
+        }
+        self.thump.set(thump_coeffs);
+        self.thump_centred = thump_centred;
+    }
+
+    fn mic_coeffs(model: &CabModel, mic: f32, sample_rate: f32) -> ([BiquadCoeffs; 2], bool) {
+        let mic = mic.clamp(0.0, 1.0);
+        let position = (mic - 0.5) * 2.0;
+        let corner_hz = model.bite[0] * (MIC_CORNER_RATIO[0] + (MIC_CORNER_RATIO[1] - MIC_CORNER_RATIO[0]) * mic);
+        let trim = 10.0f32.powf(-MIC_TRIM_DB * position / 20.0);
+        (
+            [
+                BiquadCoeffs::high_shelf(corner_hz, MIC_Q, MIC_DB * position, sample_rate),
+                BiquadCoeffs::low_shelf(MIC_LOW_HZ, 0.707, -MIC_LOW_DB * position, sample_rate).scaled(trim),
+            ],
+            position == 0.0,
+        )
+    }
+
+    fn thump_coeffs(model: &CabModel, resonance: f32, sample_rate: f32) -> (BiquadCoeffs, bool) {
+        let position = (resonance.clamp(0.0, 1.0) - 0.5) * 2.0;
+        (BiquadCoeffs::peak(model.resonance_hz, THUMP_Q, THUMP_DB * position, sample_rate), position == 0.0)
+    }
+
+    pub fn process(&mut self, block: &mut [f32]) {
+        if !self.mic_centred {
+            for sample in block.iter_mut() {
+                *sample = self.mic_low.process(self.mic_high.process(*sample as f64)) as f32;
+            }
+        }
+        if !self.thump_centred {
+            for sample in block.iter_mut() {
+                *sample = self.thump.process(*sample as f64) as f32;
+            }
+        }
+    }
+
+    /// What the dials do to the level at one frequency, in dB
+    #[cfg(test)]
+    pub fn response_db(model: &CabModel, mic: f32, resonance: f32, freq_hz: f32, sample_rate: f32) -> f32 {
+        if mic == 0.5 && resonance == 0.5 {
+            return 0.0;
+        }
+        let (mic_coeffs, _) = Self::mic_coeffs(model, mic, sample_rate);
+        let (thump_coeffs, _) = Self::thump_coeffs(model, resonance, sample_rate);
+        mic_coeffs[0].magnitude_db(freq_hz, sample_rate)
+            + mic_coeffs[1].magnitude_db(freq_hz, sample_rate)
+            + thump_coeffs.magnitude_db(freq_hz, sample_rate)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,5 +517,69 @@ mod tests {
         let mut long = vec![1.0; 2000];
         cabinet.process(&mut long);
         assert!((long[1999] - 0.1 * 960.0).abs() < 1e-2);
+    }
+
+    fn voiced(amp: Amp, mic: f32, resonance: f32, input: &[f32]) -> Vec<f32> {
+        let mut voicing = CabVoicing::new();
+        voicing.set(&amp.model().cab, mic, resonance, 48000.0);
+        let mut output = input.to_vec();
+        voicing.process(&mut output);
+        output
+    }
+
+    #[test]
+    fn test_voicing_at_the_centre_changes_nothing() {
+        let mut noise = Noise::new(5);
+        let input: Vec<f32> = (0..4800).map(|_| noise.next()).collect();
+        for amp in Amp::ALL {
+            assert_eq!(voiced(amp, 0.5, 0.5, &input), input);
+        }
+
+        // Also after a dial has been somewhere else
+        let mut voicing = CabVoicing::new();
+        voicing.set(&Amp::Brol.model().cab, 0.9, 0.1, 48000.0);
+        voicing.process(&mut input.clone());
+        voicing.set(&Amp::Brol.model().cab, 0.5, 0.5, 48000.0);
+        let mut output = input.clone();
+        voicing.process(&mut output);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn test_mic_dial_moves_the_top_and_a_little_of_the_low_end() {
+        for amp in Amp::ALL {
+            let cab = &amp.model().cab;
+            let change = |mic: f32, freq: f32| CabVoicing::response_db(cab, mic, 0.5, freq, 48000.0);
+            assert!(change(0.0, 4000.0) < -4.0, "{:?} dark at 4 kHz: {:.1} dB", amp, change(0.0, 4000.0));
+            assert!(change(1.0, 5000.0) > 4.0, "{:?} bright at 5 kHz: {:.1} dB", amp, change(1.0, 5000.0));
+            assert!((0.3..2.5).contains(&change(0.0, 200.0)), "{:?} dark at 200 Hz: {:.1} dB", amp, change(0.0, 200.0));
+            assert!((-2.5..-0.3).contains(&change(1.0, 100.0)), "{:?} bright at 100 Hz: {:.1} dB", amp, change(1.0, 100.0));
+            // Steady across the dial
+            let steps: Vec<f32> = (0..=10).map(|step| change(step as f32 * 0.1, 4000.0)).collect();
+            assert!(steps.windows(2).all(|pair| pair[1] > pair[0]), "{:?}: {:?}", amp, steps);
+        }
+    }
+
+    #[test]
+    fn test_resonance_dial_moves_the_thump_only() {
+        for amp in Amp::ALL {
+            let cab = &amp.model().cab;
+            let change = |resonance: f32, freq: f32| CabVoicing::response_db(cab, 0.5, resonance, freq, 48000.0);
+            assert!((change(1.0, cab.resonance_hz) - THUMP_DB).abs() < 0.1);
+            assert!((change(0.0, cab.resonance_hz) + THUMP_DB).abs() < 0.1);
+            assert!(change(1.0, 1000.0).abs() < 0.3 && change(0.0, 1000.0).abs() < 0.3);
+        }
+    }
+
+    #[test]
+    fn test_voicing_filters_do_what_their_response_says() {
+        let cab = &Amp::Brol.model().cab;
+        for (mic, resonance, freq) in [(0.0, 0.5, 4000.0), (1.0, 0.5, 4000.0), (0.5, 1.0, 95.0), (0.2, 0.1, 300.0)] {
+            let input = sine(freq, 0.5, 48000.0, 24_000);
+            let output = voiced(Amp::Brol, mic, resonance, &input);
+            let measured = to_db(rms(&output[12_000..]) / rms(&input[12_000..]));
+            let expected = CabVoicing::response_db(cab, mic, resonance, freq, 48000.0);
+            assert!((measured - expected).abs() < 0.1, "{} Hz: {:.2} dB, expected {:.2} dB", freq, measured, expected);
+        }
     }
 }

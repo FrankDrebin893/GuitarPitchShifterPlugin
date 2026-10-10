@@ -58,6 +58,16 @@ impl Ramp {
         self.remaining = 0;
     }
 
+    /// Where the value is now
+    pub fn value(&self) -> f32 {
+        self.value
+    }
+
+    /// Where the value is going
+    pub fn target(&self) -> f32 {
+        self.target
+    }
+
     pub fn next(&mut self) -> f32 {
         if self.remaining > 0 {
             self.remaining -= 1;

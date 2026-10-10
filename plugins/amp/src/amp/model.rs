@@ -38,8 +38,8 @@ impl Amp {
 pub struct StageModel {
     /// High-pass in front of the stage: how much low end reaches the clipping
     pub coupling_hz: f32,
-    /// Gain in dB with the Gain dial at 0 and at 10
-    pub gain_db: [f32; 2],
+    /// Gain in dB with the Gain dial at 0, 5 and 10
+    pub gain_db: [f32; 3],
     /// Where the stage clips, upwards and downwards. The difference makes even harmonics
     pub headroom: [f32; 2],
     /// Resting operating point, as an offset into the curve
@@ -48,6 +48,9 @@ pub struct StageModel {
     pub bias_shift: f32,
     /// Low-pass after the stage
     pub lowpass_hz: f32,
+    /// Antialiases the clipping to the second order instead of the first: for the stages
+    /// that clip hardest in an amp with a lot of gain. Costs about four times as much
+    pub second_order: bool,
 }
 
 /// Bass, Mid and Treble. They share one network, so each dial moves the others' ranges
@@ -139,6 +142,10 @@ pub struct AmpModel {
     /// Level after the preamp in dB across the Gain dial (0, 2.5, 5, 7.5, 10), set so the
     /// loudness stays about the same while the distortion changes
     pub level_db: [f32; 5],
+    /// Level after the power stage in dB across the Gain dial (0, 2.5, 5, 7.5, 10). What is
+    /// made up here instead of in `level_db` does not push the power stage, so the low end
+    /// of the dial stays clean on hard pick attacks
+    pub makeup_db: [f32; 5],
     pub tone: ToneModel,
     pub power: PowerModel,
     pub cab: CabModel,
@@ -146,11 +153,12 @@ pub struct AmpModel {
 
 const UNUSED_STAGE: StageModel = StageModel {
     coupling_hz: 20.0,
-    gain_db: [0.0, 0.0],
+    gain_db: [0.0, 0.0, 0.0],
     headroom: [1.0, 1.0],
     bias: 0.0,
     bias_shift: 0.0,
     lowpass_hz: 20000.0,
+    second_order: false,
 };
 
 /// Clean: glassy, with headroom to spare. Two stages with high ceilings that only bend at
@@ -166,19 +174,21 @@ static KLAR: AmpModel = AmpModel {
     stages: [
         StageModel {
             coupling_hz: 20.0,
-            gain_db: [-4.0, 11.0],
+            gain_db: [-4.0, 3.5, 11.0],
             headroom: [4.0, 5.0],
             bias: 0.0,
             bias_shift: 0.3,
             lowpass_hz: 16000.0,
+            second_order: false,
         },
         StageModel {
             coupling_hz: 40.0,
-            gain_db: [-6.0, 17.0],
+            gain_db: [-6.0, 5.5, 17.0],
             headroom: [3.0, 3.8],
             bias: 0.05,
             bias_shift: 0.3,
             lowpass_hz: 12000.0,
+            second_order: false,
         },
         UNUSED_STAGE,
         UNUSED_STAGE,
@@ -186,6 +196,7 @@ static KLAR: AmpModel = AmpModel {
     fizz_hz: None,
     lowcut_hz: None,
     level_db: [24.0, 17.0, 8.0, 0.0, -5.5],
+    makeup_db: [0.0; 5],
     tone: ToneModel {
         bass_hz: 120.0,
         bass_db: 10.0,
@@ -226,7 +237,9 @@ static KLAR: AmpModel = AmpModel {
 };
 
 /// Crunch: a mid-forward stack. Little low end goes into the clipping, so chords stay
-/// defined; the first stage has headroom to spare, so picking softly cleans it up
+/// defined; the first stage has headroom to spare, so picking softly cleans it up. At the
+/// bottom of the Gain dial every stage is turned down and the level is made up after the
+/// power stage, so that hard pick attacks stay clean there
 static BROL: AmpModel = AmpModel {
     name: "Brøl",
     model_number: "BR-50",
@@ -238,33 +251,37 @@ static BROL: AmpModel = AmpModel {
     stages: [
         StageModel {
             coupling_hz: 30.0,
-            gain_db: [2.0, 14.0],
+            gain_db: [0.0, 8.0, 14.0],
             headroom: [2.0, 2.8],
             bias: 0.0,
             bias_shift: 0.5,
             lowpass_hz: 12000.0,
+            second_order: false,
         },
         StageModel {
             coupling_hz: 180.0,
-            gain_db: [-1.0, 22.0],
+            gain_db: [-5.0, 10.5, 22.0],
             headroom: [1.0, 1.5],
             bias: 0.1,
             bias_shift: 0.4,
             lowpass_hz: 9000.0,
+            second_order: false,
         },
         StageModel {
             coupling_hz: 70.0,
-            gain_db: [-1.0, 14.0],
+            gain_db: [-4.0, 6.5, 14.0],
             headroom: [1.2, 0.9],
             bias: -0.1,
             bias_shift: 0.3,
             lowpass_hz: 7500.0,
+            second_order: false,
         },
         UNUSED_STAGE,
     ],
     fizz_hz: None,
     lowcut_hz: None,
-    level_db: [13.0, 6.5, 0.0, -1.5, -2.5],
+    level_db: [6.0, 3.0, 0.0, -1.5, -2.5],
+    makeup_db: [15.0, 6.5, 0.0, 0.0, 0.0],
     tone: ToneModel {
         bass_hz: 140.0,
         bass_db: 10.0,
@@ -306,7 +323,8 @@ static BROL: AmpModel = AmpModel {
 
 /// High gain: tight and modern. The low end is cut before the clipping and put back after
 /// it, four stages clip a signal with its upper mids pushed forward, and the fizz is
-/// filtered off after every stage. A stiff power stage with a strong resonance and presence
+/// filtered off after every stage. A stiff power stage with a strong resonance and presence.
+/// The second and third stages do most of the clipping, and are antialiased to match
 static TORDEN: AmpModel = AmpModel {
     name: "Torden",
     model_number: "TD-100",
@@ -318,40 +336,45 @@ static TORDEN: AmpModel = AmpModel {
     stages: [
         StageModel {
             coupling_hz: 30.0,
-            gain_db: [10.0, 18.0],
+            gain_db: [10.0, 14.0, 18.0],
             headroom: [2.5, 3.0],
             bias: 0.0,
             bias_shift: 0.2,
             lowpass_hz: 12000.0,
+            second_order: false,
         },
         StageModel {
             coupling_hz: 250.0,
-            gain_db: [8.0, 20.0],
+            gain_db: [8.0, 14.0, 20.0],
             headroom: [1.0, 1.4],
             bias: 0.1,
             bias_shift: 0.2,
             lowpass_hz: 8000.0,
+            second_order: true,
         },
         StageModel {
             coupling_hz: 150.0,
-            gain_db: [6.0, 18.0],
+            gain_db: [6.0, 12.0, 18.0],
             headroom: [1.2, 0.9],
             bias: -0.1,
             bias_shift: 0.15,
             lowpass_hz: 7000.0,
+            second_order: true,
         },
         StageModel {
             coupling_hz: 140.0,
-            gain_db: [6.0, 14.0],
+            gain_db: [6.0, 10.0, 14.0],
             headroom: [1.0, 1.3],
             bias: 0.05,
             bias_shift: 0.1,
             lowpass_hz: 6000.0,
+            second_order: false,
         },
     ],
     fizz_hz: Some(7500.0),
-    lowcut_hz: Some(100.0),
+    lowcut_hz: Some(120.0),
     level_db: [2.0, 0.5, 0.0, 0.0, 0.0],
+    makeup_db: [0.0; 5],
     tone: ToneModel {
         bass_hz: 110.0,
         bass_db: 10.0,
@@ -406,7 +429,7 @@ mod tests {
             assert!((1..=MAX_STAGES).contains(&model.stage_count));
             for stage in &model.stages[..model.stage_count] {
                 assert!(stage.headroom[0] > 0.0 && stage.headroom[1] > 0.0);
-                assert!(stage.gain_db[1] >= stage.gain_db[0]);
+                assert!(stage.gain_db[1] >= stage.gain_db[0] && stage.gain_db[2] >= stage.gain_db[1]);
                 assert!(stage.bias_shift >= 0.0);
             }
             assert!(model.power.sag >= 0.0 && model.power.sag < 0.5);

@@ -5,8 +5,10 @@ use std::sync::Arc;
 mod amp;
 mod cab;
 mod chain;
+mod drive;
 mod dsp;
 mod editor;
+mod gate;
 #[cfg(test)]
 mod test_util;
 pub use amp::model::Amp;
@@ -229,6 +231,14 @@ impl Plugin for GuitarAmpPlugin {
     ) -> ProcessStatus {
         let settings = AmpSettings {
             bypass: self.params.bypass.value(),
+            in_gain_db: self.params.in_gain.value(),
+            gate_on: self.params.gate_on.value(),
+            gate_thresh_db: self.params.gate_thresh.value(),
+            gate_release_ms: self.params.gate_release.value(),
+            drive_on: self.params.drive_on.value(),
+            drive_gain: self.params.drive_gain.value(),
+            drive_tone: self.params.drive_tone.value(),
+            drive_level: self.params.drive_level.value(),
             amp: self.params.amp.value(),
             gain: self.params.gain.value(),
             bass: self.params.bass.value(),
@@ -236,6 +246,9 @@ impl Plugin for GuitarAmpPlugin {
             treble: self.params.treble.value(),
             presence: self.params.presence.value(),
             master: self.params.master.value(),
+            cab_on: self.params.cab_on.value(),
+            cab_mic: self.params.cab_mic.value(),
+            cab_res: self.params.cab_res.value(),
             out_level: self.params.out_level.value(),
         };
 

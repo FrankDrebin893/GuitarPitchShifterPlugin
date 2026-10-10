@@ -61,10 +61,11 @@ impl PowerAmp {
         self.load = 0.0;
     }
 
-    /// Moves to a Master dial position over the next `steps` samples
-    pub fn set_master(&mut self, model: &PowerModel, master: f32, steps: u32) {
+    /// Moves to a Master dial position over the next `steps` samples. `makeup_db` is added
+    /// to the level after the stage
+    pub fn set_master(&mut self, model: &PowerModel, master: f32, makeup_db: f32, steps: u32) {
         self.drive.set_target(db_to_gain(curve(&model.drive_db, master)), steps);
-        self.volume.set_target(db_to_gain(curve(&model.volume_db, master)), steps);
+        self.volume.set_target(db_to_gain(curve(&model.volume_db, master) + makeup_db), steps);
     }
 
     pub fn set_presence(&mut self, model: &PowerModel, presence: f32, sample_rate: f32) {
@@ -112,7 +113,7 @@ mod tests {
         let model = &amp.model().power;
         let mut power = PowerAmp::new();
         power.configure(model, SAMPLE_RATE);
-        power.set_master(model, master, 0);
+        power.set_master(model, master, 0.0, 0);
         power.set_presence(model, presence, SAMPLE_RATE);
         let mut output = input.to_vec();
         power.process(&mut output);
@@ -170,7 +171,7 @@ mod tests {
             let model = &amp.model().power;
             let mut power = PowerAmp::new();
             power.configure(model, SAMPLE_RATE);
-            power.set_master(model, 1.0, 0);
+            power.set_master(model, 1.0, 0.0, 0);
             power.set_presence(model, 0.0, SAMPLE_RATE);
 
             let mut burst = sine(440.0, 2.0, SAMPLE_RATE, LEN);

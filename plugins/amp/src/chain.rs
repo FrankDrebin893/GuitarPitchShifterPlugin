@@ -2,11 +2,13 @@ use crate::amp::model::Amp;
 use crate::amp::poweramp::PowerAmp;
 use crate::amp::preamp::Preamp;
 use crate::amp::tonestack::{ToneCurve, ToneStack};
-use crate::cab::{design_ir, Cabinet};
+use crate::cab::{design_ir, CabVoicing, Cabinet};
+use crate::drive::Drive;
 use crate::dsp::filters::DcBlocker;
 use crate::dsp::oversample::{Oversampler, FACTOR};
 use crate::dsp::shaper::output_clip;
-use crate::dsp::{smoothing_coeff, Ramp};
+use crate::dsp::{curve, db_to_gain, smoothing_coeff, Ramp};
+use crate::gate::Gate;
 
 // The chain works in pieces of at most this many samples, and reads the dials once per piece
 const CHUNK: usize = 32;
@@ -25,10 +27,36 @@ const BYPASS_FADE_MS: f32 = 10.0;
 // set up as the new amp, and it fades back in as fast
 const AMP_FADE_MS: f32 = 5.0;
 
+// Crossfade between the cabinet and the amp's own signal when the cabinet is switched
+const CAB_FADE_MS: f32 = 20.0;
+
+// Level of the amp's signal with the cabinet off, in dB: about as loud as with it on
+const CAB_OFF_DB: f32 = -1.4;
+
+// The limits of the settings that are not dials
+const IN_GAIN_DB: [f32; 2] = [-24.0, 24.0];
+const GATE_THRESHOLD_DB: [f32; 2] = [-80.0, -20.0];
+const GATE_RELEASE_MS: [f32; 2] = [20.0, 500.0];
+
 /// What the knobs say, read once per block. The chain smooths the values itself
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AmpSettings {
     pub bypass: bool,
+    /// Gain in dB in front of everything but the gate's detector
+    pub in_gain_db: f32,
+
+    pub gate_on: bool,
+    /// Level in dBFS at the plugin's input that opens the gate
+    pub gate_thresh_db: f32,
+    /// Time the gate takes to close, in milliseconds
+    pub gate_release_ms: f32,
+
+    pub drive_on: bool,
+    /// The drive pedal's dials, 0.0 to 1.0
+    pub drive_gain: f32,
+    pub drive_tone: f32,
+    pub drive_level: f32,
+
     pub amp: Amp,
     /// The amp dials, 0.0 to 1.0
     pub gain: f32,
@@ -37,6 +65,13 @@ pub struct AmpSettings {
     pub treble: f32,
     pub presence: f32,
     pub master: f32,
+
+    /// Off leaves the amp's signal as it is, for a cabinet somewhere else
+    pub cab_on: bool,
+    /// The cabinet's dials, 0.0 to 1.0. Both leave the cabinet as designed at 0.5
+    pub cab_mic: f32,
+    pub cab_res: f32,
+
     /// Linear gain
     pub out_level: f32,
 }
@@ -45,6 +80,14 @@ impl Default for AmpSettings {
     fn default() -> Self {
         Self {
             bypass: false,
+            in_gain_db: 0.0,
+            gate_on: true,
+            gate_thresh_db: -60.0,
+            gate_release_ms: 100.0,
+            drive_on: false,
+            drive_gain: 0.3,
+            drive_tone: 0.5,
+            drive_level: 0.5,
             amp: Amp::Brol,
             gain: 0.5,
             bass: 0.5,
@@ -52,6 +95,9 @@ impl Default for AmpSettings {
             treble: 0.5,
             presence: 0.5,
             master: 0.5,
+            cab_on: true,
+            cab_mic: 0.5,
+            cab_res: 0.5,
             out_level: 1.0,
         }
     }
@@ -60,24 +106,36 @@ impl Default for AmpSettings {
 /// The dial values the chain is at, on their way to the settings
 #[derive(Clone, Copy, PartialEq)]
 struct Dials {
+    in_gain_db: f32,
+    drive_gain: f32,
+    drive_tone: f32,
+    drive_level: f32,
     gain: f32,
     bass: f32,
     mid: f32,
     treble: f32,
     presence: f32,
     master: f32,
+    cab_mic: f32,
+    cab_res: f32,
     out_level: f32,
 }
 
 impl Dials {
     fn from_settings(settings: &AmpSettings) -> Self {
         Self {
+            in_gain_db: settings.in_gain_db.clamp(IN_GAIN_DB[0], IN_GAIN_DB[1]),
+            drive_gain: settings.drive_gain.clamp(0.0, 1.0),
+            drive_tone: settings.drive_tone.clamp(0.0, 1.0),
+            drive_level: settings.drive_level.clamp(0.0, 1.0),
             gain: settings.gain.clamp(0.0, 1.0),
             bass: settings.bass.clamp(0.0, 1.0),
             mid: settings.mid.clamp(0.0, 1.0),
             treble: settings.treble.clamp(0.0, 1.0),
             presence: settings.presence.clamp(0.0, 1.0),
             master: settings.master.clamp(0.0, 1.0),
+            cab_mic: settings.cab_mic.clamp(0.0, 1.0),
+            cab_res: settings.cab_res.clamp(0.0, 1.0),
             out_level: settings.out_level.max(0.0),
         }
     }
@@ -89,12 +147,18 @@ impl Dials {
                 *value = target;
             }
         };
+        step(&mut self.in_gain_db, target.in_gain_db);
+        step(&mut self.drive_gain, target.drive_gain);
+        step(&mut self.drive_tone, target.drive_tone);
+        step(&mut self.drive_level, target.drive_level);
         step(&mut self.gain, target.gain);
         step(&mut self.bass, target.bass);
         step(&mut self.mid, target.mid);
         step(&mut self.treble, target.treble);
         step(&mut self.presence, target.presence);
         step(&mut self.master, target.master);
+        step(&mut self.cab_mic, target.cab_mic);
+        step(&mut self.cab_res, target.cab_res);
         step(&mut self.out_level, target.out_level);
     }
 }
@@ -106,13 +170,20 @@ pub struct AmpChain {
     amp: Amp,
     wanted_amp: Amp,
 
+    in_gain: Ramp,
+    gate: Gate,
     oversampler: Oversampler,
+    drive: Drive,
     preamp: Preamp,
     tone: ToneStack,
     power: PowerAmp,
     cabinet: Cabinet,
     // One impulse response per amp, designed when the sample rate is set
     cab_irs: Vec<Vec<f32>>,
+    cab_voicing: CabVoicing,
+    // Share of the cabinet in what follows it: 1.0 on, 0.0 the amp's own signal
+    cab_mix: Ramp,
+    cab_fade_steps: u32,
     dc: DcBlocker,
     out_level: Ramp,
 
@@ -121,6 +192,8 @@ pub struct AmpChain {
     // The dial positions the tone filters were last designed for
     tone_applied: [f32; 3],
     presence_applied: f32,
+    // Mic and Resonance, likewise
+    cab_applied: [f32; 2],
     // False until the first block after a reset: the dials then start at the settings
     primed: bool,
     // Samples left until the dials are read again. Counted across blocks, so the output
@@ -145,18 +218,25 @@ impl AmpChain {
             sample_rate: 44100.0,
             amp: Amp::Brol,
             wanted_amp: Amp::Brol,
+            in_gain: Ramp::new(1.0),
+            gate: Gate::new(),
             oversampler: Oversampler::new(),
+            drive: Drive::new(),
             preamp: Preamp::new(),
             tone: ToneStack::new(),
             power: PowerAmp::new(),
             cabinet: Cabinet::new(),
             cab_irs: Vec::new(),
+            cab_voicing: CabVoicing::new(),
+            cab_mix: Ramp::new(1.0),
+            cab_fade_steps: 1,
             dc: DcBlocker::new(),
             out_level: Ramp::new(1.0),
             dials: Dials::from_settings(&AmpSettings::default()),
             dial_coeff: 1.0,
             tone_applied: [f32::NAN; 3],
             presence_applied: f32::NAN,
+            cab_applied: [f32::NAN; 2],
             primed: false,
             until_tick: 0,
             wet: 1.0,
@@ -176,6 +256,10 @@ impl AmpChain {
         self.dial_coeff = smoothing_coeff(DIAL_SMOOTH_MS, sample_rate / CHUNK as f32);
         self.wet_step = 1.0 / (BYPASS_FADE_MS * 0.001 * sample_rate);
         self.amp_fade_len = ((AMP_FADE_MS * 0.001 * sample_rate).round() as u32).max(1);
+        self.cab_fade_steps = ((CAB_FADE_MS * 0.001 * sample_rate).round() as u32).max(1);
+
+        self.gate.set_sample_rate(sample_rate);
+        self.drive.configure(sample_rate * FACTOR as f32);
 
         self.cab_irs = Amp::ALL.iter().map(|amp| design_ir(&amp.model().cab, sample_rate)).collect();
         self.cabinet.set_sample_rate(sample_rate);
@@ -220,6 +304,7 @@ impl AmpChain {
         self.power.configure(&model.power, oversampled_rate);
         self.tone_applied = [f32::NAN; 3];
         self.presence_applied = f32::NAN;
+        self.cab_applied = [f32::NAN; 2];
     }
 
     pub fn reset(&mut self) {
@@ -229,16 +314,19 @@ impl AmpChain {
     }
 
     fn reset_stages(&mut self) {
+        self.gate.reset();
         self.reset_amp_stages();
         self.cabinet.reset();
+        self.cab_voicing.reset();
         self.dc.reset();
         self.amp_fade = self.amp_fade_len;
         self.cabinet_busy = 0;
     }
 
-    /// Everything in front of the cabinet
+    /// Everything between the gate and the cabinet
     fn reset_amp_stages(&mut self) {
         self.oversampler.reset();
+        self.drive.reset();
         self.preamp.reset();
         self.tone.reset();
         self.power.reset();
@@ -289,19 +377,50 @@ impl AmpChain {
             self.dials.approach(&target, self.dial_coeff);
         }
 
+        self.in_gain.set_target(db_to_gain(self.dials.in_gain_db), CHUNK as u32);
         self.out_level.set_target(self.dials.out_level, CHUNK as u32);
+
+        // The switches and the gate's settings are read here as well, not once per block,
+        // so that they too take effect on the same sample whatever the block size
+        self.gate.set(
+            settings.gate_on,
+            settings.gate_thresh_db.clamp(GATE_THRESHOLD_DB[0], GATE_THRESHOLD_DB[1]),
+            settings.gate_release_ms.clamp(GATE_RELEASE_MS[0], GATE_RELEASE_MS[1]),
+        );
+        self.drive.set_on(settings.drive_on);
+        self.drive.set(
+            self.dials.drive_gain,
+            self.dials.drive_tone,
+            self.dials.drive_level,
+            OVERSAMPLED_CHUNK as u32,
+        );
+        let cab_target = if settings.cab_on { 1.0 } else { 0.0 };
+        if cab_target != self.cab_mix.target() {
+            self.cab_mix.set_target(cab_target, self.cab_fade_steps);
+        }
+
         if jump {
+            self.in_gain.snap();
             self.out_level.snap();
+            self.gate.snap();
+            self.drive.snap();
+            self.cab_mix.snap();
         }
         self.apply_dials(jump);
         self.primed = true;
     }
 
-    /// Passes the amp's own dials on to its stages, as the amp they are set up as reads them
+    /// Passes the amp's own dials on to its stages and its cabinet, as the amp they are set
+    /// up as reads them
     fn apply_dials(&mut self, snap: bool) {
         let model = self.amp.model();
         self.preamp.set_gain(model, self.dials.gain, OVERSAMPLED_CHUNK as u32);
-        self.power.set_master(&model.power, self.dials.master, OVERSAMPLED_CHUNK as u32);
+        self.power.set_master(
+            &model.power,
+            self.dials.master,
+            curve(&model.makeup_db, self.dials.gain),
+            OVERSAMPLED_CHUNK as u32,
+        );
         if snap {
             self.preamp.snap();
             self.power.snap();
@@ -316,6 +435,11 @@ impl AmpChain {
         if self.dials.presence != self.presence_applied {
             self.power.set_presence(&model.power, self.dials.presence, oversampled_rate);
             self.presence_applied = self.dials.presence;
+        }
+        let cab = [self.dials.cab_mic, self.dials.cab_res];
+        if cab != self.cab_applied {
+            self.cab_voicing.set(&model.cab, cab[0], cab[1], self.sample_rate);
+            self.cab_applied = cab;
         }
     }
 
@@ -337,6 +461,27 @@ impl AmpChain {
         }
     }
 
+    /// The cabinet with its dials, or the amp's own signal, or on the way between the two.
+    /// The cabinet always runs, so it has its history when it is switched back on
+    fn process_cabinet(&mut self, block: &mut [f32]) {
+        let all_cabinet = self.cab_mix.value() == 1.0 && self.cab_mix.target() == 1.0;
+        let mut direct = [0.0f32; CHUNK];
+        if !all_cabinet {
+            direct[..block.len()].copy_from_slice(block);
+        }
+
+        self.cabinet.process(block);
+        self.cab_voicing.process(block);
+
+        if !all_cabinet {
+            let direct_gain = db_to_gain(CAB_OFF_DB);
+            for (sample, &direct) in block.iter_mut().zip(&direct) {
+                let direct = direct * direct_gain;
+                *sample = direct + self.cab_mix.next() * (*sample - direct);
+            }
+        }
+    }
+
     /// At most `CHUNK` samples
     fn process_chunk(&mut self, wet_target: f32, left: &mut [f32], mut right: Option<&mut [f32]>) {
         let bypassed = |chain: &Self| chain.wet == 0.0 && wet_target == 0.0;
@@ -355,16 +500,24 @@ impl AmpChain {
             None => signal[..len].copy_from_slice(left),
         }
 
+        // The gate listens to the input as it arrives and acts on it after the input gain
+        let heard = signal;
+        for sample in &mut signal[..len] {
+            *sample *= self.in_gain.next();
+        }
+        self.gate.process(&heard[..len], &mut signal[..len]);
+
         let mut oversampled = [0.0f32; OVERSAMPLED_CHUNK];
         let high = &mut oversampled[..len * FACTOR];
         self.oversampler.upsample(&signal[..len], high);
+        self.drive.process(high);
         self.preamp.process(high);
         self.tone.process(high);
         self.power.process(high);
         self.oversampler.downsample(high, &mut signal[..len]);
 
         self.fade_amp(&mut signal[..len]);
-        self.cabinet.process(&mut signal[..len]);
+        self.process_cabinet(&mut signal[..len]);
 
         for index in 0..len {
             let output = output_clip(self.dc.process(signal[index]) * self.out_level.next());
@@ -396,8 +549,9 @@ impl AmpChain {
 mod tests {
     use super::*;
     use crate::cab::ir_magnitude;
+    use crate::drive::tests::new_drive;
     use crate::dsp::shaper::{asym_clip, AsymClipper};
-    use crate::dsp::db_to_gain;
+    use crate::gate::tests::{decaying_note, gain_trace, hiss, transitions as gate_changes};
     use crate::test_util::*;
     use std::time::Instant;
 
@@ -408,7 +562,7 @@ mod tests {
     // aliases at the usual sample rates
     const ALIAS_TONES_HZ: [f32; 2] = [1245.0, 4186.0];
     // Per amp, at each of the tones
-    const ALIAS_LIMITS_DB: [[f64; 2]; 3] = [[-90.0, -78.0], [-90.0, -78.0], [-70.0, -70.0]];
+    const ALIAS_LIMITS_DB: [[f64; 2]; 3] = [[-90.0, -78.0], [-90.0, -78.0], [-84.0, -84.0]];
 
     fn new_chain(sample_rate: f32) -> AmpChain {
         let mut chain = AmpChain::new();
@@ -433,7 +587,6 @@ mod tests {
 
     fn with_all_dials(amp: Amp, value: f32, out_level: f32) -> AmpSettings {
         AmpSettings {
-            bypass: false,
             amp,
             gain: value,
             bass: value,
@@ -442,6 +595,7 @@ mod tests {
             presence: value,
             master: value,
             out_level,
+            ..AmpSettings::default()
         }
     }
 
@@ -471,11 +625,86 @@ mod tests {
         output.iter().position(|s| s.abs() >= 0.5 * top).unwrap()
     }
 
+    /// The same for any settings, also with the gate on: a quiet tone opens the gate, and
+    /// the impulse comes while it is still held open. What the impulse adds to the output
+    /// is the output with it minus the output without
+    fn latency_samples_with(settings: &AmpSettings, sample_rate: f32) -> usize {
+        let lead = (0.05 * sample_rate) as usize;
+        let at = lead + (0.025 * sample_rate) as usize;
+        let mut quiet = sine(220.0, 0.05, sample_rate, lead);
+        quiet.resize(at + 2048, 0.0);
+        let mut struck = quiet.clone();
+        struck[at] += 0.05;
+        let (quiet, struck) = (run(settings, &quiet, sample_rate), run(settings, &struck, sample_rate));
+        let added: Vec<f32> = struck[at..].iter().zip(&quiet[at..]).map(|(a, b)| a - b).collect();
+        let top = peak(&added);
+        added.iter().position(|s| s.abs() >= 0.5 * top).unwrap()
+    }
+
+    /// Every pedal on and every new dial off its centre
+    fn everything_on(amp: Amp, gain: f32) -> AmpSettings {
+        AmpSettings {
+            gate_on: true,
+            drive_on: true,
+            cab_mic: 0.7,
+            cab_res: 0.7,
+            ..with_amp(amp, gain)
+        }
+    }
+
+    fn with_drive(amp: Amp, gain: f32, drive: f32, tone: f32, level: f32) -> AmpSettings {
+        AmpSettings {
+            drive_on: true,
+            drive_gain: drive,
+            drive_tone: tone,
+            drive_level: level,
+            ..with_amp(amp, gain)
+        }
+    }
+
     /// Energy of a clipped sine that is not at its harmonics, relative to the total, in dB
     fn aliasing_db(amp: Amp, gain: f32, freq_hz: f32) -> f64 {
+        aliasing_db_with(&with_amp(amp, gain), freq_hz)
+    }
+
+    fn aliasing_db_with(settings: &AmpSettings, freq_hz: f32) -> f64 {
         let input = sine(freq_hz, 0.178, SAMPLE_RATE, 36_000);
-        let output = run(&with_amp(amp, gain), &input, SAMPLE_RATE);
+        let output = run(settings, &input, SAMPLE_RATE);
         fit_partials(&output[12_000..], SAMPLE_RATE, &harmonics_of(freq_hz, SAMPLE_RATE)).1
+    }
+
+    /// The amp and its cabinet put together from their parts, with nothing else around
+    /// them: what the chain was before it had pedals
+    fn amp_alone(settings: &AmpSettings, input: &[f32], sample_rate: f32) -> Vec<f32> {
+        let model = settings.amp.model();
+        let oversampled_rate = sample_rate * FACTOR as f32;
+        let mut oversampler = Oversampler::new();
+        let mut preamp = Preamp::new();
+        preamp.configure(model, oversampled_rate);
+        preamp.reset();
+        preamp.set_gain(model, settings.gain, 0);
+        let mut tone = ToneStack::new();
+        tone.set(&ToneCurve::new(&model.tone, settings.bass, settings.mid, settings.treble, oversampled_rate));
+        let mut power = PowerAmp::new();
+        power.configure(&model.power, oversampled_rate);
+        power.reset();
+        power.set_master(&model.power, settings.master, curve(&model.makeup_db, settings.gain), 0);
+        power.set_presence(&model.power, settings.presence, oversampled_rate);
+        let mut cabinet = Cabinet::new();
+        cabinet.set_sample_rate(sample_rate);
+        cabinet.set_ir(&design_ir(&model.cab, sample_rate));
+        let mut dc = DcBlocker::new();
+        dc.set_sample_rate(sample_rate);
+
+        let mut high = vec![0.0; input.len() * FACTOR];
+        oversampler.upsample(input, &mut high);
+        preamp.process(&mut high);
+        tone.process(&mut high);
+        power.process(&mut high);
+        let mut output = vec![0.0; input.len()];
+        oversampler.downsample(&high, &mut output);
+        cabinet.process(&mut output);
+        output.iter().map(|&sample| output_clip(dc.process(sample) * settings.out_level)).collect()
     }
 
     #[test]
@@ -511,6 +740,27 @@ mod tests {
                 }
                 let loud = run(&with_all_dials(amp, 1.0, 2.0), &input, sample_rate);
                 assert!(rms(&loud) > 0.05, "{:?} gives no output at {} Hz", amp, sample_rate);
+
+                // And with every pedal on and every dial at either end
+                for (value, cab_on) in [(0.0, true), (1.0, true), (1.0, false), (0.0, false)] {
+                    let settings = AmpSettings {
+                        in_gain_db: -24.0 + 48.0 * value,
+                        gate_on: true,
+                        gate_thresh_db: -80.0 + 60.0 * (1.0 - value),
+                        gate_release_ms: 20.0 + 480.0 * value,
+                        drive_on: true,
+                        drive_gain: value,
+                        drive_tone: value,
+                        drive_level: value,
+                        cab_on,
+                        cab_mic: value,
+                        cab_res: value,
+                        ..with_all_dials(amp, value, 2.0)
+                    };
+                    let output = run(&settings, &input, sample_rate);
+                    assert!(output.iter().all(|s| s.is_finite()), "{:?} not finite at {} Hz", amp, sample_rate);
+                    assert!(peak(&output) <= 1.0, "{:?} peak {} at {} Hz", amp, peak(&output), sample_rate);
+                }
             }
         }
     }
@@ -519,13 +769,24 @@ mod tests {
     fn test_output_does_not_depend_on_block_size() {
         let input = power_chords(SAMPLE_RATE, 0.2);
         for amp in Amp::ALL {
-            let settings = with_amp(amp, 0.7);
-            let reference = run_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, input.len());
+            let pedals = AmpSettings {
+                in_gain_db: 3.0,
+                gate_thresh_db: -30.0,
+                gate_release_ms: 20.0,
+                ..everything_on(amp, 0.7)
+            };
+            let no_cabinet = AmpSettings {
+                cab_on: false,
+                ..pedals
+            };
+            for settings in [with_amp(amp, 0.7), pedals, no_cabinet] {
+                let reference = run_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, input.len());
 
-            for block in [1, 7, 32, 64, 1000] {
-                let output = run_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, block);
-                let difference = reference.iter().zip(&output).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
-                assert!(difference < 1e-5, "{:?} in blocks of {}: off by {}", amp, block, difference);
+                for block in [1, 7, 32, 64, 1000] {
+                    let output = run_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, block);
+                    let difference = reference.iter().zip(&output).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+                    assert!(difference < 1e-5, "{:?} in blocks of {}: off by {}", amp, block, difference);
+                }
             }
         }
     }
@@ -642,6 +903,11 @@ mod tests {
             - band_level_db(signal, SAMPLE_RATE, Some(TIGHT_EDGES_HZ[1]), Some(TIGHT_EDGES_HZ[2]))
     }
 
+    /// Level of a note's fundamental against the whole signal, in dB
+    fn fundamental_db(signal: &[f32], freq_hz: f32) -> f32 {
+        to_db(level_at(signal, SAMPLE_RATE, freq_hz) / std::f32::consts::SQRT_2 / rms(signal))
+    }
+
     #[test]
     fn test_torden_keeps_palm_mutes_tight() {
         let input = palm_mutes(SAMPLE_RATE, 2.4);
@@ -693,11 +959,21 @@ mod tests {
     }
 
     #[test]
-    fn test_latency_is_under_a_millisecond() {
+    fn test_latency_is_under_half_a_millisecond() {
         for amp in Amp::ALL {
             for sample_rate in [44100.0, 48000.0, 96000.0] {
                 let latency_ms = latency_samples(amp, sample_rate) as f32 / sample_rate * 1000.0;
-                assert!(latency_ms < 1.0, "{:?} at {} Hz: {:.2} ms", amp, sample_rate, latency_ms);
+                assert!(latency_ms < 0.5, "{:?} at {} Hz: {:.2} ms", amp, sample_rate, latency_ms);
+
+                // The pedals add next to nothing, the gate nothing at all
+                for tone in [0.0, 0.5, 1.0] {
+                    let settings = AmpSettings {
+                        drive_tone: tone,
+                        ..everything_on(amp, 0.0)
+                    };
+                    let with_pedals = latency_samples_with(&settings, sample_rate) as f32 / sample_rate * 1000.0;
+                    assert!(with_pedals < 0.5, "{:?} at {} Hz with pedals: {:.2} ms", amp, sample_rate, with_pedals);
+                }
             }
         }
     }
@@ -767,6 +1043,11 @@ mod tests {
             AmpSettings { master: 1.0, ..low },
             AmpSettings { out_level: 1.0, ..low },
             with_all_dials(Amp::Brol, 1.0, 1.0),
+            AmpSettings { in_gain_db: 12.0, ..low },
+            AmpSettings { cab_mic: 1.0, ..low },
+            AmpSettings { cab_mic: 0.0, ..low },
+            AmpSettings { cab_res: 1.0, ..low },
+            AmpSettings { cab_res: 0.0, ..low },
         ];
 
         for high in jumps {
@@ -870,6 +1151,26 @@ mod tests {
     }
 
     #[test]
+    fn test_switching_amps_with_the_pedals_on_does_not_click() {
+        // The drive keeps running through the switch, and the cabinet's dials move to the
+        // new cabinet's frequencies while the old one still rings. The chords go on long
+        // enough for the new amp to be heard on pick attacks of its own after the switch
+        let at = 300 * BLOCK;
+        for input in [sine(220.0, 0.178, SAMPLE_RATE, 48_000), power_chords(SAMPLE_RATE, 2.0)] {
+            for (from, to) in transitions() {
+                let pedals = |amp: Amp| AmpSettings {
+                    cab_mic: 1.0,
+                    cab_res: 1.0,
+                    ..everything_on(amp, 0.5)
+                };
+                let output = run_change(&pedals(from), &pedals(to), &input, at);
+                let ratio = step_ratio(&output, at);
+                assert!(ratio < 1.2, "{:?} to {:?}: step {} times its own", from, to, ratio);
+            }
+        }
+    }
+
+    #[test]
     fn test_switching_ends_up_as_the_amp_itself() {
         let input = power_chords(SAMPLE_RATE, 2.0);
         let at = 300 * BLOCK;
@@ -962,6 +1263,458 @@ mod tests {
         }
     }
 
+    /// Plays `input` with one settings up to sample `at` and with another from there
+    fn run_change(before: &AmpSettings, after: &AmpSettings, input: &[f32], at: usize) -> Vec<f32> {
+        let mut chain = new_chain(SAMPLE_RATE);
+        let mut output = input.to_vec();
+        let (first, second) = output.split_at_mut(at);
+        for block in first.chunks_mut(BLOCK) {
+            chain.process(before, block, None);
+        }
+        for block in second.chunks_mut(BLOCK) {
+            chain.process(after, block, None);
+        }
+        output
+    }
+
+    /// The largest step around a change of settings against the largest the sound makes by
+    /// itself before the change and once it has settled
+    fn step_ratio(output: &[f32], at: usize) -> f32 {
+        let settle = 9600;
+        let own_step = largest_step(&output[4800..at]).max(largest_step(&output[at + settle..]));
+        largest_step(&output[at - 1..at + settle]) / own_step
+    }
+
+    #[test]
+    fn test_pedals_off_and_dials_centred_is_the_amp_alone() {
+        let input = power_chords(SAMPLE_RATE, 0.5);
+        for amp in Amp::ALL {
+            for gain in [0.0, 0.7] {
+                // Bit for bit: no pedal leaves a trace, wherever its dials are
+                let settings = AmpSettings {
+                    gate_on: false,
+                    gate_thresh_db: -20.0,
+                    drive_on: false,
+                    drive_gain: 1.0,
+                    drive_tone: 0.0,
+                    drive_level: 1.0,
+                    ..with_amp(amp, gain)
+                };
+                let reference = amp_alone(&settings, &input, SAMPLE_RATE);
+                assert_eq!(run(&settings, &input, SAMPLE_RATE), reference, "{:?} at gain {}", amp, gain * 10.0);
+
+                // The gate, open, changes nothing but the half millisecond in which it opens
+                let gated = run(&with_amp(amp, gain), &input, SAMPLE_RATE);
+                let difference =
+                    gated[12_000..].iter().zip(&reference[12_000..]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+                assert!(difference < 1e-5, "{:?} at gain {}: off by {} with the gate on", amp, gain * 10.0, difference);
+            }
+        }
+    }
+
+    #[test]
+    fn test_pedals_switched_off_again_leave_the_amp_alone() {
+        // Once the fades are over and what the amp remembers of the pedals has died away
+        let input = power_chords(SAMPLE_RATE, 3.0);
+        let at = 300 * BLOCK;
+        for amp in Amp::ALL {
+            let plain = AmpSettings {
+                gate_on: false,
+                ..with_amp(amp, 0.5)
+            };
+            let pedals = AmpSettings {
+                in_gain_db: 6.0,
+                cab_on: false,
+                ..everything_on(amp, 0.5)
+            };
+            let output = run_change(&pedals, &plain, &input, at);
+            let reference = run(&plain, &input, SAMPLE_RATE);
+            let settled = input.len() - 24_000;
+            let difference =
+                output[settled..].iter().zip(&reference[settled..]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+            assert!(difference < 0.01 * rms(&reference[settled..]), "{:?}: off by {}", amp, difference);
+        }
+    }
+
+    #[test]
+    fn test_input_gain_scales_the_input() {
+        // Quiet and with little gain, so the amp is close to linear
+        let input = sine(440.0, 0.002, SAMPLE_RATE, 19_200);
+        let level = |in_gain_db: f32| {
+            let settings = AmpSettings {
+                in_gain_db,
+                gate_on: false,
+                ..with_amp(Amp::Klar, 0.2)
+            };
+            to_db(rms(&run(&settings, &input, SAMPLE_RATE)[9600..]))
+        };
+        let unity = level(0.0);
+        for in_gain_db in [-24.0, -6.0, 12.0, 24.0] {
+            let change = level(in_gain_db) - unity;
+            assert!((change - in_gain_db).abs() < 0.5, "{} dB at the input gives {:.2} dB", in_gain_db, change);
+        }
+    }
+
+    #[test]
+    fn test_gate_opens_on_a_note_and_closes_after_it() {
+        let mut input = hiss(-75.0, 96_000);
+        for (sample, note) in input[24_000..48_000].iter_mut().zip(sine(110.0, 0.2, SAMPLE_RATE, 24_000)) {
+            *sample += note;
+        }
+        for amp in Amp::ALL {
+            let gated = run(&with_amp(amp, 1.0), &input, SAMPLE_RATE);
+            let open = run(
+                &AmpSettings {
+                    gate_on: false,
+                    ..with_amp(amp, 1.0)
+                },
+                &input,
+                SAMPLE_RATE,
+            );
+            // Silent before the note, the note as without the gate, silent again after
+            assert!(peak(&gated[..24_000]) < 1e-9, "{:?} before the note: {}", amp, peak(&gated[..24_000]));
+            assert!(peak(&open[12_000..24_000]) > 1e-4, "{:?} has no hiss to gate", amp);
+            let playing = 28_800..48_000;
+            let difference = gated[playing.clone()]
+                .iter()
+                .zip(&open[playing.clone()])
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f32::max);
+            assert!(difference < 0.02 * rms(&open[playing]), "{:?}: the note differs by {}", amp, difference);
+            assert!(peak(&gated[60_000..]) < 1e-6, "{:?} after the note: {}", amp, peak(&gated[60_000..]));
+        }
+    }
+
+    #[test]
+    fn test_gate_threshold_is_the_level_at_the_plugin_input() {
+        // The input gain may not open the gate: 24 dB more of a hiss under the threshold
+        let input = hiss(-75.0, 24_000);
+        let settings = AmpSettings {
+            in_gain_db: 24.0,
+            ..with_amp(Amp::Torden, 1.0)
+        };
+        let output = run(&settings, &input, SAMPLE_RATE);
+        assert!(peak(&output) < 1e-9, "Peak: {}", peak(&output));
+
+        // And a note over the threshold opens it however far the input gain is turned down
+        let note = sine(220.0, 0.1, SAMPLE_RATE, 24_000);
+        let settings = AmpSettings {
+            in_gain_db: -24.0,
+            ..with_amp(Amp::Torden, 1.0)
+        };
+        assert!(rms(&run(&settings, &note, SAMPLE_RATE)) > 0.01);
+    }
+
+    #[test]
+    fn test_gate_does_not_chatter_or_click_on_a_decaying_note() {
+        let note = decaying_note(SAMPLE_RATE, 6.0);
+        for (amp, gain) in [(Amp::Klar, 0.5), (Amp::Torden, 1.0)] {
+            for release_ms in [20.0, 100.0] {
+                let settings = AmpSettings {
+                    gate_thresh_db: -40.0,
+                    gate_release_ms: release_ms,
+                    ..with_amp(amp, gain)
+                };
+                let output = run(&settings, &note, SAMPLE_RATE);
+                // Heard from the start, quiet once, and quiet from there on
+                let heard: Vec<bool> = output.chunks(480).map(|piece| peak(piece) > 1e-6).collect();
+                let changes = heard.windows(2).filter(|pair| pair[0] != pair[1]).count();
+                assert!(heard[0] && !heard[heard.len() - 1], "{:?} at {} ms release", amp, release_ms);
+                assert_eq!(changes, 1, "{:?} at {} ms release", amp, release_ms);
+                // And closing makes no step larger than the note makes while it rings
+                let last = output.iter().rposition(|s| s.abs() > 1e-6).unwrap();
+                let own_step = largest_step(&output[4800..48_000]);
+                let closing = largest_step(&output[last - 24_000..]);
+                assert!(closing <= own_step, "{:?}: step of {} while closing, {} while ringing", amp, closing, own_step);
+            }
+        }
+    }
+
+    #[test]
+    fn test_gate_switches_without_a_click() {
+        // A tone under the threshold: the gate is all that decides whether it is heard
+        let input = sine(220.0, 0.005, SAMPLE_RATE, 48_000);
+        let closed = AmpSettings {
+            gate_thresh_db: -30.0,
+            ..with_amp(Amp::Brol, 0.5)
+        };
+        let off = AmpSettings {
+            gate_on: false,
+            ..closed
+        };
+        let at = 300 * BLOCK;
+        let opened = run_change(&closed, &off, &input, at);
+        assert!(peak(&opened[..at]) < 1e-9);
+        let own_step = largest_step(&opened[at + 9600..]);
+        assert!(largest_step(&opened[at - 1..]) < own_step * 1.2);
+
+        let shut = run_change(&off, &closed, &input, at);
+        let own_step = largest_step(&shut[4800..at]);
+        assert!(largest_step(&shut[at - 1..]) < own_step * 1.2);
+        assert!(peak(&shut[at + 24_000..]) < 1e-9);
+    }
+
+    #[test]
+    fn test_drive_adds_distortion_and_cuts_lows() {
+        let tone = sine(220.0, 0.178, SAMPLE_RATE, 19_200);
+        let distortion = |settings: &AmpSettings| thd_db(&run(settings, &tone, SAMPLE_RATE)[9600..], SAMPLE_RATE, 220.0);
+        let clean = distortion(&with_amp(Amp::Klar, 0.3));
+        let low = distortion(&with_drive(Amp::Klar, 0.3, 0.0, 0.5, 0.5));
+        let centre = distortion(&with_drive(Amp::Klar, 0.3, 0.5, 0.5, 0.5));
+        let full = distortion(&with_drive(Amp::Klar, 0.3, 1.0, 0.5, 0.5));
+        assert!(clean < -40.0 && low < -20.0, "Klar alone {:.1} dB, Drive 0 {:.1} dB", clean, low);
+        assert!(centre > clean + 15.0 && centre > low + 4.0, "Drive 5: {:.1} dB", centre);
+        assert!(full > centre, "Drive 10 at {:.1} dB, Drive 5 at {:.1} dB", full, centre);
+
+        // Less low end against the mids, on a clean amp and on a high gain one
+        let mutes = palm_mutes(SAMPLE_RATE, 2.4);
+        for (amp, gain) in [(Amp::Klar, 0.3), (Amp::Torden, 0.5)] {
+            let plain = lows_against_mids_db(&run(&with_amp(amp, gain), &mutes, SAMPLE_RATE));
+            let driven = lows_against_mids_db(&run(&with_drive(amp, gain, 0.2, 0.5, 0.8), &mutes, SAMPLE_RATE));
+            assert!(driven < plain - 2.0, "{:?}: lows at {:.1} dB without, {:.1} dB with the drive", amp, plain, driven);
+        }
+    }
+
+    #[test]
+    fn test_drive_tightens_torden_beyond_brol() {
+        let mutes = palm_mutes(SAMPLE_RATE, 2.4);
+        for gain in [0.5, 1.0] {
+            let brol = lows_against_mids_db(&run(&with_amp(Amp::Brol, gain), &mutes, SAMPLE_RATE));
+            let torden =
+                lows_against_mids_db(&run(&with_drive(Amp::Torden, gain, 0.2, 0.5, 0.8), &mutes, SAMPLE_RATE));
+            assert!(torden < brol - 5.0, "Gain {}: Torden with drive {:.1} dB, Brøl {:.1} dB", gain * 10.0, torden, brol);
+        }
+
+        // A single low E still has its fundamental: the drive takes little of what the amp leaves
+        let note = pluck(82.41, Pluck::OPEN, 3, SAMPLE_RATE, 48_000);
+        let fundamental = |settings: &AmpSettings| fundamental_db(&run(settings, &note, SAMPLE_RATE)[4800..28_800], 82.41);
+        let (plain, driven) = (
+            fundamental(&with_amp(Amp::Torden, 0.5)),
+            fundamental(&with_drive(Amp::Torden, 0.5, 0.2, 0.5, 0.8)),
+        );
+        assert!(
+            driven > plain - 6.0 && driven > -40.0,
+            "Fundamental at {:.1} dB, {:.1} dB without the drive",
+            driven,
+            plain
+        );
+    }
+
+    #[test]
+    fn test_drive_tone_and_level_move_the_right_way() {
+        let chords = power_chords(SAMPLE_RATE, 1.0);
+        let top = |tone: f32| {
+            let output = run(&with_drive(Amp::Klar, 0.3, 0.5, tone, 0.5), &chords, SAMPLE_RATE);
+            band_level_db(&output, SAMPLE_RATE, Some(3000.0), None)
+        };
+        let (dark, centre, bright) = (top(0.0), top(0.5), top(1.0));
+        assert!(centre > dark + 1.5 && bright > centre + 1.5, "Above 3 kHz: {:.1}, {:.1}, {:.1} dB", dark, centre, bright);
+
+        // Klar turned down so far that it follows its input
+        let quiet: Vec<f32> = chords.iter().map(|s| s * 0.05).collect();
+        let level = |settings: &AmpSettings| to_db(rms(&run(settings, &quiet, SAMPLE_RATE)));
+        let pedal = |level_dial: f32| AmpSettings {
+            gate_on: false,
+            master: 0.2,
+            ..with_drive(Amp::Klar, 0.2, 0.0, 0.5, level_dial)
+        };
+        let (low, centre, high) = (level(&pedal(0.0)), level(&pedal(0.5)), level(&pedal(1.0)));
+        assert!(
+            (centre - low - 20.0).abs() < 1.5 && (high - centre - 20.0).abs() < 1.5,
+            "Level 0, 5 and 10: {:.1}, {:.1}, {:.1} dB",
+            low,
+            centre,
+            high
+        );
+    }
+
+    #[test]
+    fn test_drive_switches_without_a_click() {
+        let at = 300 * BLOCK;
+        for input in [sine(220.0, 0.178, SAMPLE_RATE, 48_000), power_chords(SAMPLE_RATE, 1.0)] {
+            for (amp, gain) in [(Amp::Klar, 0.5), (Amp::Torden, 0.7)] {
+                for (drive, level) in [(0.3, 0.5), (1.0, 0.8)] {
+                    let on = with_drive(amp, gain, drive, 0.5, level);
+                    let off = AmpSettings { drive_on: false, ..on };
+                    for (before, after) in [(&off, &on), (&on, &off)] {
+                        let ratio = step_ratio(&run_change(before, after, &input, at), at);
+                        assert!(ratio < 1.2, "{:?}, drive on {}: step {} times its own", amp, after.drive_on, ratio);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_drive_dial_jumps_do_not_click() {
+        let input = sine(220.0, 0.178, SAMPLE_RATE, 24_000);
+        let low = with_drive(Amp::Klar, 0.3, 0.2, 0.2, 0.3);
+        let jumps = [
+            AmpSettings { drive_gain: 1.0, ..low },
+            AmpSettings { drive_tone: 1.0, ..low },
+            AmpSettings { drive_level: 0.8, ..low },
+        ];
+        for high in jumps {
+            let output = run_change(&low, &high, &input, 150 * BLOCK);
+            let ratio = step_ratio(&output[..], 150 * BLOCK);
+            assert!(ratio < 1.3, "Step {} times its own for {:?}", ratio, high);
+        }
+    }
+
+    #[test]
+    fn test_cabinet_switches_without_a_click_and_keeps_its_level() {
+        let at = 300 * BLOCK;
+        for input in [sine(220.0, 0.178, SAMPLE_RATE, 48_000), power_chords(SAMPLE_RATE, 1.0)] {
+            for amp in Amp::ALL {
+                let on = with_amp(amp, 0.5);
+                let off = AmpSettings { cab_on: false, ..on };
+                for (before, after) in [(&off, &on), (&on, &off)] {
+                    let output = run_change(before, after, &input, at);
+                    let ratio = step_ratio(&output, at);
+                    assert!(ratio < 1.3, "{:?}, cabinet on {}: step {} times its own", amp, after.cab_on, ratio);
+                    // Ends up as if it had been that way all along: the cabinet kept its history
+                    let reference = run(after, &input, SAMPLE_RATE);
+                    let settled = at + 4800;
+                    let difference = output[settled..]
+                        .iter()
+                        .zip(&reference[settled..])
+                        .map(|(a, b)| (a - b).abs())
+                        .fold(0.0, f32::max);
+                    assert!(difference < 1e-4, "{:?}, cabinet on {}: off by {}", amp, after.cab_on, difference);
+                }
+            }
+        }
+
+        // Without the cabinet the top is open, and it is about as loud
+        let chords = power_chords(SAMPLE_RATE, 2.0);
+        for amp in Amp::ALL {
+            let with = run(&with_amp(amp, 0.5), &chords, SAMPLE_RATE);
+            let without = run(
+                &AmpSettings {
+                    cab_on: false,
+                    ..with_amp(amp, 0.5)
+                },
+                &chords,
+                SAMPLE_RATE,
+            );
+            let fizz = |output: &[f32]| band_level_db(output, SAMPLE_RATE, Some(8000.0), None);
+            if amp != Amp::Klar {
+                let (with, without) = (fizz(&with), fizz(&without));
+                assert!(without > with + 6.0, "{:?}: {:.1} dB and {:.1} dB above 8 kHz", amp, with, without);
+            }
+            let difference = to_db(rms(&without) / rms(&with));
+            assert!(difference.abs() < 3.0, "{:?}: {:.1} dB louder without the cabinet", amp, difference);
+        }
+    }
+
+    #[test]
+    fn test_cabinet_dials_move_their_bands() {
+        // Quiet and with little gain, so the amp is close to linear
+        let level = |settings: &AmpSettings, freq_hz: f32| {
+            let input = sine(freq_hz, 0.01, SAMPLE_RATE, 9600);
+            to_db(rms(&run(settings, &input, SAMPLE_RATE)[4800..]))
+        };
+        for amp in Amp::ALL {
+            let base = AmpSettings {
+                gate_on: false,
+                ..with_amp(amp, 0.2)
+            };
+            let resonance_hz = amp.model().cab.resonance_hz;
+            // What the dial does at a frequency, at its dark and at its bright end
+            let mic = |freq_hz: f32| {
+                [0.0, 1.0].map(|value| level(&AmpSettings { cab_mic: value, ..base }, freq_hz) - level(&base, freq_hz))
+            };
+            let res = |freq_hz: f32| {
+                [0.0, 1.0].map(|value| level(&AmpSettings { cab_res: value, ..base }, freq_hz) - level(&base, freq_hz))
+            };
+
+            let top = mic(4000.0);
+            assert!(top[0] < -3.0 && top[1] > 3.0, "{:?} mic at 4 kHz: {:.1}, {:.1} dB", amp, top[0], top[1]);
+            let lows = mic(150.0);
+            assert!(lows[0] > 0.3 && lows[1] < -0.3, "{:?} mic at 150 Hz: {:.1}, {:.1} dB", amp, lows[0], lows[1]);
+            let mids = mic(800.0);
+            assert!(mids[0].abs() < 1.5 && mids[1].abs() < 1.5);
+
+            let thump = res(resonance_hz);
+            assert!(thump[0] < -4.5 && thump[1] > 4.5, "{:?} resonance: {:.1}, {:.1} dB", amp, thump[0], thump[1]);
+            let mids = res(1000.0);
+            assert!(mids[0].abs() < 0.5 && mids[1].abs() < 0.5);
+        }
+    }
+
+    #[test]
+    fn test_cabinet_dials_stay_about_as_loud() {
+        let chords = power_chords(SAMPLE_RATE, 2.0);
+        for amp in Amp::ALL {
+            let level = |settings: &AmpSettings| to_db(rms(&run(settings, &chords, SAMPLE_RATE)));
+            let base = with_amp(amp, 0.5);
+            for mic in [0.0, 1.0] {
+                let change = level(&AmpSettings { cab_mic: mic, ..base }) - level(&base);
+                assert!(change.abs() < 1.5, "{:?} with Mic at {}: {:.1} dB", amp, mic * 10.0, change);
+            }
+            for res in [0.0, 1.0] {
+                let change = level(&AmpSettings { cab_res: res, ..base }) - level(&base);
+                assert!(change.abs() < 2.5, "{:?} with Resonance at {}: {:.1} dB", amp, res * 10.0, change);
+            }
+        }
+    }
+
+    #[test]
+    fn test_aliasing_stays_low_with_the_drive_in_front_of_torden() {
+        let settings = with_drive(Amp::Torden, 1.0, 0.3, 0.5, 0.8);
+        for freq_hz in ALIAS_TONES_HZ {
+            let aliasing = aliasing_db_with(&settings, freq_hz);
+            assert!(aliasing < -74.0, "{:.1} dB at {} Hz", aliasing, freq_hz);
+        }
+    }
+
+    #[test]
+    fn test_pedals_do_not_allocate() {
+        let layout = |chain: &AmpChain| {
+            let irs: Vec<(usize, usize)> = chain.cab_irs.iter().map(|ir| (ir.as_ptr() as usize, ir.capacity())).collect();
+            (chain.cab_irs.as_ptr() as usize, chain.cab_irs.capacity(), irs, chain.cabinet.buffers())
+        };
+        // The pedals own no buffers at all: a chain is as large as its fields, and the only
+        // memory it points to is the cabinet's
+        for sample_rate in [44100.0, 192000.0] {
+            let mut chain = new_chain(sample_rate);
+            let before = layout(&chain);
+            let mut block = sine(220.0, 0.2, sample_rate, 96_000);
+            for (index, piece) in block.chunks_mut(BLOCK).enumerate() {
+                let turn = index / 40;
+                let settings = AmpSettings {
+                    in_gain_db: (turn % 5) as f32 * 6.0 - 12.0,
+                    gate_on: turn % 2 == 0,
+                    gate_thresh_db: -20.0 - (turn % 3) as f32 * 20.0,
+                    drive_on: turn % 3 == 0,
+                    drive_gain: (turn % 4) as f32 / 3.0,
+                    cab_on: turn % 5 != 0,
+                    cab_mic: (turn % 3) as f32 * 0.5,
+                    cab_res: (turn % 4) as f32 / 3.0,
+                    ..with_amp(Amp::ALL[turn % 3], 0.5)
+                };
+                chain.process(&settings, piece, None);
+            }
+            assert_eq!(layout(&chain), before);
+        }
+    }
+
+    #[test]
+    fn test_closed_gate_and_silence_are_not_slower() {
+        // Everything on, played, then left alone: the gate closes, and nothing behind it
+        // may decay into denormal numbers
+        let mut chain = new_chain(SAMPLE_RATE);
+        let settings = everything_on(Amp::Torden, 1.0);
+        let playing = block_time_us(&mut chain, &settings, &power_chords(SAMPLE_RATE, 0.25));
+        let quiet = hiss(-75.0, 48_000);
+        let tail = run_blocks(&mut chain, &settings, &quiet, BLOCK);
+        assert!(peak(&tail[24_000..]) < 1e-6, "The gate is not closed: {}", peak(&tail[24_000..]));
+        let closed = block_time_us(&mut chain, &settings, &hiss(-75.0, 12_000));
+        let silent = block_time_us(&mut chain, &settings, &vec![0.0; 12_000]);
+        assert!(closed < playing * 2.0, "{:.1} us per block playing, {:.1} us with the gate closed", playing, closed);
+        assert!(silent < playing * 2.0, "{:.1} us per block playing, {:.1} us silent", playing, silent);
+    }
+
     /// Median time to process one block, in microseconds
     fn block_time_us(chain: &mut AmpChain, settings: &AmpSettings, input: &[f32]) -> f64 {
         let mut scratch = input.to_vec();
@@ -991,7 +1744,8 @@ mod tests {
     }
 
     /// Prints levels, distortion, aliasing, tightness, dynamics, latency and cost for every
-    /// amp. Use it to compare before and after changing the DSP or a model's constants:
+    /// amp, and what the gate, the drive pedal and the cabinet's dials do. Use it to compare
+    /// before and after changing the DSP or a model's constants:
     ///   cargo test -p amp --release amp_report -- --ignored --nocapture
     #[test]
     #[ignore]
@@ -1223,6 +1977,301 @@ mod tests {
         }
 
         println!();
+        println!("Clean headroom at Gain 0: THD in dB of a 220 Hz sine at three levels in dBFS RMS");
+        println!("{:<8}{:>8}{:>8}{:>8}", "amp", "-18", "-12", "-6");
+        for amp in Amp::ALL {
+            print!("{:<8}", amp.model().name);
+            for level_db in [-18.0, -12.0, -6.0] {
+                let input = sine(220.0, db_to_gain(level_db) * std::f32::consts::SQRT_2, SAMPLE_RATE, 48_000);
+                let output = run(&with_amp(amp, 0.0), &input, SAMPLE_RATE);
+                print!("{:>8.1}", thd_db(&output[24_000..], SAMPLE_RATE, 220.0));
+            }
+            println!();
+        }
+
+        println!();
+        println!("Gate. A low E that rings out (peak -12 dBFS), the same note cut off after half a second,");
+        println!("and hiss at -70 dBFS RMS. `opens`: from the first sample of the note to fully open.");
+        println!("`cut closed`: from the cut to silence. `ringing closed`: when the ringing note is shut out.");
+        println!("`changes`: times the gate opened or started to close during the ringing note (2 is once each)");
+        println!(
+            "{:>10}{:>10}{:>10}{:>12}{:>16}{:>9}{:>10}",
+            "threshold", "release", "opens ms", "cut closed", "ringing closed", "changes", "hiss"
+        );
+        let ringing = decaying_note(SAMPLE_RATE, 8.0);
+        let mut cut = ringing[..24_000].to_vec();
+        cut.resize(96_000, 0.0);
+        let noise = hiss(-70.0, 96_000);
+        for threshold_db in [-70.0, -60.0, -50.0, -40.0] {
+            for release_ms in [20.0, 100.0, 500.0] {
+                let trace = |input: &[f32]| {
+                    let mut gate = Gate::new();
+                    gate.set_sample_rate(SAMPLE_RATE);
+                    gate.set(true, threshold_db, release_ms);
+                    gain_trace(&mut gate, input)
+                };
+                let to_ms = |samples: usize| samples as f32 / SAMPLE_RATE * 1000.0;
+                let ringing_trace = trace(&ringing);
+                let cut_trace = trace(&cut);
+                let hiss_trace = trace(&noise);
+                let opens = ringing_trace.iter().position(|&gain| gain == 1.0).unwrap();
+                let cut_closed = cut_trace[24_000..].iter().position(|&gain| gain == 0.0).unwrap();
+                let ringing_closed = match ringing_trace.iter().rposition(|&gain| gain > 0.0) {
+                    Some(last) if last + 1 < ringing_trace.len() => format!("{:.2} s", (last + 1) as f32 / SAMPLE_RATE),
+                    _ => "still open".to_string(),
+                };
+                let hiss_gain = rms(&hiss_trace[48_000..]);
+                let hiss_state = match hiss_gain {
+                    gain if gain == 0.0 => "silent".to_string(),
+                    gain if gain == 1.0 => "open".to_string(),
+                    gain => format!("{:.1} dB", to_db(gain)),
+                };
+                println!(
+                    "{:>7} dB{:>7} ms{:>10.2}{:>9.0} ms{:>16}{:>9}{:>10}",
+                    threshold_db,
+                    release_ms,
+                    to_ms(opens),
+                    to_ms(cut_closed),
+                    ringing_closed,
+                    gate_changes(&ringing_trace),
+                    hiss_state
+                );
+            }
+        }
+        println!("Hiss at -70 dBFS RMS through each amp at Gain 10, output in dBFS RMS");
+        for amp in Amp::ALL {
+            let level = |gate_on: bool| {
+                let settings = AmpSettings {
+                    gate_on,
+                    ..with_amp(amp, 1.0)
+                };
+                let output = run(&settings, &noise, SAMPLE_RATE);
+                let level = rms(&output[48_000..]);
+                if level < 1e-9 { "silent".to_string() } else { format!("{:.1}", to_db(level)) }
+            };
+            println!("{:<8}gate off {:>8}   gate on at -60 dB {:>8}", amp.model().name, level(false), level(true));
+        }
+
+        println!();
+        println!("Drive pedal alone (no amp), 4x oversampled as in the chain. THD of the 220 Hz sine, level of");
+        println!("the chords against the pedal switched off, and the chords per band relative to the whole");
+        let pedal_alone = |drive: f32, tone: f32, level: f32, input: &[f32]| {
+            let mut oversampler = Oversampler::new();
+            let mut pedal = new_drive(SAMPLE_RATE * FACTOR as f32, drive, tone, level);
+            let mut high = vec![0.0; input.len() * FACTOR];
+            oversampler.upsample(input, &mut high);
+            pedal.process(&mut high);
+            let mut output = vec![0.0; input.len()];
+            oversampler.downsample(&high, &mut output);
+            output
+        };
+        println!(
+            "{:<22}{:>8}{:>8}{:>9}{:>9}{:>9}{:>9}{:>9}{:>9}",
+            "drive tone level", "THD dB", "level", "to 100", "100-400", "400-1k6", "1k6-6k4", "6k4 up", "over 3k"
+        );
+        print!("{:<22}{:>8}{:>8}", "off", "", "");
+        for level in tight_levels_db(&chords, SAMPLE_RATE) {
+            print!("{:>9.1}", level);
+        }
+        println!("{:>9.1}", band_level_db(&chords, SAMPLE_RATE, Some(3000.0), None));
+        let pedal_settings = [
+            (0.0, 0.5, 0.5),
+            (0.2, 0.5, 0.5),
+            (0.3, 0.5, 0.5),
+            (0.5, 0.5, 0.5),
+            (1.0, 0.5, 0.5),
+            (0.5, 0.0, 0.5),
+            (0.5, 1.0, 0.5),
+            (0.5, 0.5, 0.0),
+            (0.5, 0.5, 1.0),
+            (0.2, 0.5, 0.8),
+        ];
+        for (drive, tone_dial, level) in pedal_settings {
+            let sine_out = pedal_alone(drive, tone_dial, level, &tone);
+            let chords_out = pedal_alone(drive, tone_dial, level, &chords);
+            print!(
+                "{:<22}{:>8.1}{:>8.1}",
+                format!("{:>4.1}{:>6.1}{:>6.1}", drive * 10.0, tone_dial * 10.0, level * 10.0),
+                thd_db(&sine_out[24_000..], SAMPLE_RATE, 220.0),
+                to_db(rms(&chords_out) / rms(&chords))
+            );
+            for level in tight_levels_db(&chords_out, SAMPLE_RATE) {
+                print!("{:>9.1}", level);
+            }
+            println!("{:>9.1}", band_level_db(&chords_out, SAMPLE_RATE, Some(3000.0), None));
+        }
+
+        println!();
+        println!("Drive pedal into an amp. Chords RMS and peak in dBFS, THD of the sine, aliasing as above");
+        println!(
+            "{:<12}{:<20}{:>12}{:>12}{:>9}{:>12}{:>12}",
+            "amp gain", "drive tone level", "chords RMS", "chords pk", "THD dB", "alias 1245", "alias 4186"
+        );
+        let pedal_rows = [
+            (Amp::Klar, 0.3, None),
+            (Amp::Klar, 0.3, Some((0.0, 0.5, 0.5))),
+            (Amp::Klar, 0.3, Some((0.5, 0.5, 0.5))),
+            (Amp::Klar, 0.3, Some((1.0, 0.5, 0.5))),
+            (Amp::Klar, 0.3, Some((1.0, 1.0, 1.0))),
+            (Amp::Brol, 0.5, Some((0.3, 0.5, 0.7))),
+            (Amp::Torden, 0.5, None),
+            (Amp::Torden, 0.5, Some((0.2, 0.5, 0.8))),
+            (Amp::Torden, 1.0, None),
+            (Amp::Torden, 1.0, Some((0.0, 0.5, 0.5))),
+            (Amp::Torden, 1.0, Some((0.3, 0.5, 0.8))),
+            (Amp::Torden, 1.0, Some((0.3, 1.0, 1.0))),
+            (Amp::Torden, 1.0, Some((1.0, 1.0, 1.0))),
+        ];
+        for (amp, gain, pedal) in pedal_rows {
+            let (settings, pedal_name) = match pedal {
+                Some((drive, tone_dial, level)) => (
+                    with_drive(amp, gain, drive, tone_dial, level),
+                    format!("{:>4.1}{:>6.1}{:>6.1}", drive * 10.0, tone_dial * 10.0, level * 10.0),
+                ),
+                None => (with_amp(amp, gain), "off".to_string()),
+            };
+            let chords_out = run(&settings, &chords, SAMPLE_RATE);
+            let tone_out = run(&settings, &tone, SAMPLE_RATE);
+            println!(
+                "{:<12}{:<20}{:>12.1}{:>12.1}{:>9.1}{:>12.1}{:>12.1}",
+                format!("{} {:.1}", amp.model().name, gain * 10.0),
+                pedal_name,
+                to_db(rms(&chords_out)),
+                to_db(peak(&chords_out)),
+                thd_db(&tone_out[24_000..], SAMPLE_RATE, 220.0),
+                aliasing_db_with(&settings, ALIAS_TONES_HZ[0]),
+                aliasing_db_with(&settings, ALIAS_TONES_HZ[1]),
+            );
+        }
+
+        println!();
+        println!("Tightness with the pedal itself (Drive 2, Tone 5, Level 8 unless named): the palm mutes as");
+        println!("above, and `lows` is the level below 100 Hz against 400 to 1600 Hz. The last columns are the");
+        println!("fundamental of a single low C (65 Hz) and low E (82 Hz) against the whole signal, in dB");
+        println!(
+            "{:<26}{:>9}{:>9}{:>9}{:>9}{:>9}{:>9}{:>9}{:>9}{:>9}",
+            "Hz", "to 100", "100-400", "400-1k6", "1k6-6k4", "6k4 up", "RMS", "lows", "65 Hz", "82 Hz"
+        );
+        let low_notes = [65.41, 82.41].map(|freq_hz| (freq_hz, pluck(freq_hz, Pluck::OPEN, 3, SAMPLE_RATE, 48_000)));
+        print!("{:<26}", "dry");
+        for level in tight_levels_db(&mutes, SAMPLE_RATE) {
+            print!("{:>9.1}", level);
+        }
+        print!("{:>9.1}{:>9.1}", to_db(rms(&mutes)), lows_against_mids_db(&mutes));
+        for (freq_hz, note) in &low_notes {
+            print!("{:>9.1}", fundamental_db(&note[4800..28_800], *freq_hz));
+        }
+        println!();
+        let tight_rows = [
+            ("Brøl 5.0".to_string(), with_amp(Amp::Brol, 0.5)),
+            ("Brøl 10.0".to_string(), with_amp(Amp::Brol, 1.0)),
+            ("Torden 5.0".to_string(), with_amp(Amp::Torden, 0.5)),
+            ("Torden 10.0".to_string(), with_amp(Amp::Torden, 1.0)),
+            ("Torden 5.0 drive".to_string(), with_drive(Amp::Torden, 0.5, 0.2, 0.5, 0.8)),
+            ("Torden 10.0 drive".to_string(), with_drive(Amp::Torden, 1.0, 0.2, 0.5, 0.8)),
+            ("Torden 5.0 drive 0/5/10".to_string(), with_drive(Amp::Torden, 0.5, 0.0, 0.5, 1.0)),
+            ("Torden 5.0 drive 5/5/5".to_string(), with_drive(Amp::Torden, 0.5, 0.5, 0.5, 0.5)),
+            ("Brøl 5.0 drive".to_string(), with_drive(Amp::Brol, 0.5, 0.2, 0.5, 0.8)),
+            ("Klar 5.0".to_string(), with_amp(Amp::Klar, 0.5)),
+            ("Klar 5.0 drive 5/5/5".to_string(), with_drive(Amp::Klar, 0.5, 0.5, 0.5, 0.5)),
+        ];
+        for (name, settings) in &tight_rows {
+            let output = run(settings, &mutes, SAMPLE_RATE);
+            print!("{:<26}", name);
+            for level in tight_levels_db(&output, SAMPLE_RATE) {
+                print!("{:>9.1}", level);
+            }
+            print!("{:>9.1}{:>9.1}", to_db(rms(&output)), lows_against_mids_db(&output));
+            for (freq_hz, note) in &low_notes {
+                print!("{:>9.1}", fundamental_db(&run(settings, note, SAMPLE_RATE)[4800..28_800], *freq_hz));
+            }
+            println!();
+        }
+
+        println!();
+        println!("Cabinet dials: change of the response in dB with Mic and Resonance at either end");
+        let cab_probes = [63.0, 100.0, 125.0, 200.0, 400.0, 800.0, 1600.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0];
+        print!("{:<18}", "Hz");
+        for probe in cab_probes {
+            print!("{:>7}", probe);
+        }
+        println!();
+        for amp in Amp::ALL {
+            for (name, mic, res) in [("mic 0", 0.0, 0.5), ("mic 10", 1.0, 0.5), ("res 0", 0.5, 0.0), ("res 10", 0.5, 1.0)] {
+                print!("{:<18}", format!("{} {}", amp.model().name, name));
+                for probe in cab_probes {
+                    print!("{:>7.1}", CabVoicing::response_db(&amp.model().cab, mic, res, probe, SAMPLE_RATE));
+                }
+                println!();
+            }
+        }
+        println!("Chords RMS at Gain 5 against the cabinet as designed, in dB");
+        println!("{:<8}{:>8}{:>8}{:>8}{:>8}{:>9}", "amp", "mic 0", "mic 10", "res 0", "res 10", "cab off");
+        for amp in Amp::ALL {
+            let base = with_amp(amp, 0.5);
+            let level = |settings: &AmpSettings| to_db(rms(&run(settings, &chords[..96_000], SAMPLE_RATE)));
+            let designed = level(&base);
+            println!(
+                "{:<8}{:>8.1}{:>8.1}{:>8.1}{:>8.1}{:>9.1}",
+                amp.model().name,
+                level(&AmpSettings { cab_mic: 0.0, ..base }) - designed,
+                level(&AmpSettings { cab_mic: 1.0, ..base }) - designed,
+                level(&AmpSettings { cab_res: 0.0, ..base }) - designed,
+                level(&AmpSettings { cab_res: 1.0, ..base }) - designed,
+                level(&AmpSettings { cab_on: false, ..base }) - designed,
+            );
+        }
+
+        println!();
+        println!("Latency with gate, drive and cabinet dials on (Drive 3, Tone 5 and Tone 0, Level 5)");
+        for amp in Amp::ALL {
+            for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0] {
+                let samples = latency_samples_with(&everything_on(amp, 0.0), sample_rate);
+                let dark = AmpSettings {
+                    drive_tone: 0.0,
+                    ..everything_on(amp, 0.0)
+                };
+                let dark_samples = latency_samples_with(&dark, sample_rate);
+                println!(
+                    "{:<8}{:>8} Hz{:>5} samples{:>7.3} ms   Tone 0{:>5} samples{:>7.3} ms",
+                    amp.model().name,
+                    sample_rate,
+                    samples,
+                    samples as f32 / sample_rate * 1000.0,
+                    dark_samples,
+                    dark_samples as f32 / sample_rate * 1000.0
+                );
+            }
+        }
+
+        println!();
+        println!("Time per {}-sample block with everything on (Torden, Gain 10, gate, drive, cabinet dials),", BLOCK);
+        println!("and with the gate closed on hiss");
+        for sample_rate in [48000.0, 96000.0, 192000.0] {
+            let block_us = BLOCK as f64 / sample_rate as f64 * 1e6;
+            let mut chain = new_chain(sample_rate);
+            let settings = everything_on(Amp::Torden, 1.0);
+            let chords = power_chords(sample_rate, 2.0);
+            let quiet = hiss(-75.0, (sample_rate * 2.0) as usize);
+            run_blocks(&mut chain, &settings, &chords, BLOCK);
+            run_blocks(&mut chain, &settings, &vec![0.0; (sample_rate * 20.0) as usize], BLOCK);
+            let closed = block_time_us(&mut chain, &settings, &quiet);
+            let playing = block_time_us(&mut chain, &settings, &chords);
+            let mut plain_chain = new_chain(sample_rate);
+            let plain = block_time_us(&mut plain_chain, &with_amp(Amp::Torden, 1.0), &chords);
+            println!(
+                "{:>8} Hz  playing{:>7.1} us{:>6.1} %   gate closed{:>7.1} us{:>6.1} %   pedals off{:>7.1} us{:>6.1} %",
+                sample_rate,
+                playing,
+                playing / block_us * 100.0,
+                closed,
+                closed / block_us * 100.0,
+                plain,
+                plain / block_us * 100.0
+            );
+        }
+
+        println!();
         println!("Clipping curves, ns per sample");
         let ramp: Vec<f32> = (0..1_000_000).map(|i| ((i % 2000) as f32 - 1000.0) * 0.004).collect();
         let time_ns = |name: &str, shape: &mut dyn FnMut(f32) -> f32| {
@@ -1232,14 +2281,18 @@ mod tests {
             println!("{:<22}{:>6.1}", name, start.elapsed().as_secs_f64() * 1e9 / ramp.len() as f64);
         };
         let mut clipper = AsymClipper::new();
+        let mut second = AsymClipper::new();
+        second.set_second_order(true);
         time_ns("asym_clip", &mut |x| asym_clip(x, 1.0, 1.5));
         time_ns("AsymClipper", &mut |x| clipper.process(x));
+        time_ns("AsymClipper, 2nd order", &mut |x| second.process(x));
         time_ns("tanh", &mut |x| x.tanh());
     }
 
     /// Writes WAV files to target/renders for listening: a direct guitar signal, dry and
-    /// through every amp at a few settings, palm mutes through every amp, and one file that
-    /// changes amp every two seconds:
+    /// through every amp at a few settings, palm mutes through every amp, the drive pedal in
+    /// front of Torden and of Klar, the cabinet's dials and the cabinet switched off, the gate
+    /// on a noisy input, and one file that changes amp every two seconds:
     ///   cargo test -p amp --release render_wavs -- --ignored
     ///
     /// Set AMP_INPUT_WAV to the path of a recording to use that instead of the made-up one.
@@ -1294,6 +2347,61 @@ mod tests {
         }
         let output = run(&with_amp(Amp::Torden, 0.5), &boosted(&mutes, sample_rate as f32), sample_rate as f32);
         write_wav(&dir.join(file_name(Amp::Torden, "palm_mutes_boosted_gain5")), &[&output, &output], sample_rate);
+
+        // The pedals. Torden with and without the drive in front, on the recording and on
+        // palm mutes; Klar with the drive as an overdrive of its own
+        let rate = sample_rate as f32;
+        let render = |name: &str, settings: &AmpSettings, input: &[f32]| {
+            let output = run(settings, input, rate);
+            write_wav(&dir.join(format!("amp_{}.wav", name)), &[&output, &output], sample_rate);
+        };
+        render("torden_gain6_drive_off", &with_amp(Amp::Torden, 0.6), &input);
+        render("torden_gain6_drive_on", &with_drive(Amp::Torden, 0.6, 0.2, 0.5, 0.8), &input);
+        render("torden_palm_mutes_gain6_drive_on", &with_drive(Amp::Torden, 0.6, 0.2, 0.5, 0.8), &mutes);
+        render("klar_gain3_drive_off", &with_amp(Amp::Klar, 0.3), &input);
+        render("klar_gain3_drive3", &with_drive(Amp::Klar, 0.3, 0.3, 0.5, 0.5), &input);
+        render("klar_gain3_drive7", &with_drive(Amp::Klar, 0.3, 0.7, 0.5, 0.5), &input);
+        render("klar_gain3_drive10_tone8", &with_drive(Amp::Klar, 0.3, 1.0, 0.8, 0.5), &input);
+
+        // The cabinet: Mic at 0, 5 and 10, Resonance at 0 and 10, and switched off
+        for (name, mic, res, cab_on) in [
+            ("mic0", 0.0, 0.5, true),
+            ("mic5", 0.5, 0.5, true),
+            ("mic10", 1.0, 0.5, true),
+            ("res0", 0.5, 0.0, true),
+            ("res10", 0.5, 1.0, true),
+            ("off", 0.5, 0.5, false),
+        ] {
+            let settings = AmpSettings {
+                cab_on,
+                cab_mic: mic,
+                cab_res: res,
+                ..with_amp(Amp::Brol, 0.6)
+            };
+            render(&format!("brol_gain6_cab_{}", name), &settings, &input);
+        }
+
+        // The gate: the recording with hum and hiss under it, twice through Torden. The
+        // first time with the gate off, the second time with it on
+        let mut noisy = input.clone();
+        let mut noise = Noise::new(9);
+        for (index, sample) in noisy.iter_mut().enumerate() {
+            let time = index as f32 / rate;
+            let hum = (std::f32::consts::TAU * 50.0 * time).sin() + 0.5 * (std::f32::consts::TAU * 150.0 * time).sin();
+            *sample += db_to_gain(-66.0) * hum + db_to_gain(-70.0) * noise.next();
+        }
+        let mut chain = new_chain(rate);
+        let gate_off = AmpSettings {
+            gate_on: false,
+            ..with_amp(Amp::Torden, 0.7)
+        };
+        let gate_on = AmpSettings {
+            gate_thresh_db: -55.0,
+            ..with_amp(Amp::Torden, 0.7)
+        };
+        let mut output = run_blocks(&mut chain, &gate_off, &noisy, BLOCK);
+        output.extend(run_blocks(&mut chain, &gate_on, &noisy, BLOCK));
+        write_wav(&dir.join("amp_torden_gate_off_then_on.wav"), &[&output, &output], sample_rate);
 
         // A new amp every two seconds while the playing goes on
         let mut chain = new_chain(sample_rate as f32);
