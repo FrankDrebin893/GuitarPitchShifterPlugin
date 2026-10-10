@@ -3,12 +3,14 @@ use crate::amp::poweramp::PowerAmp;
 use crate::amp::preamp::Preamp;
 use crate::amp::tonestack::{ToneCurve, ToneStack};
 use crate::cab::{design_ir, CabVoicing, Cabinet};
+use crate::delay::{Delay, DelaySettings};
 use crate::drive::Drive;
 use crate::dsp::filters::DcBlocker;
 use crate::dsp::oversample::{Oversampler, FACTOR};
 use crate::dsp::shaper::output_clip;
 use crate::dsp::{curve, db_to_gain, smoothing_coeff, Ramp};
 use crate::gate::Gate;
+use crate::reverb::{Reverb, ReverbSettings};
 
 // The chain works in pieces of at most this many samples, and reads the dials once per piece
 const CHUNK: usize = 32;
@@ -20,7 +22,9 @@ const DIAL_SMOOTH_MS: f32 = 20.0;
 // A dial this close to where it is going is taken as there, so the filters stop being redesigned
 const DIAL_SETTLED: f32 = 1e-5;
 
-// Crossfade between the amp and the untouched input when Bypass is switched
+// Crossfade between the amp and the untouched input when Bypass is switched. The repeats and
+// the reverb tail fade out with the amp, and are dropped once nothing is heard of them: what
+// comes back is the amp from rest, not what was left in the effects when it was switched off
 const BYPASS_FADE_MS: f32 = 10.0;
 
 // When another amp is picked, the amp's output fades to silence in this time, the stages are
@@ -72,6 +76,10 @@ pub struct AmpSettings {
     pub cab_mic: f32,
     pub cab_res: f32,
 
+    /// The two effects behind the cabinet. They smooth their own settings
+    pub delay: DelaySettings,
+    pub reverb: ReverbSettings,
+
     /// Linear gain
     pub out_level: f32,
 }
@@ -98,6 +106,8 @@ impl Default for AmpSettings {
             cab_on: true,
             cab_mic: 0.5,
             cab_res: 0.5,
+            delay: DelaySettings::default(),
+            reverb: ReverbSettings::default(),
             out_level: 1.0,
         }
     }
@@ -163,7 +173,7 @@ impl Dials {
     }
 }
 
-/// The whole signal chain. Mono through the amp and cabinet
+/// The whole signal chain. Mono through the amp and cabinet, stereo from the delay on
 pub struct AmpChain {
     sample_rate: f32,
     // The amp the stages are set up as, and the one the settings ask for
@@ -185,6 +195,12 @@ pub struct AmpChain {
     cab_mix: Ramp,
     cab_fade_steps: u32,
     dc: DcBlocker,
+    delay: Delay,
+    reverb: Reverb,
+    // What the effects are told. Read with the dials, so a switch takes effect on the same
+    // sample whatever the block size
+    delay_settings: DelaySettings,
+    reverb_settings: ReverbSettings,
     out_level: Ramp,
 
     dials: Dials,
@@ -231,6 +247,10 @@ impl AmpChain {
             cab_mix: Ramp::new(1.0),
             cab_fade_steps: 1,
             dc: DcBlocker::new(),
+            delay: Delay::new(),
+            reverb: Reverb::new(),
+            delay_settings: DelaySettings::default(),
+            reverb_settings: ReverbSettings::default(),
             out_level: Ramp::new(1.0),
             dials: Dials::from_settings(&AmpSettings::default()),
             dial_coeff: 1.0,
@@ -260,6 +280,8 @@ impl AmpChain {
 
         self.gate.set_sample_rate(sample_rate);
         self.drive.configure(sample_rate * FACTOR as f32);
+        self.delay.set_sample_rate(sample_rate);
+        self.reverb.set_sample_rate(sample_rate);
 
         self.cab_irs = Amp::ALL.iter().map(|amp| design_ir(&amp.model().cab, sample_rate)).collect();
         self.cabinet.set_sample_rate(sample_rate);
@@ -319,11 +341,26 @@ impl AmpChain {
         self.cabinet.reset();
         self.cab_voicing.reset();
         self.dc.reset();
+        // An idle effect holds nothing but zeros already. Clearing its lines again would
+        // only cost time, and this is also called on the audio thread, when Bypass has faded
+        if !self.delay.is_idle() {
+            self.delay.reset();
+        }
+        if !self.reverb.is_idle() {
+            self.reverb.reset();
+        }
         self.amp_fade = self.amp_fade_len;
         self.cabinet_busy = 0;
     }
 
-    /// Everything between the gate and the cabinet
+    /// True when nothing is left to hear of earlier input: no repeats and no reverb tail are
+    /// ringing. The amp and the cabinet themselves are silent within milliseconds
+    pub fn is_idle(&self) -> bool {
+        self.delay.is_idle() && self.reverb.is_idle()
+    }
+
+    /// Everything between the gate and the cabinet. The effects are not touched: their
+    /// repeats and tail ring on while another amp is set up
     fn reset_amp_stages(&mut self) {
         self.oversampler.reset();
         self.drive.reset();
@@ -333,7 +370,10 @@ impl AmpChain {
     }
 
     /// Processes a block in place. With two channels the input is their average and the
-    /// output goes to both
+    /// output is stereo: the amp in the middle, the repeats and the reverb tail around it.
+    /// With one channel the output is the left one of those two. Their sum would keep the amp
+    /// as it is as well, but the tail and the repeats come out 3 dB lower in it, and the
+    /// repeats hollow: left and right repeat a few milliseconds apart, which is a comb
     pub fn process(&mut self, settings: &AmpSettings, left: &mut [f32], mut right: Option<&mut [f32]>) {
         self.wanted_amp = settings.amp;
         let wet_target = if settings.bypass { 0.0 } else { 1.0 };
@@ -398,6 +438,8 @@ impl AmpChain {
         if cab_target != self.cab_mix.target() {
             self.cab_mix.set_target(cab_target, self.cab_fade_steps);
         }
+        self.delay_settings = settings.delay;
+        self.reverb_settings = settings.reverb;
 
         if jump {
             self.in_gain.snap();
@@ -519,26 +561,44 @@ impl AmpChain {
         self.fade_amp(&mut signal[..len]);
         self.process_cabinet(&mut signal[..len]);
 
+        // Two channels from here on. The effects add to what they are given and leave the
+        // amp's own signal as it is, on time. Both are called whether they are on or not:
+        // switched off they let their repeats and tail ring out, and idle they do nothing
+        let mut wide = [[0.0f32; CHUNK]; 2];
         for index in 0..len {
-            let output = output_clip(self.dc.process(signal[index]) * self.out_level.next());
+            let sample = self.dc.process(signal[index]);
+            wide[0][index] = sample;
+            wide[1][index] = sample;
+        }
+        let [wide_left, wide_right] = &mut wide;
+        self.delay.process(&self.delay_settings, &mut wide_left[..len], &mut wide_right[..len]);
+        self.reverb.process(&self.reverb_settings, &mut wide_left[..len], &mut wide_right[..len]);
 
+        // The effects do not limit themselves, so the safety clip comes last
+        for index in 0..len {
+            let level = self.out_level.next();
             if self.wet != wet_target {
                 self.wet = (self.wet + self.wet_step.copysign(wet_target - self.wet)).clamp(0.0, 1.0);
             }
+
+            let output = output_clip(wide_left[index] * level);
             if self.wet >= 1.0 {
                 left[index] = output;
-                if let Some(right) = right.as_deref_mut() {
-                    right[index] = output;
-                }
             } else {
                 left[index] += self.wet * (output - left[index]);
-                if let Some(right) = right.as_deref_mut() {
+            }
+            if let Some(right) = right.as_deref_mut() {
+                let output = output_clip(wide_right[index] * level);
+                if self.wet >= 1.0 {
+                    right[index] = output;
+                } else {
                     right[index] += self.wet * (output - right[index]);
                 }
             }
         }
 
-        // Start from silence when the amp comes back, not from where it was left
+        // Start from silence when the amp comes back, not from where it was left, and
+        // without the repeats and the tail of what was played before
         if bypassed(self) {
             self.reset_stages();
         }
@@ -550,7 +610,7 @@ mod tests {
     use super::*;
     use crate::cab::ir_magnitude;
     use crate::drive::tests::new_drive;
-    use crate::dsp::shaper::{asym_clip, AsymClipper};
+    use crate::dsp::shaper::{asym_clip, AsymClipper, OUTPUT_CLIP_KNEE};
     use crate::gate::tests::{decaying_note, gain_trace, hiss, transitions as gate_changes};
     use crate::test_util::*;
     use std::time::Instant;
@@ -662,6 +722,87 @@ mod tests {
         }
     }
 
+    fn delay_on(time_ms: f32, feedback: f32, mix: f32) -> DelaySettings {
+        DelaySettings {
+            on: true,
+            time_ms,
+            feedback,
+            mix,
+        }
+    }
+
+    fn reverb_on(decay_s: f32, mix: f32) -> ReverbSettings {
+        ReverbSettings {
+            on: true,
+            decay_s,
+            mix,
+        }
+    }
+
+    /// Delay and reverb on, both short: heard within a fraction of a second and soon over
+    fn with_effects(base: AmpSettings) -> AmpSettings {
+        AmpSettings {
+            delay: delay_on(60.0, 0.4, 0.5),
+            reverb: reverb_on(0.4, 0.5),
+            ..base
+        }
+    }
+
+    /// Both effects as loud and as long as they go
+    fn with_effects_at_most(base: AmpSettings) -> AmpSettings {
+        AmpSettings {
+            delay: delay_on(350.0, 0.9, 1.0),
+            reverb: reverb_on(6.0, 1.0),
+            ..base
+        }
+    }
+
+    /// Both effects switched on and otherwise as the plugin starts
+    fn with_default_effects(base: AmpSettings) -> AmpSettings {
+        AmpSettings {
+            delay: DelaySettings {
+                on: true,
+                ..DelaySettings::default()
+            },
+            reverb: ReverbSettings {
+                on: true,
+                ..ReverbSettings::default()
+            },
+            ..base
+        }
+    }
+
+    /// The stereo layout with the same input on both channels, in blocks of `block` samples
+    fn run_stereo_blocks(chain: &mut AmpChain, settings: &AmpSettings, input: &[f32], block: usize) -> (Vec<f32>, Vec<f32>) {
+        let (mut left, mut right) = (input.to_vec(), input.to_vec());
+        for (l, r) in left.chunks_mut(block).zip(right.chunks_mut(block)) {
+            chain.process(settings, l, Some(r));
+        }
+        (left, right)
+    }
+
+    fn run_stereo(settings: &AmpSettings, input: &[f32], sample_rate: f32) -> (Vec<f32>, Vec<f32>) {
+        run_stereo_blocks(&mut new_chain(sample_rate), settings, input, BLOCK)
+    }
+
+    fn difference(a: &[f32], b: &[f32]) -> Vec<f32> {
+        a.iter().zip(b).map(|(a, b)| a - b).collect()
+    }
+
+    fn largest_difference(a: &[f32], b: &[f32]) -> f32 {
+        a.iter().zip(b).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max)
+    }
+
+    /// Address and capacity of every buffer the chain points to
+    fn buffer_layout(chain: &AmpChain) -> Vec<(usize, usize)> {
+        let mut layout = vec![(chain.cab_irs.as_ptr() as usize, chain.cab_irs.capacity())];
+        layout.extend(chain.cab_irs.iter().map(|ir| (ir.as_ptr() as usize, ir.capacity())));
+        layout.extend(chain.cabinet.buffers());
+        layout.extend(chain.delay.buffers());
+        layout.extend(chain.reverb.buffers());
+        layout
+    }
+
     /// Energy of a clipped sine that is not at its harmonics, relative to the total, in dB
     fn aliasing_db(amp: Amp, gain: f32, freq_hz: f32) -> f64 {
         aliasing_db_with(&with_amp(amp, gain), freq_hz)
@@ -674,7 +815,7 @@ mod tests {
     }
 
     /// The amp and its cabinet put together from their parts, with nothing else around
-    /// them: what the chain was before it had pedals
+    /// them: what the chain was before it had pedals and effects
     fn amp_alone(settings: &AmpSettings, input: &[f32], sample_rate: f32) -> Vec<f32> {
         let model = settings.amp.model();
         let oversampled_rate = sample_rate * FACTOR as f32;
@@ -1247,10 +1388,7 @@ mod tests {
     #[test]
     fn test_switching_does_not_allocate() {
         // What can be seen from here: every buffer stays where it is, with the size it had
-        let layout = |chain: &AmpChain| {
-            let irs: Vec<(usize, usize)> = chain.cab_irs.iter().map(|ir| (ir.as_ptr() as usize, ir.capacity())).collect();
-            (chain.cab_irs.as_ptr() as usize, chain.cab_irs.capacity(), irs, chain.cabinet.buffers())
-        };
+        let layout = buffer_layout;
         for sample_rate in [44100.0, 192000.0] {
             let mut chain = new_chain(sample_rate);
             let before = layout(&chain);
@@ -1290,7 +1428,7 @@ mod tests {
         let input = power_chords(SAMPLE_RATE, 0.5);
         for amp in Amp::ALL {
             for gain in [0.0, 0.7] {
-                // Bit for bit: no pedal leaves a trace, wherever its dials are
+                // Bit for bit: no pedal and no effect leaves a trace, wherever its dials are
                 let settings = AmpSettings {
                     gate_on: false,
                     gate_thresh_db: -20.0,
@@ -1298,10 +1436,20 @@ mod tests {
                     drive_gain: 1.0,
                     drive_tone: 0.0,
                     drive_level: 1.0,
+                    delay: DelaySettings {
+                        on: false,
+                        ..delay_on(20.0, 0.9, 1.0)
+                    },
+                    reverb: ReverbSettings {
+                        on: false,
+                        ..reverb_on(6.0, 1.0)
+                    },
                     ..with_amp(amp, gain)
                 };
                 let reference = amp_alone(&settings, &input, SAMPLE_RATE);
                 assert_eq!(run(&settings, &input, SAMPLE_RATE), reference, "{:?} at gain {}", amp, gain * 10.0);
+                let (left, right) = run_stereo(&settings, &input, SAMPLE_RATE);
+                assert!(left == reference && right == reference, "{:?} at gain {} in stereo", amp, gain * 10.0);
 
                 // The gate, open, changes nothing but the half millisecond in which it opens
                 let gated = run(&with_amp(amp, gain), &input, SAMPLE_RATE);
@@ -1669,16 +1817,12 @@ mod tests {
     }
 
     #[test]
-    fn test_pedals_do_not_allocate() {
-        let layout = |chain: &AmpChain| {
-            let irs: Vec<(usize, usize)> = chain.cab_irs.iter().map(|ir| (ir.as_ptr() as usize, ir.capacity())).collect();
-            (chain.cab_irs.as_ptr() as usize, chain.cab_irs.capacity(), irs, chain.cabinet.buffers())
-        };
+    fn test_pedals_and_effects_do_not_allocate() {
         // The pedals own no buffers at all: a chain is as large as its fields, and the only
-        // memory it points to is the cabinet's
+        // memory it points to is the cabinet's and the lines of the delay and the reverb
         for sample_rate in [44100.0, 192000.0] {
             let mut chain = new_chain(sample_rate);
-            let before = layout(&chain);
+            let before = buffer_layout(&chain);
             let mut block = sine(220.0, 0.2, sample_rate, 96_000);
             for (index, piece) in block.chunks_mut(BLOCK).enumerate() {
                 let turn = index / 40;
@@ -1691,11 +1835,22 @@ mod tests {
                     cab_on: turn % 5 != 0,
                     cab_mic: (turn % 3) as f32 * 0.5,
                     cab_res: (turn % 4) as f32 / 3.0,
+                    bypass: turn % 7 == 6,
+                    delay: DelaySettings {
+                        on: turn % 2 == 1,
+                        ..delay_on([20.0, 1000.0, 350.0][turn % 3], 0.9, 1.0)
+                    },
+                    reverb: ReverbSettings {
+                        on: turn % 4 < 2,
+                        ..reverb_on([0.3, 6.0][turn % 2], 1.0)
+                    },
                     ..with_amp(Amp::ALL[turn % 3], 0.5)
                 };
                 chain.process(&settings, piece, None);
             }
-            assert_eq!(layout(&chain), before);
+            assert_eq!(buffer_layout(&chain), before);
+            chain.reset();
+            assert_eq!(buffer_layout(&chain), before);
         }
     }
 
@@ -1743,8 +1898,338 @@ mod tests {
         assert!(silent < playing * 2.0, "{:.1} us per block playing, {:.1} us silent", playing, silent);
     }
 
+    #[test]
+    fn test_effects_switched_off_leave_no_trace() {
+        // Bit for bit, wherever their dials are, on both channels and in the mono layout.
+        // That the chain without them is the amp alone is tested above
+        let input = power_chords(SAMPLE_RATE, 0.3);
+        for amp in Amp::ALL {
+            let plain = everything_on(amp, 0.6);
+            let off = AmpSettings {
+                delay: DelaySettings {
+                    on: false,
+                    ..delay_on(1000.0, 0.9, 1.0)
+                },
+                reverb: ReverbSettings {
+                    on: false,
+                    ..reverb_on(6.0, 1.0)
+                },
+                ..plain
+            };
+            let reference = run(&plain, &input, SAMPLE_RATE);
+            let mut chain = new_chain(SAMPLE_RATE);
+            let (left, right) = run_stereo_blocks(&mut chain, &off, &input, BLOCK);
+            assert!(left == reference && right == reference, "{:?}", amp);
+            assert!(run(&off, &input, SAMPLE_RATE) == reference, "{:?} in mono", amp);
+            assert!(chain.is_idle());
+        }
+    }
+
+    #[test]
+    fn test_delay_makes_left_and_right_differ_around_the_same_amp() {
+        // Turned down, so the safety clip stays out of it
+        let input = power_chords(SAMPLE_RATE, 0.5);
+        let plain = AmpSettings {
+            out_level: 0.25,
+            ..with_amp(Amp::Klar, 0.5)
+        };
+        let delayed = AmpSettings {
+            delay: delay_on(100.0, 0.4, 0.5),
+            ..plain
+        };
+        let dry = run(&plain, &input, SAMPLE_RATE);
+        let (left, right) = run_stereo(&delayed, &input, SAMPLE_RATE);
+
+        // Until the first repeat there is only the amp, as it is without the delay
+        let first = (0.09 * SAMPLE_RATE) as usize;
+        assert!(left[..first] == dry[..first] && right[..first] == dry[..first]);
+
+        // From there on the repeats are added to it, and they are not the same on both sides
+        let (repeats_left, repeats_right) = (difference(&left, &dry), difference(&right, &dry));
+        for repeats in [&repeats_left, &repeats_right] {
+            assert!(rms(&repeats[first..]) > 0.1 * rms(&dry), "Repeats at {}, amp at {}", rms(repeats), rms(&dry));
+        }
+        let alike = correlation(&repeats_left[first..], &repeats_right[first..]);
+        assert!(alike < 0.9, "Left and right repeats correlate by {}", alike);
+        assert!(rms(&difference(&left, &right)) > 0.05 * rms(&dry));
+    }
+
+    #[test]
+    fn test_effects_add_no_latency() {
+        // The amp's own signal comes through as without them, to the sample: bit for bit
+        // until the first of the tail and the first repeat arrive
+        let input = power_chords(SAMPLE_RATE, 0.1);
+        let plain = everything_on(Amp::Brol, 0.5);
+        let effects = AmpSettings {
+            delay: delay_on(20.0, 0.9, 1.0),
+            reverb: reverb_on(6.0, 1.0),
+            ..plain
+        };
+        let dry = run(&plain, &input, SAMPLE_RATE);
+        let (left, right) = run_stereo(&effects, &input, SAMPLE_RATE);
+        let before = (0.014 * SAMPLE_RATE) as usize;
+        assert!(left[..before] == dry[..before] && right[..before] == dry[..before]);
+        assert!(left[before..] != dry[before..]);
+
+        for (amp, sample_rate) in [(Amp::Klar, 48000.0), (Amp::Brol, 48000.0), (Amp::Torden, 48000.0), (Amp::Torden, 44100.0)] {
+            let plain = everything_on(amp, 0.0);
+            let effects = AmpSettings {
+                delay: delay_on(20.0, 0.9, 1.0),
+                reverb: reverb_on(6.0, 1.0),
+                ..plain
+            };
+            let (without, with) = (latency_samples_with(&plain, sample_rate), latency_samples_with(&effects, sample_rate));
+            assert_eq!(with, without, "{:?} at {} Hz", amp, sample_rate);
+        }
+    }
+
+    /// Plays `input` block by block and tells after which blocks the chain was idle
+    fn run_watching(chain: &mut AmpChain, settings: &AmpSettings, input: &[f32]) -> (Vec<f32>, Vec<f32>, Vec<bool>) {
+        let (mut left, mut right) = (input.to_vec(), input.to_vec());
+        let mut idle = Vec::new();
+        for (l, r) in left.chunks_mut(BLOCK).zip(right.chunks_mut(BLOCK)) {
+            chain.process(settings, l, Some(r));
+            idle.push(chain.is_idle());
+        }
+        (left, right, idle)
+    }
+
+    #[test]
+    fn test_reverb_tail_rings_on_after_the_input_and_ends() {
+        let playing = 192 * BLOCK;
+        let mut input = power_chords(SAMPLE_RATE, 0.3)[..playing].to_vec();
+        input.resize(playing + 72_000, 0.0);
+        let plain = AmpSettings {
+            out_level: 0.25,
+            ..with_amp(Amp::Klar, 0.5)
+        };
+        let settings = AmpSettings {
+            reverb: reverb_on(0.3, 0.5),
+            ..plain
+        };
+        let dry = run(&plain, &input, SAMPLE_RATE);
+        let mut chain = new_chain(SAMPLE_RATE);
+        assert!(chain.is_idle());
+        let (left, right, idle) = run_watching(&mut chain, &settings, &input);
+
+        // A tenth of a second after the last note: nothing of the amp, a tail on both sides
+        let after = playing + 4800..playing + 9600;
+        assert!(peak(&dry[after.clone()]) < 1e-6, "The amp alone is still at {}", peak(&dry[after.clone()]));
+        assert!(rms(&left[after.clone()]) > 1e-4 && rms(&right[after.clone()]) > 1e-4, "No tail: {}", rms(&left[after.clone()]));
+        assert!(left[after.clone()] != right[after.clone()]);
+        assert!(!idle[playing / BLOCK - 1] && !idle[(playing + 4800) / BLOCK]);
+
+        // And it ends: idle within a second and a half, and silent from there on
+        let ended = idle.iter().rposition(|idle| !idle).map_or(0, |last| (last + 1) * BLOCK);
+        assert!(ended < playing + 72_000, "Never idle");
+        assert!(ended > playing && ended < playing + (1.5 * SAMPLE_RATE) as usize, "Idle after {} samples", ended - playing);
+        assert!(peak(&left[ended..]) < 1e-9 && peak(&right[ended..]) < 1e-9);
+    }
+
+    #[test]
+    fn test_chain_is_idle_without_effects_and_once_the_repeats_have_ended() {
+        let playing = 96 * BLOCK;
+        let mut input = power_chords(SAMPLE_RATE, 0.2)[..playing].to_vec();
+        input.resize(playing + 84_000, 0.0);
+
+        // Without effects there is never a tail to wait for
+        let plain = with_amp(Amp::Klar, 0.5);
+        let (_, _, idle) = run_watching(&mut new_chain(SAMPLE_RATE), &plain, &input[..2 * playing]);
+        assert!(idle.iter().all(|&idle| idle));
+
+        // The delay holds its last repeats for as long as its lines are, a second, after
+        // they have fallen silent
+        let settings = AmpSettings {
+            delay: delay_on(20.0, 0.3, 0.5),
+            ..plain
+        };
+        let (left, right, idle) = run_watching(&mut new_chain(SAMPLE_RATE), &settings, &input);
+        assert!(idle[..(playing + 2400) / BLOCK].iter().all(|&idle| !idle));
+        let ended = idle.iter().rposition(|idle| !idle).map_or(0, |last| (last + 1) * BLOCK);
+        assert!(ended < playing + 84_000, "Never idle");
+        assert!(ended < playing + (1.6 * SAMPLE_RATE) as usize, "Idle after {} samples", ended - playing);
+        assert!(peak(&left[ended..]) < 1e-9 && peak(&right[ended..]) < 1e-9);
+    }
+
+    #[test]
+    fn test_switching_amps_does_not_cut_the_tail() {
+        // The last chord has stopped and its repeats and tail ring on when another amp is
+        // picked. The amps themselves are silent by then, so the tail is all there is
+        let playing = 128 * BLOCK;
+        let at = playing + 40 * BLOCK;
+        let mut input = power_chords(SAMPLE_RATE, 0.2)[..playing].to_vec();
+        input.resize(playing + 24_000, 0.0);
+        let effects = |amp: Amp| AmpSettings {
+            delay: delay_on(100.0, 0.5, 0.5),
+            reverb: reverb_on(1.5, 0.5),
+            out_level: 0.25,
+            ..with_amp(amp, 0.5)
+        };
+
+        for (from, to) in [(Amp::Torden, Amp::Klar), (Amp::Klar, Amp::Brol)] {
+            let (stayed, _) = run_stereo(&effects(from), &input, SAMPLE_RATE);
+            let mut chain = new_chain(SAMPLE_RATE);
+            let (mut left, mut right) = (input.clone(), input.clone());
+            for (index, (l, r)) in left.chunks_mut(BLOCK).zip(right.chunks_mut(BLOCK)).enumerate() {
+                chain.process(&effects(if index * BLOCK < at { from } else { to }), l, Some(r));
+            }
+            let tail = rms(&stayed[at..]);
+            assert!(tail > 1e-3, "{:?}: no tail to keep, {}", from, tail);
+            let off = largest_difference(&left[at..], &stayed[at..]);
+            assert!(off < 0.01 * tail, "{:?} to {:?}: tail off by {} at a level of {}", from, to, off, tail);
+            assert!(rms(&right[at..]) > 0.5 * tail);
+        }
+    }
+
+    #[test]
+    fn test_switching_amps_with_effects_on_does_not_click() {
+        let at = 300 * BLOCK;
+        let input = sine(220.0, 0.178, SAMPLE_RATE, 36_000);
+        for (from, to) in [(Amp::Klar, Amp::Torden), (Amp::Torden, Amp::Brol)] {
+            let effects = |amp: Amp| with_effects(with_amp(amp, 0.5));
+            let mut chain = new_chain(SAMPLE_RATE);
+            let (mut left, mut right) = (input.clone(), input.clone());
+            for (index, (l, r)) in left.chunks_mut(BLOCK).zip(right.chunks_mut(BLOCK)).enumerate() {
+                chain.process(&effects(if index * BLOCK < at { from } else { to }), l, Some(r));
+            }
+            for channel in [&left, &right] {
+                let ratio = step_ratio(channel, at);
+                assert!(ratio < 1.2, "{:?} to {:?}: step {} times its own", from, to, ratio);
+            }
+        }
+    }
+
+    #[test]
+    fn test_bypass_with_effects_does_not_click_and_comes_back_clean() {
+        let input = sine(220.0, 0.3, SAMPLE_RATE, 28_800);
+        let playing = with_effects(with_amp(Amp::Klar, 0.5));
+        let bypassed = AmpSettings {
+            bypass: true,
+            ..playing
+        };
+        let (off, on) = (150 * BLOCK, 300 * BLOCK);
+        let fade = (BYPASS_FADE_MS * 0.001 * SAMPLE_RATE) as usize + 1;
+
+        // Playing, bypassed, playing again
+        let mut chain = new_chain(SAMPLE_RATE);
+        let (mut left, mut right) = (input.clone(), input.clone());
+        for (index, (l, r)) in left.chunks_mut(BLOCK).zip(right.chunks_mut(BLOCK)).enumerate() {
+            let settings = if (150..300).contains(&index) { &bypassed } else { &playing };
+            chain.process(settings, l, Some(r));
+            // Once the fade is over nothing is kept ringing behind the bypass
+            assert!(!(160..300).contains(&index) || chain.is_idle());
+        }
+        assert!(left != right);
+        // What comes back is a chain that starts there: nothing of what the effects held
+        let (fresh_left, fresh_right) = run_stereo(&playing, &input[on..], SAMPLE_RATE);
+
+        for (channel, fresh) in [(&left, &fresh_left), (&right, &fresh_right)] {
+            assert!(channel[off + fade..on] == input[off + fade..on]);
+            let own_step = largest_step(&channel[4800..off]).max(largest_step(&input));
+            let step_off = largest_step(&channel[off - 1..off + fade + 1]);
+            let step_on = largest_step(&channel[on - 1..on + 2400]);
+            assert!(step_off < own_step * 1.2, "Step of {} into bypass, {} while playing", step_off, own_step);
+            assert!(step_on < own_step * 1.2, "Step of {} out of bypass, {} while playing", step_on, own_step);
+            let stale = largest_difference(&channel[on + fade..], &fresh[fade..]);
+            assert!(stale < 1e-6, "Off by {} from a chain that starts at the switch", stale);
+        }
+
+        // And with nothing played after a short bypass, nothing is heard: the long tail and
+        // the repeats of the chords before it are gone
+        let long = with_effects_at_most(with_amp(Amp::Klar, 0.5));
+        let mut chain = new_chain(SAMPLE_RATE);
+        run_stereo_blocks(&mut chain, &long, &power_chords(SAMPLE_RATE, 0.2), BLOCK);
+        assert!(!chain.is_idle());
+        let bypassed = AmpSettings { bypass: true, ..long };
+        run_stereo_blocks(&mut chain, &bypassed, &vec![0.0; 16 * BLOCK], BLOCK);
+        assert!(chain.is_idle());
+        let (left, right) = run_stereo_blocks(&mut chain, &long, &vec![0.0; 9600], BLOCK);
+        assert!(peak(&left) < 1e-9 && peak(&right) < 1e-9, "Left over: {} and {}", peak(&left), peak(&right));
+        assert!(chain.is_idle());
+    }
+
+    #[test]
+    fn test_mono_layout_is_the_left_channel() {
+        let input = power_chords(SAMPLE_RATE, 0.3);
+        for amp in [Amp::Klar, Amp::Torden] {
+            let settings = with_effects(everything_on(amp, 0.6));
+            let mono = run(&settings, &input, SAMPLE_RATE);
+            let (left, right) = run_stereo(&settings, &input, SAMPLE_RATE);
+            assert!(mono == left, "{:?}", amp);
+            assert!(left != right, "{:?}", amp);
+        }
+    }
+
+    #[test]
+    fn test_output_is_bounded_with_effects_at_extremes_at_all_sample_rates() {
+        // Full-scale input, every dial up, the shortest delay at full feedback so that as
+        // many repeats as can be pile up, the longest reverb, twice the output level
+        for sample_rate in [44100.0, 48000.0, 88200.0, 96000.0, 192000.0] {
+            let len = (sample_rate * 0.2) as usize;
+            let mut noise = Noise::new(3);
+            let input: Vec<f32> = sine(97.0, 1.0, sample_rate, len).iter().map(|s| s + noise.next()).collect();
+            for (amp, time_ms) in [(Amp::Klar, 20.0), (Amp::Torden, 1000.0)] {
+                let settings = AmpSettings {
+                    in_gain_db: 24.0,
+                    drive_on: true,
+                    drive_gain: 1.0,
+                    drive_level: 1.0,
+                    delay: delay_on(time_ms, 0.9, 1.0),
+                    reverb: reverb_on(6.0, 1.0),
+                    ..with_all_dials(amp, 1.0, 2.0)
+                };
+                let (left, right) = run_stereo(&settings, &input, sample_rate);
+                for channel in [&left, &right] {
+                    assert!(channel.iter().all(|s| s.is_finite()), "{:?} not finite at {} Hz", amp, sample_rate);
+                    assert!(peak(channel) <= 1.0, "{:?} peak {} at {} Hz", amp, peak(channel), sample_rate);
+                    assert!(rms(channel) > 0.05);
+                }
+                let mono = run(&settings, &input, sample_rate);
+                assert!(mono.iter().all(|s| s.is_finite()) && peak(&mono) <= 1.0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_output_with_effects_does_not_depend_on_block_size() {
+        let input = power_chords(SAMPLE_RATE, 0.2);
+        let settings = with_effects(AmpSettings {
+            gate_thresh_db: -30.0,
+            gate_release_ms: 20.0,
+            ..everything_on(Amp::Brol, 0.7)
+        });
+        let reference = run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, input.len());
+        assert!(reference.0 != reference.1);
+        for block in [1, 7, 32, 64, 1000] {
+            let output = run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, block);
+            let off = largest_difference(&reference.0, &output.0).max(largest_difference(&reference.1, &output.1));
+            assert!(off < 1e-5, "In blocks of {}: off by {}", block, off);
+            let mono = run_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, block);
+            assert!(largest_difference(&reference.0, &mono) < 1e-5, "Mono in blocks of {}", block);
+        }
+    }
+
+    #[test]
+    fn test_effects_tails_are_not_slower_than_playing() {
+        // The repeats and the tail fall all the way to nothing in this time. Numbers that
+        // small must not slow the processor down on the way
+        let mut chain = new_chain(SAMPLE_RATE);
+        let settings = AmpSettings {
+            delay: delay_on(20.0, 0.5, 1.0),
+            reverb: reverb_on(0.3, 1.0),
+            ..with_amp(Amp::Klar, 0.5)
+        };
+        let playing = block_time_us(&mut chain, &settings, &power_chords(SAMPLE_RATE, 0.25));
+        assert!(!chain.is_idle());
+        let ringing = block_time_us(&mut chain, &settings, &vec![0.0; 60_000]);
+        let silent = block_time_us(&mut chain, &settings, &vec![0.0; 12_000]);
+        assert!(ringing < playing * 2.0, "{:.1} us per block playing, {:.1} us while the tail ends", playing, ringing);
+        assert!(silent < playing * 2.0, "{:.1} us per block playing, {:.1} us silent", playing, silent);
+    }
+
     /// Prints levels, distortion, aliasing, tightness, dynamics, latency and cost for every
-    /// amp, and what the gate, the drive pedal and the cabinet's dials do. Use it to compare
+    /// amp, and what the gate, the drive pedal, the cabinet's dials, the delay, the reverb and
+    /// the safety clip do. Use it to compare
     /// before and after changing the DSP or a model's constants:
     ///   cargo test -p amp --release amp_report -- --ignored --nocapture
     #[test]
@@ -2272,6 +2757,210 @@ mod tests {
         }
 
         println!();
+        println!("Delay and reverb. `default`: both on as the plugin starts (350 ms, 35 %, 25 % and 1.5 s, 20 %).");
+        println!("`most`: 350 ms, feedback 90 %, mix 100 % and 6 s, mix 100 %");
+        println!();
+        println!("Time per {}-sample block, stereo, everything on (Torden, Gain 10, gate, drive, cabinet dials)", BLOCK);
+        let block_time_stereo_us = |chain: &mut AmpChain, settings: &AmpSettings, input: &[f32]| {
+            let (mut left, mut right) = (input.to_vec(), input.to_vec());
+            let mut times: Vec<f64> = left
+                .chunks_mut(BLOCK)
+                .zip(right.chunks_mut(BLOCK))
+                .map(|(l, r)| {
+                    let start = Instant::now();
+                    chain.process(settings, l, Some(r));
+                    start.elapsed().as_secs_f64() * 1e6
+                })
+                .collect();
+            times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            times[times.len() / 2]
+        };
+        println!(
+            "{:>11}{:>19}{:>19}{:>19}{:>19}{:>19}",
+            "", "effects off", "delay", "reverb", "both", "both, tails only"
+        );
+        for sample_rate in [48000.0, 96000.0, 192000.0] {
+            let block_us = BLOCK as f64 / sample_rate as f64 * 1e6;
+            let base = everything_on(Amp::Torden, 1.0);
+            let both = with_default_effects(base);
+            let chords = power_chords(sample_rate, 2.0);
+            print!("{:>8} Hz", sample_rate);
+            for settings in [base, AmpSettings { reverb: base.reverb, ..both }, AmpSettings { delay: base.delay, ..both }, both] {
+                let mut chain = new_chain(sample_rate);
+                run_stereo_blocks(&mut chain, &settings, &chords, BLOCK);
+                let time = block_time_stereo_us(&mut chain, &settings, &chords);
+                print!("{:>9.1} us{:>5.1} %", time, time / block_us * 100.0);
+            }
+            // Nothing played, the gate closed, the repeats and a long tail ringing
+            let long = AmpSettings {
+                reverb: reverb_on(6.0, 0.2),
+                delay: delay_on(350.0, 0.9, 0.25),
+                ..base
+            };
+            let mut chain = new_chain(sample_rate);
+            run_stereo_blocks(&mut chain, &long, &chords, BLOCK);
+            run_stereo_blocks(&mut chain, &long, &vec![0.0; sample_rate as usize], BLOCK);
+            let time = block_time_stereo_us(&mut chain, &long, &vec![0.0; sample_rate as usize]);
+            assert!(!chain.is_idle());
+            println!("{:>9.1} us{:>5.1} %", time, time / block_us * 100.0);
+        }
+
+        println!();
+        println!("Output peak on the chords in dBFS, the louder of left and right: in front of the safety");
+        println!("clip and behind it, and the share of samples over its knee ({:.1} dBFS)", to_db(OUTPUT_CLIP_KNEE));
+        println!("{:<22}{:>21}{:>24}{:>24}", "", "effects off", "default", "most");
+        println!(
+            "{:<22}{:>7}{:>7}{:>7}{:>10}{:>7}{:>7}{:>10}{:>7}{:>7}",
+            "amp", "front", "out", "over", "front", "out", "over", "front", "out", "over"
+        );
+        let stereo_peak = |settings: &AmpSettings, input: &[f32]| {
+            let (left, right) = run_stereo(settings, input, SAMPLE_RATE);
+            let over = left.iter().chain(&right).filter(|s| s.abs() > OUTPUT_CLIP_KNEE).count();
+            (peak(&left).max(peak(&right)), over as f32 / (2 * left.len()) as f32 * 100.0)
+        };
+        let loud: Vec<f32> = chords.iter().map(|s| (s * 2.0).clamp(-1.0, 1.0)).collect();
+        let peak_rows = [
+            ("Klar 0.0", with_amp(Amp::Klar, 0.0), &chords),
+            ("Klar 5.0", with_amp(Amp::Klar, 0.5), &chords),
+            ("Brøl 0.0", with_amp(Amp::Brol, 0.0), &chords),
+            ("Brøl 5.0", with_amp(Amp::Brol, 0.5), &chords),
+            ("Torden 5.0", with_amp(Amp::Torden, 0.5), &chords),
+            ("Torden 10.0", with_amp(Amp::Torden, 1.0), &chords),
+            ("Klar 5.0 +6 dB in", with_amp(Amp::Klar, 0.5), &loud),
+            ("Brøl 5.0 +6 dB in", with_amp(Amp::Brol, 0.5), &loud),
+            ("Torden 5.0 +6 dB in", with_amp(Amp::Torden, 0.5), &loud),
+            ("Klar 5.0 Master 10", AmpSettings { master: 1.0, ..with_amp(Amp::Klar, 0.5) }, &chords),
+            ("Torden 5.0 Master 10", AmpSettings { master: 1.0, ..with_amp(Amp::Torden, 0.5) }, &chords),
+        ];
+        for (name, base, input) in peak_rows {
+            let mut row = format!("{:<22}", name);
+            for settings in [base, with_default_effects(base), with_effects_at_most(base)] {
+                // The output level sits between the effects and the clip. Turned far down,
+                // nothing reaches the clip, and the peak is the one in front of it
+                let quiet = AmpSettings { out_level: 0.01, ..settings };
+                let front = stereo_peak(&quiet, input).0 * 100.0;
+                let (out, over) = stereo_peak(&settings, input);
+                row += &format!("{:>7.1}{:>7.1}{:>6.1}%   ", to_db(front), to_db(out), over);
+            }
+            println!("{}", row.trim_end());
+        }
+
+        println!();
+        println!("Safety clip. Klar at Gain 3 with the drive at 10, 10, 10 in front, the loudest setting there");
+        println!("is, across the Output dial: chords peak in front of the clip and behind it, and aliasing");
+        println!("{:<14}{:>8}{:>8}{:>12}{:>12}", "Output dB", "front", "out", "alias 1245", "alias 4186");
+        for out_db in [0.0, -3.0, -6.0, -9.0] {
+            let settings = AmpSettings {
+                out_level: db_to_gain(out_db),
+                ..with_drive(Amp::Klar, 0.3, 1.0, 1.0, 1.0)
+            };
+            let quiet = AmpSettings { out_level: 0.01, ..settings };
+            println!(
+                "{:<14}{:>8.1}{:>8.1}{:>12.1}{:>12.1}",
+                out_db,
+                to_db(peak(&run(&quiet, &chords, SAMPLE_RATE)) * 100.0 * settings.out_level),
+                to_db(peak(&run(&settings, &chords, SAMPLE_RATE))),
+                aliasing_db_with(&settings, ALIAS_TONES_HZ[0]),
+                aliasing_db_with(&settings, ALIAS_TONES_HZ[1]),
+            );
+        }
+
+        println!();
+        println!("Stereo (Brøl, Gain 5, chords, in front of the safety clip). `L/R`: how alike left and right");
+        println!("of the whole output are, 1.0 is mono. `wet L/R`: the same for what the effects add. `wet`:");
+        println!("its level against the amp's own signal. Mono host layout: the plugin puts out the left");
+        println!("channel (`layout`: its largest difference from the stereo layout's left). `sum`: what the");
+        println!("average of left and right would do to the level of what the effects add, over all and in");
+        println!("the octave where it loses most");
+        println!(
+            "{:<26}{:>8}{:>9}{:>8}{:>10}{:>8}{:>14}",
+            "", "L/R", "wet L/R", "wet dB", "layout", "sum dB", "worst octave"
+        );
+        let base = AmpSettings {
+            out_level: 0.01,
+            ..with_amp(Amp::Brol, 0.5)
+        };
+        let defaults = with_default_effects(base);
+        let stereo_rows = [
+            ("delay default", AmpSettings { reverb: base.reverb, ..defaults }),
+            ("reverb default", AmpSettings { delay: base.delay, ..defaults }),
+            ("both default", defaults),
+            ("delay 100 ms", AmpSettings { delay: delay_on(100.0, 0.35, 0.25), ..base }),
+            ("delay 1000 ms", AmpSettings { delay: delay_on(1000.0, 0.35, 0.25), ..base }),
+            ("reverb 0.3 s", AmpSettings { reverb: reverb_on(0.3, 0.2), ..base }),
+            ("reverb 6 s", AmpSettings { reverb: reverb_on(6.0, 0.2), ..base }),
+            ("both most", with_effects_at_most(base)),
+        ];
+        let dry = run(&base, &chords, SAMPLE_RATE);
+        for (name, settings) in stereo_rows {
+            let (left, right) = run_stereo(&settings, &chords, SAMPLE_RATE);
+            let mono = run(&settings, &chords, SAMPLE_RATE);
+            let (wet_left, wet_right) = (difference(&left, &dry), difference(&right, &dry));
+            let wet_sum: Vec<f32> = wet_left.iter().zip(&wet_right).map(|(l, r)| 0.5 * (l + r)).collect();
+            let worst = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+                .iter()
+                .map(|&centre_hz| {
+                    let band = |signal: &[f32]| rms(&octave_band(signal, SAMPLE_RATE, centre_hz));
+                    to_db(band(&wet_sum) / band(&wet_left))
+                })
+                .fold(f32::MAX, f32::min);
+            println!(
+                "{:<26}{:>8.3}{:>9.3}{:>8.1}{:>10.1e}{:>8.1}{:>14.1}",
+                name,
+                correlation(&left, &right),
+                correlation(&wet_left, &wet_right),
+                to_db(rms(&wet_left) / rms(&dry)),
+                largest_difference(&mono, &left),
+                to_db(rms(&wet_sum) / rms(&wet_left)),
+                worst
+            );
+        }
+
+        println!();
+        println!("Latency with everything on, without the effects and with them (delay 20 ms, 90 %, 100 %,");
+        println!("reverb 6 s, 100 %), in samples");
+        println!("{:<8}{:>10}{:>10}{:>10}{:>10}", "", "44100", "48000", "96000", "192000");
+        for amp in Amp::ALL {
+            print!("{:<8}", amp.model().name);
+            for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0] {
+                let plain = everything_on(amp, 0.0);
+                let effects = AmpSettings {
+                    delay: delay_on(20.0, 0.9, 1.0),
+                    reverb: reverb_on(6.0, 1.0),
+                    ..plain
+                };
+                print!(
+                    "{:>10}",
+                    format!("{} / {}", latency_samples_with(&plain, sample_rate), latency_samples_with(&effects, sample_rate))
+                );
+            }
+            println!();
+        }
+
+        println!();
+        println!("Time from the last note until the chain is idle (Brøl, Gain 5, gate on), in seconds");
+        let last_note = power_chords(SAMPLE_RATE, 2.0);
+        let idle_rows = [
+            ("effects off", with_amp(Amp::Brol, 0.5)),
+            ("delay default", AmpSettings { reverb: ReverbSettings::default(), ..with_default_effects(with_amp(Amp::Brol, 0.5)) }),
+            ("reverb default", AmpSettings { delay: DelaySettings::default(), ..with_default_effects(with_amp(Amp::Brol, 0.5)) }),
+            ("both default", with_default_effects(with_amp(Amp::Brol, 0.5))),
+            ("reverb 6 s", AmpSettings { reverb: reverb_on(6.0, 0.2), ..with_amp(Amp::Brol, 0.5) }),
+            ("delay 1000 ms, 90 %", AmpSettings { delay: delay_on(1000.0, 0.9, 0.25), ..with_amp(Amp::Brol, 0.5) }),
+        ];
+        for (name, settings) in idle_rows {
+            let mut chain = new_chain(SAMPLE_RATE);
+            run_stereo_blocks(&mut chain, &settings, &last_note, BLOCK);
+            let mut blocks = 0;
+            while !chain.is_idle() && blocks < 200 * SAMPLE_RATE as usize / BLOCK {
+                let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
+                chain.process(&settings, &mut left, Some(&mut right));
+                blocks += 1;
+            }
+            println!("{:<22}{:>8.2}", name, (blocks * BLOCK) as f32 / SAMPLE_RATE);
+        }
+
+        println!();
         println!("Clipping curves, ns per sample");
         let ramp: Vec<f32> = (0..1_000_000).map(|i| ((i % 2000) as f32 - 1000.0) * 0.004).collect();
         let time_ns = |name: &str, shape: &mut dyn FnMut(f32) -> f32| {
@@ -2292,7 +2981,8 @@ mod tests {
     /// Writes WAV files to target/renders for listening: a direct guitar signal, dry and
     /// through every amp at a few settings, palm mutes through every amp, the drive pedal in
     /// front of Torden and of Klar, the cabinet's dials and the cabinet switched off, the gate
-    /// on a noisy input, and one file that changes amp every two seconds:
+    /// on a noisy input, one file that changes amp every two seconds, and each amp in stereo
+    /// with delay and reverb:
     ///   cargo test -p amp --release render_wavs -- --ignored
     ///
     /// Set AMP_INPUT_WAV to the path of a recording to use that instead of the made-up one.
@@ -2411,6 +3101,42 @@ mod tests {
             chain.process(&with_amp(Amp::ALL[turn % Amp::ALL.len()], 0.5), block, None);
         }
         write_wav(&dir.join("amp_switching.wav"), &[&output, &output], sample_rate);
+
+        // The effects, in stereo, with three seconds after the playing for what rings on:
+        // Klar with delay and reverb, Brøl in a small room, Torden as a lead with delay
+        let mut ringing_out = input.clone();
+        ringing_out.resize(input.len() + 3 * sample_rate as usize, 0.0);
+        let effect_renders = [
+            (
+                "klar_gain4_delay_reverb",
+                AmpSettings {
+                    delay: delay_on(380.0, 0.4, 0.3),
+                    reverb: reverb_on(2.2, 0.3),
+                    ..with_amp(Amp::Klar, 0.4)
+                },
+            ),
+            (
+                "brol_gain6_room",
+                AmpSettings {
+                    reverb: reverb_on(0.5, 0.3),
+                    ..with_amp(Amp::Brol, 0.6)
+                },
+            ),
+            (
+                "torden_gain7_lead_delay",
+                AmpSettings {
+                    delay: delay_on(430.0, 0.45, 0.3),
+                    reverb: reverb_on(1.2, 0.1),
+                    mid: 0.65,
+                    ..with_drive(Amp::Torden, 0.7, 0.2, 0.5, 0.8)
+                },
+            ),
+            ("brol_gain5_default_effects", with_default_effects(with_amp(Amp::Brol, 0.5))),
+        ];
+        for (name, settings) in effect_renders {
+            let (left, right) = run_stereo(&settings, &ringing_out, rate);
+            write_wav(&dir.join(format!("amp_{}.wav", name)), &[&left, &right], sample_rate);
+        }
 
         println!("Wrote renders to {}", dir.display());
     }
