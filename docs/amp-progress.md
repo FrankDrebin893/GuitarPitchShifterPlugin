@@ -26,41 +26,27 @@ for something destructive or something that truly needs Rasmus.
 |---|---|
 | M1 One playable amp (Brøl) | done 2026-10-10 |
 | M2 Three amps | done 2026-10-10 |
-| M3 Gate, drive, pedalboard | done 2026-10-10 (window captured after the merge but the capture was not looked at) |
-| M4 Delay and reverb | modules and pedals written on side branches, not wired or merged |
+| M3 Gate, drive, pedalboard | done 2026-10-10 |
+| M4 Delay and reverb | done 2026-10-10 |
 | M5 Tuning and cost | not started |
 
 ## Next
 
-The session stopped here on 2026-10-10 because the usage limit was reached. M3 is committed
-and pushed. To continue with M4:
+M5, tuning and cost, in this order:
 
-1. Merge the two finished side branches (local only, in `.claude/worktrees`; if they are gone,
-   redo them from the descriptions below):
-   - `worktree-agent-a053295a7f4936ef3`, commit `b18e09a`: `delay.rs` and `reverb.rs` as
-     standalone modules with tests, `effects_report` and `render_effects` (ignored tests in
-     `reverb.rs`). API: `Delay` / `Reverb` with `new`, `set_sample_rate`, `reset`, `is_idle`,
-     `process(&settings, left, right)` in place; dry untouched, wet added; they smooth their
-     own settings. `DelaySettings { on, time_ms, feedback, mix }`, `ReverbSettings { on,
-     decay_s, mix }`
-   - `worktree-agent-a1df7e0f9270db3ea`, commit `1898a48`: Delay and Reverb pedals in the
-     editor and their parameters in `lib.rs` (`delay_on`, `delay_time` 20..1000 ms default 350,
-     `delay_feedback` 0..0.9 default 0.35, `delay_mix` default 0.25, `reverb_on`,
-     `reverb_decay` 0.3..6 s default 1.5, `reverb_mix` default 0.2)
-2. Wire them into `AmpChain::process_chunk`: after the cabinet and the DC blocker (move the DC
-   blocker in front of the effects), delay then reverb, then `out_level`, `output_clip` and the
-   bypass mix per channel. Add the settings to `AmpSettings` with the same defaults as `lib.rs`
-   and pass them in `process`. Call both every piece even when off (trails). Reset them in
-   `reset_stages`, not `reset_amp_stages`. Decide bypass (simplest: reset them when the bypass
-   fade reaches zero) and the mono host layout (scratch right channel, output the left or the
-   sum). Return `ProcessStatus::KeepAlive` while either `is_idle()` is false
-3. Tests that change: `test_stereo_outputs_are_equal_and_match_mono` and the `amp_alone`
-   reference. Add the effects to `amp_report` (CPU with everything on) and `render_wavs`
-4. Look at the 960 x 660 window (scratchpad script `shot.ps1` is gone with the session: start
-   `target/debug/amp_standalone.exe --backend dummy` and capture its window), update
-   CLAUDE.md (Guitar Amp section: parameter table, gate, drive, cab dials, effects; `param_switch`
-   in the Look section), commit, push
-5. Then M5 and the backlog below
+1. 2x oversampling at 88.2 kHz and above (192 kHz is 16 to 17.6 % of a core, almost all in
+   the oversampled region). `FACTOR` becomes a runtime value; re-check aliasing at 96 kHz
+   (Torden Gain 10 with the drive is the row to watch)
+2. Shorter cabinet IR at high rates (3840 taps at 192 kHz): measure how many taps hold the
+   response within 0.5 dB, or cap the IR
+3. Klar headroom: Gain 0 with default effects peaks 0.1 dB under the safety clip's knee;
+   1 to 1.5 dB less makeup, keeping the 2 dB level match between amps
+4. Faster idle: the delay waits a full line (1 s) of silence and both run down to -120 dBFS
+   (77 s at 1000 ms / 90 %)
+5. Bundle VST3 and CLAP (`cargo xtask bundle amp --release`) and check the bundle is there
+6. Then the backlog at the end of this file
+
+CLAUDE.md has the plugin's structure, signal flow and parameter table.
 
 ## What was decided with Rasmus
 
@@ -167,6 +153,15 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
   the default is bit-identical; cab off passes the amp at -1.4 dB
 - 2026-10-10 M3: pedals are 180 x 310; three-knob pedals use radius 17 in a triangle, two-knob
   pedals radius 24; the LED sits under the title. `ui::param_switch` draws LED and switch
+- 2026-10-10 M4: delay and reverb are additive: the dry signal is never scaled, so mix 0 and
+  off are bit-transparent. The delay's two lines feed each other, so the left/right offset
+  does not grow with each repeat. The reverb is an 8-line network with Hadamard mixing
+- 2026-10-10 M4: effect settings are latched at the 32-sample tick, not smoothed in the chain;
+  the modules smooth themselves
+- 2026-10-10 M4: `KeepAlive` while `!chain.is_idle()`, else `Normal`. `Tail(n)` would need
+  the tail length ahead of time, and gains nothing in CLAP
+- 2026-10-10 M4: rigs use `ui::rig_led` (black socket, darker unlit lens); `ui::led` and the
+  other two plugins are unchanged
 - 2026-10-10 Worktrees for subagents start from `main`, not from `amp-sim`. Tell each agent to
   run `git merge --ff-only amp-sim` first
 
@@ -189,8 +184,6 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
   dial could change character more
 - Torden is only 2.5 dB tighter than Brøl below 100 Hz relative to the mids on palm mutes
 - Amp switching leaves a dip of about 10 ms; not listened to (`amp_switching.wav`)
-- An unlit LED on oxblood reads as an empty chrome ring: `LED_OFF` was tuned for orange and
-  teal. Changing it changes the other two plugins, so it waits for a decision
 - The no-denormal-slowdown test is a timing assertion (silent under 2x playing); stable so far
 - The standalone window was looked at as a capture of the window; the plugin has not been
   loaded in a DAW
@@ -208,12 +201,22 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
 - Delay and reverb (not merged yet): the reverb blooms late (loudest around 95 ms); the
   delay's odd repeats lose 2.8 dB in mono; neither limits its own output; the delay at
   1000 ms and feedback 0.9 takes 76 s to go idle
-- Unlit LEDs on oxblood read as empty chrome rings. Planned for M5: a darker unlit lens used
-  only on rigs, so the other two plugins do not change
 
 M3 figures (2026-10-10, 48 kHz): Torden Gain 10 aliasing -91.7 / -90.4 dB, with the drive
 (Drive 3, Level 8) -91.5 / -79.5 dB; Brøl Gain 0 THD -45.0 dB; closed gate is exactly silent;
 worst latency 0.317 ms (Torden, 44.1 kHz, everything on). Run `amp_report` for the full tables.
+
+- M4: bypass cuts the delay and reverb tails (10 ms fade) and resets them
+- M4: a mono host layout gets the left effect channel only (the sum combs: up to -6.7 dB in
+  one octave)
+- M4: effects at their maximum push 2 to 11 dB over the safety clip's knee; the clip is not
+  antialiased (an antialiased one costs half a sample and rolls off the top even when idle)
+- M4: with the gate off and a hissy amp the effects never go idle, so the status stays KeepAlive
+- M4: VST3 hosts that read the tail length only once at load see 0
+- M4: everything on in stereo, Torden: 3.6 % / 7.8 % / 17.6 % of a core at 48 / 96 / 192 kHz.
+  The effects cost about 5 us per 64-sample block (delay 1.3, reverb 3.7)
+- M4: latency is unchanged by the effects (Klar 8, Brøl 10, Torden 14 samples at 48 kHz with
+  every pedal on)
 
 ## Last report
 

@@ -51,7 +51,8 @@ Every plugin is drawn as a painted stompbox. All of it is vector, drawn with egu
 
 - `theme.rs` - Colours, the three embedded fonts (`install`), text helpers. One paint colour per plugin
 - `widgets.rs` - `param_knob` (fluted knob, name, value on label tape), `footswitch`, `led`,
-  `silk_frame`, `silk_label`, and `badge` (the HØJT logo: the Ø is a knob, its slash the pointer)
+  `small_footswitch`, `rig_led` and `param_switch` (the switch and LED of a rig, bound to an on/off
+  parameter), `silk_frame`, `silk_label`, and `badge` (the HØJT logo: the Ø is a knob, its slash the pointer)
 - `frame.rs` - `pedal`: enclosure, screws, jack captions, tilted name band, model number, logo.
   A plugin describes itself with a `PedalStyle`. For a window with several enclosures: `rig`
   (the bare bench), `head` (wide enclosure with everything a pedal has printed on it) and
@@ -95,7 +96,9 @@ controls, portrait) or `plugins/drums/src/editor.rs` (many controls, landscape) 
   pedal per plugin. Its window is a `rig`: one `head` across the top, which carries the name band,
   model number and logo, and from left to right in signal order a row of `mini_pedal`s below it.
   All of them have the plugin's one paint colour. On a head and on mini pedals the switches are
-  `small_footswitch` with the LED beside or above it; everything else in this guide applies
+  `small_footswitch` and the LEDs `rig_led` (an unlit `led` disappears on dark paint), beside or
+  above the switch. A mini pedal holds two knobs of radius 24 side by side or three of radius 17
+  in a triangle. Everything else in this guide applies
 
 After changing an editor, run it standalone (see Build Commands) and look at it before bundling.
 
@@ -187,33 +190,91 @@ Not there yet: separate outputs per drum, hi-hat openness from CC4, cymbal choke
 
 ### Guitar Amp (`plugins/amp`)
 
-In progress on branch `amp-sim`. `docs/amp-progress.md` has the plan, the frozen parameter ids,
-the decisions and the state of the work; read it before touching the plugin.
+In progress on branch `amp-sim`. `docs/amp-progress.md` has the plan, the decisions, the known
+problems and the backlog; read it before working on the plugin.
 
-A guitar amp with our own amps and components: own names, no real makers' names, trademarks or
-circuit names anywhere. Three amps, each with its own cabinet: Klar (clean, glassy), Brøl
-(mid-forward crunch) and Torden (modern tight high gain). They share the six dials.
+A guitar amp with a full signal chain, all our own designs: own names, no real makers' names,
+trademarks or circuit names anywhere (code, comments, docs, commit messages). Three amps, each
+with its own cabinet: Klar (clean, glassy), Brøl (mid-forward crunch), Torden (modern tight high
+gain). They share the six dials.
 
 - `src/lib.rs` - Plugin entry point, parameters. Reads them once per block into `AmpSettings`
-- `src/chain.rs` - `AmpChain`: the whole signal chain, dial smoothing, bypass crossfade, amp
-  switching (the amp fades out for 5 ms, is reconfigured at silence and fades back in)
+- `src/chain.rs` - `AmpChain`: the whole chain, dial smoothing, bypass crossfade, amp switching
+- `src/gate.rs`, `src/drive.rs` - Noise gate; overdrive pedal
 - `src/amp/` - `model.rs` (`Amp` and one `AmpModel` of constants per amp), `preamp.rs`,
   `tonestack.rs`, `poweramp.rs`
-- `src/cab.rs` - Cabinet: impulse response designed in code per sample rate, direct FIR
+- `src/cab.rs` - Cabinet: impulse response designed in code per sample rate, direct FIR, Mic and
+  Resonance filters behind it
+- `src/delay.rs`, `src/reverb.rs` - Stereo delay; stereo reverb (8-line feedback delay network)
 - `src/dsp/` - `filters.rs` (f64 biquads), `oversample.rs` (4x, minimum-phase IIR half-bands),
   `shaper.rs` (antialiased clippers)
-- `src/editor.rs` - egui GUI: oxblood amp head
+- `src/editor.rs` - egui GUI: oxblood head over five pedals
 
-Mono through amp and cabinet (a stereo input is averaged). The nonlinear stages run 4x
-oversampled with antialiased clippers. Latency is 0.15 to 0.25 ms and nothing is reported to the host.
-Amps differ only by the constants in `amp/model.rs`: tune there, never with `match amp` in the DSP.
+Signal flow:
+
+1. Input (a stereo input is averaged to mono), input gain, gate. The gate's detector reads the
+   input before the input gain; no lookahead
+2. One 4x oversampled region: drive pedal, preamp stages, tone stack, power amp. The clippers
+   are antialiased (antiderivative method; second order where the gain is highest)
+3. Cabinet, DC blocker
+4. Stereo delay, then stereo reverb. They add wet to an untouched dry signal, smooth their own
+   settings, ring out when switched off and cost nothing once idle
+5. Output level, safety clip
+
+How it behaves:
+
+- Amps differ only by constants in `amp/model.rs`. Tune there, never with `match amp` in the DSP
+- Dials are read every 32 samples counted across host blocks, so the output does not depend on
+  the host's block size
+- Switching amp fades the amp out over 5 ms, reconfigures it at silence and fades it back in
+- Bypass crossfades to the untouched input in 10 ms and drops the effects' tails
+- With every pedal off and the cabinet dials at 5.0 the chain is bit-identical to the amp alone
+- Latency is 0.1 to 0.3 ms and nothing is reported to the host
+- A mono host layout gets the left channel of the effects
+- `process` returns `KeepAlive` while a delay or reverb tail rings
+
+| Parameter (id) | Range | Default | Description |
+|----------------|-------|---------|-------------|
+| Bypass (`bypass`) | on / off | off | The On switch on the head |
+| Input (`in_gain`) | -24 to +24 dB | 0 dB | Gain in front of everything except the gate's detector |
+| Gate (`gate_on`) | on / off | on | Noise gate on the input |
+| Gate Threshold (`gate_thresh`) | -80 to -20 dB | -60 dB | Input level that opens the gate (closes 6 dB lower) |
+| Gate Release (`gate_release`) | 20-500 ms | 100 ms | Time to close after a 40 ms hold |
+| Drive (`drive_on`) | on / off | off | Overdrive pedal in front of the amp |
+| Drive Gain (`drive_gain`) | 0.0-10.0 | 3.0 | Amount of clipping in the pedal |
+| Drive Tone (`drive_tone`) | 0.0-10.0 | 5.0 | The pedal's top end, 1.5 to 7 kHz |
+| Drive Level (`drive_level`) | 0.0-10.0 | 5.0 | The pedal's output, -20 to +20 dB into the amp |
+| Amp (`amp`) | Klar / Brøl / Torden | Brøl | Amp and its cabinet. Variant ids `klar`, `brol`, `torden` |
+| Gain, Bass, Mid, Treble, Presence, Master (`gain`, `bass`, `mid`, `treble`, `presence`, `master`) | 0.0-10.0 | 5.0 | The amp's dials |
+| Cabinet (`cab_on`) | on / off | on | Off passes the amp at about the same level, for a cabinet elsewhere |
+| Cab Mic (`cab_mic`) | 0.0-10.0 | 5.0 | Darker to brighter microphone position |
+| Cab Resonance (`cab_res`) | 0.0-10.0 | 5.0 | Less or more low thump |
+| Delay (`delay_on`) | on / off | off | Stereo delay behind the cabinet |
+| Delay Time (`delay_time`) | 20-1000 ms | 350 ms | Time between repeats |
+| Delay Feedback (`delay_feedback`) | 0-90 % | 35 % | Level of each repeat against the one before |
+| Delay Mix (`delay_mix`) | 0-100 % | 25 % | Level of the repeats |
+| Reverb (`reverb_on`) | on / off | off | Stereo reverb behind the delay |
+| Reverb Decay (`reverb_decay`) | 0.3-6.0 s | 1.5 s | Time for the tail to fall by 60 dB |
+| Reverb Mix (`reverb_mix`) | 0-100 % | 20 % | Level of the tail |
+| Output (`out_level`) | -30 to +6 dB | 0 dB | Output level, in front of the safety clip |
+
+Dials are stored 0.0-1.0 and shown as 0.0-10.0.
+
+Amp tests sit next to the code. The ones for the whole chain are in `chain.rs`. Three ignored
+tests are the tools for working on the sound:
 
 ```bash
-# Levels, distortion, aliasing, cabinet response, latency and CPU time per amp. Run before and after a DSP change.
+# Levels, distortion, aliasing, tightness, gate, drive, cabinet, effects, latency and CPU time.
+# Run before and after a DSP change and compare.
 cargo test -p amp --release amp_report -- --ignored --nocapture
 
-# A DI guitar through each amp, as WAV files in target/renders. Optional: AMP_INPUT_WAV=<recording>
+# Delay and reverb by themselves: echo times, decay times, density, width, cost.
+cargo test -p amp --release effects_report -- --ignored --nocapture
+
+# A DI guitar through each amp and setting, as WAV files in target/renders (amp_*.wav).
+# Optional: AMP_INPUT_WAV=<recording>. render_effects writes the effects alone (amp_fx_*.wav)
 cargo test -p amp --release render_wavs -- --ignored
+cargo test -p amp --release render_effects -- --ignored
 ```
 
 ## Adding a Plugin
