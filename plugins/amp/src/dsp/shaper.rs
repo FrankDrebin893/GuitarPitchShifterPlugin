@@ -184,6 +184,12 @@ impl AsymClipper {
         self.second_order = second_order;
     }
 
+    /// As if the input had stood where `other` saw it last: for taking over from it
+    /// while it runs
+    pub fn follow(&mut self, other: &FineClipper) {
+        self.reset(other.clipper.last_input as f32);
+    }
+
     /// `rest` is the input the clipper sits at in silence (the stage's operating point)
     pub fn reset(&mut self, rest: f32) {
         let rest = rest as f64;
@@ -198,10 +204,13 @@ impl AsymClipper {
     }
 
     pub fn process(&mut self, input: f32) -> f32 {
-        let input = input as f64;
+        self.step(input as f64) as f32
+    }
+
+    fn step(&mut self, input: f64) -> f64 {
         let output = if self.second_order { self.second_order(input) } else { self.first_order(input) };
         self.last_input = input;
-        output as f32
+        output
     }
 
     fn first_order(&mut self, input: f64) -> f64 {
@@ -246,6 +255,61 @@ impl AsymClipper {
         self.last_integral = second;
         self.last_quotient = quotient;
         output
+    }
+}
+
+/// `asym_clip`, antialiased to the second order at twice the rate it is called at: for a
+/// stage that is handed square waves, where the second order alone leaves aliasing at
+/// about -70 dB whatever is done to the stages around it.
+///
+/// Each call takes two steps, to halfway between the last input and this one and then to
+/// this one, which is the straight line the antialiasing takes the input to follow anyway.
+/// The two results and the two before them are weighted 1, 3, 3, 1 and summed. Together
+/// that averages the curve over a bell two and a half samples wide in place of the second
+/// order's triangle of two, which is what lets through 15 dB less of what would fold
+/// back. A quarter of a sample later than the second order, and twice the work
+#[derive(Clone, Copy)]
+pub struct FineClipper {
+    clipper: AsymClipper,
+    // The results of the last two half steps, the older one first
+    history: [f64; 2],
+}
+
+impl FineClipper {
+    pub fn new() -> Self {
+        let mut clipper = AsymClipper::new();
+        clipper.set_second_order(true);
+        clipper.reset(0.0);
+        Self {
+            clipper,
+            history: [0.0; 2],
+        }
+    }
+
+    /// Call `reset` after this
+    pub fn set_limits(&mut self, positive: f32, negative: f32) {
+        self.clipper.set_limits(positive, negative);
+    }
+
+    /// `rest` is the input the clipper sits at in silence (the stage's operating point)
+    pub fn reset(&mut self, rest: f32) {
+        self.clipper.reset(rest);
+        self.history = [self.clipper.limits.curve(rest as f64); 2];
+    }
+
+    /// As if the input had stood where `other` saw it last: for taking over from it
+    /// while it runs
+    pub fn follow(&mut self, other: &AsymClipper) {
+        self.reset(other.last_input as f32);
+    }
+
+    pub fn process(&mut self, input: f32) -> f32 {
+        let input = input as f64;
+        let halfway = self.clipper.step(0.5 * (self.clipper.last_input + input));
+        let there = self.clipper.step(input);
+        let output = 0.125 * (there + 3.0 * (halfway + self.history[1]) + self.history[0]);
+        self.history = [halfway, there];
+        output as f32
     }
 }
 
@@ -439,11 +503,97 @@ mod tests {
     fn test_silence_gives_silence() {
         let mut asym = AsymClipper::new();
         let mut second = second_order_clipper(1.0, 1.6, 0.0);
+        let mut fine = fine_clipper(1.0, 1.6, 0.0);
         let mut power = PowerClipper::new();
         for _ in 0..16 {
             assert_eq!(asym.process(0.0), 0.0);
             assert_eq!(second.process(0.0), 0.0);
+            assert_eq!(fine.process(0.0), 0.0);
             assert_eq!(power.process(0.0), 0.0);
+        }
+    }
+
+    fn fine_clipper(positive: f32, negative: f32, rest: f32) -> FineClipper {
+        let mut clipper = FineClipper::new();
+        clipper.set_limits(positive, negative);
+        clipper.reset(rest);
+        clipper
+    }
+
+    #[test]
+    fn test_fine_clipper_follows_the_curve_a_sample_and_a_quarter_late() {
+        // A slow signal, so the curve is close to straight between the samples
+        let mut fine = fine_clipper(1.0, 1.6, 0.0);
+        let input = sine(100.0, 3.0, 192_000.0, 4000);
+        let output: Vec<f32> = input.iter().map(|&s| fine.process(s)).collect();
+        for index in 4..input.len() {
+            let late = 0.75 * input[index - 1] + 0.25 * input[index - 2];
+            assert!((output[index] - asym_clip(late, 1.0, 1.6)).abs() < 1e-3, "At {index}");
+        }
+
+        // At rest on a stage's operating point it gives the curve there, from the start,
+        // and after a step it settles on the curve at the new value
+        let mut fine = fine_clipper(1.2, 0.9, -0.1);
+        assert_eq!(fine.process(-0.1), asym_clip(-0.1, 1.2, 0.9));
+        let outputs: Vec<f32> = (0..5).map(|_| fine.process(2.0)).collect();
+        assert!(outputs.iter().all(|s| s.is_finite()));
+        assert_eq!(outputs[4], asym_clip(2.0, 1.2, 0.9));
+    }
+
+    #[test]
+    fn test_fine_clipper_aliases_less_than_the_second_order_on_a_square_wave() {
+        // A sine so far over the limits that it crosses them within a fifth of a sample:
+        // what comes out is a square wave, every edge of it one step
+        let sample_rate = 176_400.0;
+        let freq = 4186.0;
+        let input = sine(freq, 80.0, sample_rate, 35_280);
+        let harmonics = harmonics_of(freq, sample_rate);
+        // Where harmonics 42 to 47 land once folded: all of them can be heard
+        let folded: Vec<f64> = (42..=47).map(|n| (n as f64 * freq as f64 - sample_rate as f64).abs()).collect();
+        let partials = [harmonics.clone(), folded].concat();
+        let folded_db = |output: &[f32]| {
+            let (levels, _) = fit_partials(&output[4410..], sample_rate, &partials);
+            let energy: f64 = levels[harmonics.len()..].iter().map(|level| level * level).sum();
+            10.0 * (energy / (levels[0] * levels[0])).log10()
+        };
+
+        let mut second = second_order_clipper(1.0, 1.4, 0.0);
+        let second: Vec<f32> = input.iter().map(|&s| second.process(s)).collect();
+        let mut fine = fine_clipper(1.0, 1.4, 0.0);
+        let fine: Vec<f32> = input.iter().map(|&s| fine.process(s)).collect();
+        let (second_db, fine_db) = (folded_db(&second), folded_db(&fine));
+        assert!(fine_db < second_db - 10.0, "Second order {second_db:.1} dB, at twice the rate {fine_db:.1} dB");
+    }
+
+    #[test]
+    fn test_clippers_take_over_from_each_other_where_the_input_stands() {
+        // The one that starts while the other runs gives the curve at the last input
+        // until it has seen the input move
+        let mut second = second_order_clipper(1.0, 1.4, 0.0);
+        let mut fine = fine_clipper(1.0, 1.4, 0.0);
+        for &sample in &sine(1000.0, 0.8, 176_400.0, 100) {
+            second.process(sample);
+        }
+        let stands_at = second.last_input as f32;
+        fine.follow(&second);
+        assert_eq!(fine.process(stands_at), asym_clip(stands_at, 1.0, 1.4));
+
+        // The second order knows all it needs after two inputs: from there it is as if
+        // it had run all along
+        let rest = sine(1000.0, 0.8, 176_400.0, 200);
+        let mut alone = second_order_clipper(1.0, 1.4, 0.0);
+        let mut taking_over = second_order_clipper(1.0, 1.4, 0.0);
+        for (index, &sample) in rest.iter().enumerate() {
+            fine.process(sample);
+            let expected = alone.process(sample);
+            if index == 100 {
+                taking_over.follow(&fine);
+            }
+            if index > 102 {
+                assert_eq!(taking_over.process(sample), expected);
+            } else if index > 100 {
+                taking_over.process(sample);
+            }
         }
     }
 }

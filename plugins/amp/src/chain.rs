@@ -584,6 +584,8 @@ impl AmpChain {
             settings.gate_release_ms.clamp(GATE_RELEASE_MS[0], GATE_RELEASE_MS[1]),
         );
         self.drive.set_on(settings.drive_on);
+        // With the pedal in front the amp is pushed harder than it ever is without
+        self.preamp.set_driven(settings.drive_on, self.drive.fade_steps());
         self.drive.set(
             self.dials.drive_gain,
             self.dials.drive_tone,
@@ -2401,6 +2403,17 @@ mod tests {
         for freq_hz in ALIAS_TONES_HZ {
             let aliasing = aliasing_db_with(&settings, freq_hz);
             assert!(aliasing < -74.0, "{:.1} dB at {} Hz", aliasing, freq_hz);
+        }
+    }
+
+    #[test]
+    fn test_aliasing_stays_low_with_the_drive_flat_out_in_front_of_torden() {
+        // Drive, Tone and Level at 10: the pedal's Level makes the amp's first stage clip,
+        // and the second is handed square waves. At the lowest rate, where it is worst
+        let settings = with_drive(Amp::Torden, 1.0, 1.0, 1.0, 1.0);
+        for freq_hz in ALIAS_TONES_HZ {
+            let aliasing = aliasing_db_at(&settings, freq_hz, 44100.0);
+            assert!(aliasing < -72.0, "{:.1} dB at {} Hz", aliasing, freq_hz);
         }
     }
 

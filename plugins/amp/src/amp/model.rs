@@ -51,6 +51,10 @@ pub struct StageModel {
     /// Antialiases the clipping to the second order instead of the first: for the stages
     /// that clip hardest in an amp with a lot of gain. Costs about four times as much
     pub second_order: bool,
+    /// Clips at twice the rate while the drive pedal is on (`FineClipper`): for the stage
+    /// that is handed square waves once the pedal pushes the stage before it into clipping.
+    /// Costs twice the second order, and only while the pedal is on
+    pub finer_when_driven: bool,
 }
 
 /// Bass, Mid and Treble. They share one network, so each dial moves the others' ranges
@@ -162,6 +166,7 @@ const UNUSED_STAGE: StageModel = StageModel {
     bias_shift: 0.0,
     lowpass_hz: 20000.0,
     second_order: false,
+    finer_when_driven: false,
 };
 
 /// Clean: glassy, with headroom to spare. Two stages with high ceilings that only bend at
@@ -183,6 +188,7 @@ static KLAR: AmpModel = AmpModel {
             bias_shift: 0.3,
             lowpass_hz: 16000.0,
             second_order: false,
+            finer_when_driven: false,
         },
         StageModel {
             coupling_hz: 40.0,
@@ -192,6 +198,7 @@ static KLAR: AmpModel = AmpModel {
             bias_shift: 0.3,
             lowpass_hz: 12000.0,
             second_order: false,
+            finer_when_driven: false,
         },
         UNUSED_STAGE,
         UNUSED_STAGE,
@@ -263,6 +270,7 @@ static BROL: AmpModel = AmpModel {
             bias_shift: 0.5,
             lowpass_hz: 12000.0,
             second_order: false,
+            finer_when_driven: false,
         },
         StageModel {
             coupling_hz: 180.0,
@@ -272,6 +280,7 @@ static BROL: AmpModel = AmpModel {
             bias_shift: 0.4,
             lowpass_hz: 9000.0,
             second_order: false,
+            finer_when_driven: false,
         },
         StageModel {
             coupling_hz: 70.0,
@@ -281,6 +290,7 @@ static BROL: AmpModel = AmpModel {
             bias_shift: 0.3,
             lowpass_hz: 7500.0,
             second_order: false,
+            finer_when_driven: false,
         },
         UNUSED_STAGE,
     ],
@@ -331,7 +341,9 @@ static BROL: AmpModel = AmpModel {
 /// High gain: tight and modern. The low end is cut before the clipping and put back after
 /// it, four stages clip a signal with its upper mids pushed forward, and the fizz is
 /// filtered off after every stage. A stiff power stage with a strong resonance and presence.
-/// The second and third stages do most of the clipping, and are antialiased to match
+/// The second and third stages do most of the clipping, and are antialiased to match. With
+/// the drive pedal's Level up the first stage clips as well and hands the second one square
+/// waves: that one then clips at twice the rate
 static TORDEN: AmpModel = AmpModel {
     name: "Torden",
     model_number: "TD-100",
@@ -349,6 +361,7 @@ static TORDEN: AmpModel = AmpModel {
             bias_shift: 0.2,
             lowpass_hz: 12000.0,
             second_order: false,
+            finer_when_driven: false,
         },
         StageModel {
             coupling_hz: 250.0,
@@ -358,6 +371,7 @@ static TORDEN: AmpModel = AmpModel {
             bias_shift: 0.2,
             lowpass_hz: 8000.0,
             second_order: true,
+            finer_when_driven: true,
         },
         StageModel {
             coupling_hz: 150.0,
@@ -367,6 +381,7 @@ static TORDEN: AmpModel = AmpModel {
             bias_shift: 0.15,
             lowpass_hz: 7000.0,
             second_order: true,
+            finer_when_driven: false,
         },
         StageModel {
             coupling_hz: 140.0,
@@ -376,6 +391,7 @@ static TORDEN: AmpModel = AmpModel {
             bias_shift: 0.1,
             lowpass_hz: 6000.0,
             second_order: false,
+            finer_when_driven: false,
         },
     ],
     fizz_hz: Some(7500.0),

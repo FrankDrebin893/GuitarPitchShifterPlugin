@@ -43,7 +43,12 @@ pub struct Preset {
 // Chosen from the amp models' constants and measured with `preset_report` below: nobody
 // has listened to them yet. Master is where their levels were matched: the report's chords
 // come out at -18 to -14 dBFS RMS (cleans lowest, leads highest) with the peaks under the
-// safety clip's knee. The first one is every parameter at its default
+// safety clip's knee. The first one is every parameter at its default.
+//
+// The gates are set by `preset_gate_report`. A threshold of -54 dB is the highest that
+// leaves palm mutes alone when they are played quietly (peaks at -30 dBFS): from -52 dB up
+// the gate starts to close on the tail of every mute. How fast a gate shuts in a rest is
+// its release, not its threshold: 8 dB of threshold are 9 ms
 pub static PRESETS: [Preset; 12] = [
     Preset {
         name: "Init",
@@ -145,7 +150,7 @@ pub static PRESETS: [Preset; 12] = [
         name: "Stram",
         amp: Amp::Torden,
         dials: [5.5, 4.5, 5.0, 6.0, 6.0, 5.0],
-        gate: (ON, -50.0, 60.0),
+        gate: (ON, -56.0, 50.0),
         drive: (ON, [1.0, 6.0, 8.0]),
         cab: (ON, [5.5, 5.0]),
         delay: (OFF, 350.0, 30.0, 20.0),
@@ -157,7 +162,7 @@ pub static PRESETS: [Preset; 12] = [
         name: "Granit",
         amp: Amp::Torden,
         dials: [7.5, 6.5, 3.0, 6.5, 6.5, 5.5],
-        gate: (ON, -48.0, 60.0),
+        gate: (ON, -54.0, 60.0),
         drive: (ON, [1.5, 5.5, 7.0]),
         cab: (ON, [5.0, 6.0]),
         delay: (OFF, 350.0, 30.0, 20.0),
@@ -169,7 +174,7 @@ pub static PRESETS: [Preset; 12] = [
         name: "Dyb",
         amp: Amp::Torden,
         dials: [6.0, 4.0, 5.5, 6.0, 6.5, 5.0],
-        gate: (ON, -46.0, 40.0),
+        gate: (ON, -54.0, 40.0),
         drive: (ON, [0.5, 6.5, 8.5]),
         cab: (ON, [5.5, 2.5]),
         delay: (OFF, 350.0, 30.0, 20.0),
@@ -181,7 +186,7 @@ pub static PRESETS: [Preset; 12] = [
         name: "Lyn",
         amp: Amp::Torden,
         dials: [7.0, 5.0, 6.5, 5.5, 5.5, 5.0],
-        gate: (ON, -52.0, 180.0),
+        gate: (ON, -54.0, 180.0),
         drive: (ON, [2.5, 5.0, 7.0]),
         cab: (ON, [4.5, 5.0]),
         delay: (ON, 420.0, 30.0, 20.0),
@@ -309,6 +314,8 @@ mod tests {
     use crate::chain::{AmpChain, AmpSettings};
     use crate::delay::DelaySettings;
     use crate::dsp::shaper::OUTPUT_CLIP_KNEE;
+    use crate::gate::tests::{decaying_note, gain_trace, hiss, transitions as gate_changes};
+    use crate::gate::Gate;
     use crate::reverb::ReverbSettings;
     use crate::test_util::*;
 
@@ -482,6 +489,138 @@ mod tests {
             assert!(level < to_db(OUTPUT_CLIP_KNEE), "{} peaks at {level:.1} dBFS", preset.name);
             let loudness = to_db(rms(&left));
             assert!((-20.0..-12.0).contains(&loudness), "{} is at {loudness:.1} dBFS RMS", preset.name);
+        }
+    }
+
+    /// What a preset's gate does to `input`: the gate's gain for every sample
+    fn gate_trace(preset: &Preset, input: &[f32]) -> Vec<f32> {
+        let mut gate = Gate::new();
+        gate.set_sample_rate(SAMPLE_RATE);
+        gate.set(preset.gate.0, preset.gate.1, preset.gate.2);
+        gain_trace(&mut gate, input)
+    }
+
+    fn at_peak_db(mut signal: Vec<f32>, peak_db: f32) -> Vec<f32> {
+        let scale = 10f32.powf(peak_db / 20.0) / peak(&signal);
+        signal.iter_mut().for_each(|sample| *sample *= scale);
+        signal
+    }
+
+    /// A power chord on the low string, struck once and left to ring
+    fn held_chord(seconds: f32) -> Vec<f32> {
+        let len = (seconds * SAMPLE_RATE) as usize;
+        let mut chord = vec![0.0; len];
+        for (string, freq_hz) in [82.41, 123.47, 164.81].into_iter().enumerate() {
+            let offset = string * (0.004 * SAMPLE_RATE) as usize;
+            let note = pluck(freq_hz, Pluck::OPEN, 7 + string as u32, SAMPLE_RATE, len - offset);
+            for (sample, note) in chord[offset..].iter_mut().zip(note) {
+                *sample += note;
+            }
+        }
+        chord
+    }
+
+    /// Two bars of palm mutes, a rest of half a second after each bar
+    fn mutes_with_rests() -> Vec<f32> {
+        let bar = palm_mutes(SAMPLE_RATE, 1.2);
+        let rest = vec![0.0; (0.5 * SAMPLE_RATE) as usize];
+        [&bar[..], &rest[..], &bar[..], &rest[..]].concat()
+    }
+
+    /// How far a ringing sound had fallen from its loudest, in dB, when the gate started
+    /// to close on it, and how long after its start that was. Nothing if the gate never
+    /// opened. Levels are peaks over 30 ms, as a listener and the gate's detector hear them
+    fn cut(trace: &[f32], input: &[f32]) -> Option<(f32, f32)> {
+        let opened = trace.iter().position(|&gain| gain == 1.0)?;
+        let closing = opened + trace[opened..].iter().position(|&gain| gain < 1.0).unwrap_or(trace.len() - opened);
+        let window = (0.03 * SAMPLE_RATE) as usize;
+        let level_at = |at: usize| peak(&input[at.saturating_sub(window).min(input.len() - window)..][..window]);
+        let fallen = to_db(peak(input) / level_at(closing.min(input.len())).max(1e-9));
+        Some((fallen, closing as f32 / SAMPLE_RATE))
+    }
+
+    #[test]
+    fn test_gates_leave_quiet_playing_and_ringing_chords_alone() {
+        let chord = at_peak_db(held_chord(6.0), -12.0);
+        let quiet_mutes = at_peak_db(mutes_with_rests(), -30.0);
+        let bar = (1.2 * SAMPLE_RATE) as usize;
+        let lead = (0.01 * SAMPLE_RATE) as usize;
+        for preset in &PRESETS {
+            // A chord that is held has fallen 40 dB before the gate starts to close on it
+            let (fallen, _) = cut(&gate_trace(preset, &chord), &chord).unwrap();
+            assert!(fallen >= 40.0, "{} cuts a held chord {fallen:.0} dB down", preset.name);
+
+            // Palm mutes played quietly open the gate and it stays open through the bar
+            let trace = gate_trace(preset, &quiet_mutes);
+            assert!(trace[lead..bar].iter().all(|&gain| gain == 1.0), "{} chops quiet palm mutes", preset.name);
+
+            // And in the rest behind the bar it shuts: the rhythm presets of the high gain
+            // amp within an eighth of a second of the last mute
+            let shut = trace[bar - lead..].iter().position(|&gain| gain == 0.0);
+            if preset.amp == Amp::Torden && preset.gate.2 <= 60.0 {
+                let limit = (0.125 * SAMPLE_RATE) as usize;
+                assert!(shut.is_some_and(|samples| samples <= limit), "{} shuts after {shut:?} samples", preset.name);
+            }
+        }
+    }
+
+    /// How the gate of every preset treats notes that ring out, quiet playing and palm
+    /// mutes. Run after changing a preset's gate:
+    /// cargo test -p amp --release preset_gate_report -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn preset_gate_report() {
+        let note = decaying_note(SAMPLE_RATE, 8.0);
+        let chord = held_chord(8.0);
+        let mutes = mutes_with_rests();
+        println!("\nA low E and a power chord left to ring, peaking at -12 and at -30 dBFS: how far each has");
+        println!("fallen when the gate starts to close on it, in dB, and after how many seconds (`shut`: never");
+        println!("opened). Palm mutes with a rest after each bar, peaking at -12 and at -30 dBFS: `gaps` is how");
+        println!("often the gate started to close between two mutes of a bar (0 is right), `rest` the time from");
+        println!("the last mute of a bar to silence in ms. `hiss`: the gate on noise at -70 and -76 dBFS RMS");
+        println!(
+            "{:<8} {:>6} {:>5} {:>13} {:>13} {:>13} {:>13} {:>10} {:>10} {:>13}",
+            "preset", "thresh", "rel", "note -12", "note -30", "chord -12", "chord -30", "mutes -12", "mutes -30", "hiss -70/-76"
+        );
+        for preset in &PRESETS {
+            print!("{:<8} {:>6.0} {:>5.0}", preset.name, preset.gate.1, preset.gate.2);
+            for sound in [&note, &chord] {
+                for peak_db in [-12.0, -30.0] {
+                    let input = at_peak_db(sound.clone(), peak_db);
+                    match cut(&gate_trace(preset, &input), &input) {
+                        Some((fallen, at_s)) => print!(" {:>13}", format!("{fallen:.0} dB {at_s:.2} s")),
+                        None => print!(" {:>13}", "shut"),
+                    }
+                }
+            }
+            for peak_db in [-12.0, -30.0] {
+                let input = at_peak_db(mutes.clone(), peak_db);
+                let trace = gate_trace(preset, &input);
+                // The bars are 1.2 s long with half a second of rest behind each
+                let bar = (1.2 * SAMPLE_RATE) as usize;
+                let period = (1.7 * SAMPLE_RATE) as usize;
+                let lead = (0.01 * SAMPLE_RATE) as usize;
+                let gaps: usize = (0..2).map(|index| gate_changes(&trace[index * period + lead..index * period + bar]) / 2).sum();
+                let opened = trace[..bar].iter().any(|&gain| gain == 1.0);
+                // The last mute is cut off 10 ms before the bar ends
+                let last_ends = bar - (0.01 * SAMPLE_RATE) as usize;
+                let silent = trace[last_ends..period].iter().position(|&gain| gain == 0.0);
+                let rest = match (opened, silent) {
+                    (false, _) => "shut".to_string(),
+                    (true, Some(samples)) => format!("{gaps} {:.0} ms", samples as f32 / SAMPLE_RATE * 1000.0),
+                    (true, None) => format!("{gaps} open"),
+                };
+                print!(" {rest:>10}");
+            }
+            let on_hiss = [-70.0, -76.0].map(|level_db| {
+                let trace = gate_trace(preset, &hiss(level_db, 96_000));
+                if trace.iter().all(|&gain| gain == 0.0) {
+                    "shut"
+                } else {
+                    "open"
+                }
+            });
+            println!(" {:>13}", on_hiss.join(" / "));
         }
     }
 

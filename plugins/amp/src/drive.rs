@@ -90,6 +90,11 @@ impl Drive {
         }
     }
 
+    /// Samples the pedal takes to fade in or out when it is switched
+    pub fn fade_steps(&self) -> u32 {
+        self.fade_steps
+    }
+
     /// Moves to the dial positions (0.0 to 1.0) over the next `steps` samples
     pub fn set(&mut self, drive: f32, tone: f32, level: f32, steps: u32) {
         let tone_hz = TONE_SECTION_RATIO * TONE_HZ[0] * (TONE_HZ[1] / TONE_HZ[0]).powf(tone);

@@ -1,6 +1,6 @@
 use super::model::{AmpModel, StageModel, MAX_STAGES};
 use crate::dsp::filters::{Biquad, BiquadCoeffs, OnePoleHp, OnePoleLp, ANTI_DENORMAL};
-use crate::dsp::shaper::{asym_clip, AsymClipper};
+use crate::dsp::shaper::{asym_clip, AsymClipper, FineClipper};
 use crate::dsp::{curve, db_to_gain, smoothing_coeff, Ramp};
 
 // Flat up to the corner
@@ -18,6 +18,11 @@ struct Stage {
     coupling: OnePoleHp,
     gain: Ramp,
     clipper: AsymClipper,
+    // Takes the clipper's place while the drive pedal is on, in the stages whose model
+    // asks for it. Share of it in the stage's clipping: 0.0 the clipper, 1.0 this one
+    fine: FineClipper,
+    fine_share: Ramp,
+    finer_when_driven: bool,
     lowpass: OnePoleLp,
     headroom: [f32; 2],
     bias: f32,
@@ -34,6 +39,9 @@ impl Stage {
             coupling: OnePoleHp::new(),
             gain: Ramp::new(1.0),
             clipper: AsymClipper::new(),
+            fine: FineClipper::new(),
+            fine_share: Ramp::new(0.0),
+            finer_when_driven: false,
             lowpass: OnePoleLp::new(),
             headroom: [1.0, 1.0],
             bias: 0.0,
@@ -49,6 +57,8 @@ impl Stage {
         self.lowpass.set(model.lowpass_hz, sample_rate);
         self.clipper.set_limits(model.headroom[0], model.headroom[1]);
         self.clipper.set_second_order(model.second_order);
+        self.fine.set_limits(model.headroom[0], model.headroom[1]);
+        self.finer_when_driven = model.finer_when_driven;
         self.headroom = model.headroom;
         self.bias = model.bias;
         self.bias_shift = model.bias_shift;
@@ -59,8 +69,39 @@ impl Stage {
     fn reset(&mut self) {
         self.coupling.reset();
         self.clipper.reset(self.bias);
+        self.fine.reset(self.bias);
         self.lowpass.reset();
         self.overdrive = 0.0;
+    }
+
+    /// Crossfades to the finer clipper or back over the next `steps` samples. The one
+    /// that comes in starts where the input stands, and has found its feet long before
+    /// it is heard
+    fn set_driven(&mut self, driven: bool, steps: u32) {
+        let target = if driven && self.finer_when_driven { 1.0 } else { 0.0 };
+        if target == self.fine_share.target() {
+            return;
+        }
+        if target == 1.0 && self.fine_share.value() == 0.0 {
+            self.fine.follow(&self.clipper);
+        } else if target == 0.0 && self.fine_share.value() == 1.0 {
+            self.clipper.follow(&self.fine);
+        }
+        self.fine_share.set_target(target, steps);
+    }
+
+    /// The clipping around the operating point `bias`, by the stage's own clipper, the
+    /// finer one, or both while one takes over from the other
+    fn clip(&mut self, input: f32) -> f32 {
+        if self.fine_share.value() == 0.0 && self.fine_share.target() == 0.0 {
+            return self.clipper.process(input);
+        }
+        let fine = self.fine.process(input);
+        if self.fine_share.value() == 1.0 && self.fine_share.target() == 1.0 {
+            return fine;
+        }
+        let plain = self.clipper.process(input);
+        plain + self.fine_share.next() * (fine - plain)
     }
 
     fn process(&mut self, input: f32) -> f32 {
@@ -70,7 +111,7 @@ impl Stage {
         // sample lets the processor work it out alongside the clipping, which is what the
         // stages cost most
         let bias = self.bias - self.bias_shift * self.overdrive / (1.0 + self.overdrive);
-        let clipped = self.clipper.process(driven + bias) - asym_clip(bias, self.headroom[0], self.headroom[1]);
+        let clipped = self.clip(driven + bias) - asym_clip(bias, self.headroom[0], self.headroom[1]);
 
         // Peaks past the top of the curve charge the coupling capacitor, which pulls the
         // operating point down until it has drained again
@@ -94,6 +135,8 @@ pub struct Preamp {
     fizz: Biquad,
     lowcut: Biquad,
     level: Ramp,
+    // Whether the drive pedal is on in front of the amp
+    driven: bool,
 }
 
 impl Preamp {
@@ -108,6 +151,7 @@ impl Preamp {
             fizz: Biquad::new(),
             lowcut: Biquad::new(),
             level: Ramp::new(1.0),
+            driven: false,
         }
     }
 
@@ -127,6 +171,17 @@ impl Preamp {
         self.stage_count = model.stage_count.clamp(1, MAX_STAGES);
         for (stage, stage_model) in self.stages.iter_mut().zip(&model.stages) {
             stage.configure(stage_model, sample_rate);
+            stage.set_driven(self.driven, 0);
+        }
+    }
+
+    /// Tells the amp whether the drive pedal is on in front of it: the stages whose model
+    /// asks for it clip at twice the rate while it is. They get there over `steps` samples
+    /// (the pedal fades in as slowly), or at once from `snap`
+    pub fn set_driven(&mut self, driven: bool, steps: u32) {
+        self.driven = driven;
+        for stage in &mut self.stages {
+            stage.set_driven(driven, steps);
         }
     }
 
@@ -160,6 +215,7 @@ impl Preamp {
     pub fn snap(&mut self) {
         for stage in &mut self.stages {
             stage.gain.snap();
+            stage.fine_share.snap();
         }
         self.level.snap();
         self.bright_gain.snap();
@@ -282,6 +338,48 @@ mod tests {
             let dot: f32 = input[LEN / 2..].iter().zip(&output[LEN / 2..]).map(|(a, b)| a * b).sum();
             assert!(dot > 0.0, "{:?} inverts", amp);
         }
+    }
+
+    #[test]
+    fn test_only_the_stages_that_ask_for_it_clip_finer_behind_the_drive() {
+        let input = sine(440.0, 0.5, SAMPLE_RATE, 9600);
+        let run_driven = |amp: Amp, changes: &[(usize, bool)]| {
+            let mut preamp = Preamp::new();
+            preamp.configure(amp.model(), SAMPLE_RATE);
+            preamp.reset();
+            preamp.set_gain(amp.model(), 1.0, 0);
+            let mut output = input.clone();
+            let mut start = 0;
+            for &(until, driven) in changes {
+                preamp.set_driven(driven, 1920);
+                preamp.process(&mut output[start..until]);
+                start = until;
+            }
+            output
+        };
+        for amp in Amp::ALL {
+            let finer = amp.model().stages[..amp.model().stage_count].iter().any(|stage| stage.finer_when_driven);
+            let plain = run_driven(amp, &[(9600, false)]);
+            let driven = run_driven(amp, &[(9600, true)]);
+            assert_eq!(driven != plain, finer, "{amp:?}");
+            if !finer {
+                continue;
+            }
+
+            // The same sound, a quarter of a sample later in that stage: no louder, and
+            // nothing like a step where one clipper takes over from the other
+            assert!((to_db(rms(&driven[4800..])) - to_db(rms(&plain[4800..]))).abs() < 0.1, "{amp:?}");
+            let steps = |signal: &[f32]| signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
+            let switched = run_driven(amp, &[(2400, false), (6000, true), (9600, false)]);
+            assert!(steps(&switched) < 1.1 * steps(&plain).max(steps(&driven)), "{amp:?}");
+            // Until it is switched it is the plain amp to the bit, and switched back it is
+            // the plain amp again once the fade is over and the filters behind have settled
+            assert_eq!(switched[..2400], plain[..2400]);
+            let settled = 6000 + 1920 + 960;
+            let off = switched[settled..].iter().zip(&plain[settled..]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+            assert!(off < 1e-3 * peak(&plain), "{amp:?}: off by {off}");
+        }
+        assert!(Amp::Torden.model().stages[1].finer_when_driven);
     }
 
     #[test]
