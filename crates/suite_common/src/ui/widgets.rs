@@ -19,6 +19,10 @@ const SMALL_KNOB_RADIUS: f32 = 24.0;
 
 const LABEL_SPACING: f32 = 0.14;
 
+// Diameter of a footswitch's washer
+const FOOTSWITCH_SIZE: f32 = 74.0;
+const SMALL_FOOTSWITCH_SIZE: f32 = 50.0;
+
 fn polar(center: Pos2, radius: f32, angle: f32) -> Pos2 {
     Pos2::new(center.x + angle.cos() * radius, center.y + angle.sin() * radius)
 }
@@ -148,27 +152,41 @@ pub fn label_tape(painter: &Painter, top_center: Pos2, text: &str, size: f32) {
 
 /// Chrome stomp switch. Returns the click response.
 pub fn footswitch(ui: &mut Ui, center: Pos2, id_source: &str) -> Response {
-    let rect = Rect::from_center_size(center, Vec2::splat(74.0));
+    stomp_switch(ui, center, id_source, FOOTSWITCH_SIZE)
+}
+
+/// The smaller stomp switch of a head or a mini pedal. Returns the click response.
+pub fn small_footswitch(ui: &mut Ui, center: Pos2, id_source: &str) -> Response {
+    stomp_switch(ui, center, id_source, SMALL_FOOTSWITCH_SIZE)
+}
+
+/// Stomp switch `size` across. The measures in here are those of the full-size one
+fn stomp_switch(ui: &mut Ui, center: Pos2, id_source: &str, size: f32) -> Response {
+    let scale = size / FOOTSWITCH_SIZE;
+    let rect = Rect::from_center_size(center, Vec2::splat(size));
     let response = ui.interact(rect, Id::new(("footswitch", id_source)), Sense::click());
     let pressed = response.is_pointer_button_down_on();
 
     let painter = ui.painter();
     let ring = Stroke::new(1.0, Color32::from_black_alpha(110));
-    painter.circle_filled(center + vec2(0.0, 8.0), 38.0, SHADOW);
+    let disc = |center: Pos2, offset: Vec2, radius: f32, color: Color32| {
+        painter.circle_filled(center + offset * scale, radius * scale, color);
+    };
+    disc(center, vec2(0.0, 8.0), 38.0, SHADOW);
     // Washer, nut, then the cap
-    painter.circle_filled(center, 37.0, CHROME_LIGHT);
-    painter.circle_stroke(center, 37.0, ring);
-    painter.circle_filled(center, 32.0, CHROME);
-    painter.circle_stroke(center, 32.0, ring);
+    disc(center, Vec2::ZERO, 37.0, CHROME_LIGHT);
+    painter.circle_stroke(center, 37.0 * scale, ring);
+    disc(center, Vec2::ZERO, 32.0, CHROME);
+    painter.circle_stroke(center, 32.0 * scale, ring);
 
-    let cap = if pressed { center + vec2(0.0, 1.5) } else { center };
-    painter.circle_filled(cap, 26.0, CHROME_DARK);
-    painter.circle_filled(cap + vec2(-2.0, -2.5), 22.0, CHROME);
-    painter.circle_filled(cap + vec2(-4.5, -5.5), 15.0, CHROME_LIGHT);
+    let cap = if pressed { center + vec2(0.0, 1.5) * scale } else { center };
+    disc(cap, Vec2::ZERO, 26.0, CHROME_DARK);
+    disc(cap, vec2(-2.0, -2.5), 22.0, CHROME);
+    disc(cap, vec2(-4.5, -5.5), 15.0, CHROME_LIGHT);
     if !pressed {
-        painter.circle_filled(cap + vec2(-7.0, -8.5), 7.0, CHROME_SHINE);
+        disc(cap, vec2(-7.0, -8.5), 7.0, CHROME_SHINE);
     }
-    painter.circle_stroke(cap, 26.0, ring);
+    painter.circle_stroke(cap, 26.0 * scale, ring);
 
     response
 }
