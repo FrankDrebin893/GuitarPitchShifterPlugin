@@ -111,6 +111,25 @@ impl BiquadCoeffs {
         )
     }
 
+    /// A share of the way from these coefficients to `target`
+    fn towards(&self, target: &Self, share: f64) -> Self {
+        Self {
+            b0: (target.b0 - self.b0) * share,
+            b1: (target.b1 - self.b1) * share,
+            b2: (target.b2 - self.b2) * share,
+            a1: (target.a1 - self.a1) * share,
+            a2: (target.a2 - self.a2) * share,
+        }
+    }
+
+    fn add(&mut self, step: &Self) {
+        self.b0 += step.b0;
+        self.b1 += step.b1;
+        self.b2 += step.b2;
+        self.a1 += step.a1;
+        self.a2 += step.a2;
+    }
+
     /// The same filter with its output multiplied by `gain`
     pub fn scaled(self, gain: f32) -> Self {
         let gain = gain as f64;
@@ -167,6 +186,61 @@ impl Biquad {
         self.z1 = self.coeffs.b1 * input - self.coeffs.a1 * output + self.z2 + ANTI_DENORMAL as f64;
         self.z2 = self.coeffs.b2 * input - self.coeffs.a2 * output;
         output
+    }
+}
+
+/// A `Biquad` for a dial: its coefficients move to new ones in a straight line, one step per
+/// sample, so a dial that is read once per piece of the block does not move the filter in
+/// steps that are heard as zipper noise. Between two stable filters every step is stable
+#[derive(Clone, Copy)]
+pub struct GlidingBiquad {
+    filter: Biquad,
+    target: BiquadCoeffs,
+    step: BiquadCoeffs,
+    remaining: u32,
+}
+
+impl GlidingBiquad {
+    pub fn new() -> Self {
+        Self {
+            filter: Biquad::new(),
+            target: BiquadCoeffs::IDENTITY,
+            step: BiquadCoeffs::IDENTITY,
+            remaining: 0,
+        }
+    }
+
+    /// Moves to `coeffs` over the next `steps` samples; at once with no steps
+    pub fn set(&mut self, coeffs: BiquadCoeffs, steps: u32) {
+        self.target = coeffs;
+        if steps == 0 {
+            self.filter.coeffs = coeffs;
+            self.remaining = 0;
+        } else {
+            self.step = self.filter.coeffs.towards(&coeffs, 1.0 / steps as f64);
+            self.remaining = steps;
+        }
+    }
+
+    /// True while the coefficients are on their way
+    pub fn is_gliding(&self) -> bool {
+        self.remaining > 0
+    }
+
+    pub fn reset(&mut self) {
+        self.filter.reset();
+    }
+
+    pub fn process(&mut self, input: f64) -> f64 {
+        if self.remaining > 0 {
+            self.remaining -= 1;
+            if self.remaining == 0 {
+                self.filter.coeffs = self.target;
+            } else {
+                self.filter.coeffs.add(&self.step);
+            }
+        }
+        self.filter.process(input)
     }
 }
 
@@ -285,6 +359,36 @@ mod tests {
         let mut biquad = Biquad::new();
         biquad.set(coeffs);
         measured_db(|s| biquad.process(s as f64) as f32, freq_hz, sample_rate)
+    }
+
+    #[test]
+    fn test_gliding_biquad_arrives_and_is_then_the_plain_filter() {
+        let from = BiquadCoeffs::low_shelf(200.0, 0.6, -10.0, SAMPLE_RATE);
+        let to = BiquadCoeffs::low_shelf(200.0, 0.6, 10.0, SAMPLE_RATE);
+        let input = sine(150.0, 0.5, SAMPLE_RATE, 9600);
+
+        let mut gliding = GlidingBiquad::new();
+        gliding.set(from, 0);
+        let mut plain = Biquad::new();
+        plain.set(from);
+        for &sample in &input[..4800] {
+            assert_eq!(gliding.process(sample as f64), plain.process(sample as f64));
+        }
+
+        // On the way every sample moves a little, none in a step
+        gliding.set(to, 128);
+        let moving: Vec<f64> = input[4800..4928].iter().map(|&sample| gliding.process(sample as f64)).collect();
+        assert_eq!(gliding.filter.coeffs, to);
+        let largest = moving.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f64::max);
+        assert!(largest < 0.02, "Step of {}", largest);
+
+        // And from there on it is the filter it was moved to
+        plain.set(to);
+        plain.z1 = gliding.filter.z1;
+        plain.z2 = gliding.filter.z2;
+        for &sample in &input[4928..] {
+            assert_eq!(gliding.process(sample as f64), plain.process(sample as f64));
+        }
     }
 
     #[test]

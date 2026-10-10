@@ -648,7 +648,7 @@ pub(crate) mod tests {
         for _ in 0..3 {
             slowest = slowest.max(block_time_us(&mut delay, &setting, &silence));
         }
-        assert!(slowest < playing * 2.0, "{:.1} us per block playing, {:.1} us in the tail", playing, slowest);
+        assert!(slowest < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us in the tail", playing, slowest);
 
         let (left, right) = run_blocks(&mut delay, &setting, &vec![0.0; ms(1200.0)], BLOCK);
         assert!(delay.is_idle());

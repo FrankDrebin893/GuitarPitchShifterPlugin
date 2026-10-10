@@ -1,5 +1,5 @@
 use super::model::PowerModel;
-use crate::dsp::filters::{Biquad, BiquadCoeffs, DcBlocker, ANTI_DENORMAL};
+use crate::dsp::filters::{Biquad, BiquadCoeffs, DcBlocker, GlidingBiquad, ANTI_DENORMAL};
 use crate::dsp::shaper::PowerClipper;
 use crate::dsp::{curve, db_to_gain, smoothing_coeff, Ramp};
 
@@ -12,7 +12,7 @@ const PRESENCE_Q: f32 = 0.6;
 pub struct PowerAmp {
     dc: DcBlocker,
     resonance: Biquad,
-    presence: Biquad,
+    presence: GlidingBiquad,
     drive: Ramp,
     volume: Ramp,
     clipper: PowerClipper,
@@ -28,7 +28,7 @@ impl PowerAmp {
         Self {
             dc: DcBlocker::new(),
             resonance: Biquad::new(),
-            presence: Biquad::new(),
+            presence: GlidingBiquad::new(),
             drive: Ramp::new(1.0),
             volume: Ramp::new(1.0),
             clipper: PowerClipper::new(),
@@ -68,13 +68,10 @@ impl PowerAmp {
         self.volume.set_target(db_to_gain(curve(&model.volume_db, master) + makeup_db), steps);
     }
 
-    pub fn set_presence(&mut self, model: &PowerModel, presence: f32, sample_rate: f32) {
-        self.presence.set(BiquadCoeffs::high_shelf(
-            model.presence_hz,
-            PRESENCE_Q,
-            model.presence_db * presence,
-            sample_rate,
-        ));
+    /// Moves to a Presence dial position over the next `steps` samples; at once with no steps
+    pub fn set_presence(&mut self, model: &PowerModel, presence: f32, sample_rate: f32, steps: u32) {
+        let coeffs = BiquadCoeffs::high_shelf(model.presence_hz, PRESENCE_Q, model.presence_db * presence, sample_rate);
+        self.presence.set(coeffs, steps);
     }
 
     /// Ends the move started by `set_master` at once
@@ -114,7 +111,7 @@ mod tests {
         let mut power = PowerAmp::new();
         power.configure(model, SAMPLE_RATE);
         power.set_master(model, master, 0.0, 0);
-        power.set_presence(model, presence, SAMPLE_RATE);
+        power.set_presence(model, presence, SAMPLE_RATE, 0);
         let mut output = input.to_vec();
         power.process(&mut output);
         output
@@ -172,7 +169,7 @@ mod tests {
             let mut power = PowerAmp::new();
             power.configure(model, SAMPLE_RATE);
             power.set_master(model, 1.0, 0.0, 0);
-            power.set_presence(model, 0.0, SAMPLE_RATE);
+            power.set_presence(model, 0.0, SAMPLE_RATE, 0);
 
             let mut burst = sine(440.0, 2.0, SAMPLE_RATE, LEN);
             power.process(&mut burst);

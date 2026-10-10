@@ -736,7 +736,7 @@ mod tests {
             slowest = slowest.max(block_time_us(&mut reverb, &setting, &silence));
         }
         assert!(!reverb.is_idle());
-        assert!(slowest < playing * 2.0, "{:.1} us per block playing, {:.1} us in the tail", playing, slowest);
+        assert!(slowest < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us in the tail", playing, slowest);
 
         let (left, right) = run_blocks(&mut reverb, &setting, &vec![0.0; seconds(0.6, SAMPLE_RATE)], BLOCK);
         assert!(reverb.is_idle());

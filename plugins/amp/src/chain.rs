@@ -38,10 +38,11 @@ const CAB_FADE_MS: f32 = 20.0;
 // Level of the amp's signal with the cabinet off, in dB: about as loud as with it on
 const CAB_OFF_DB: f32 = -1.4;
 
-// The limits of the settings that are not dials
-const IN_GAIN_DB: [f32; 2] = [-24.0, 24.0];
-const GATE_THRESHOLD_DB: [f32; 2] = [-80.0, -20.0];
-const GATE_RELEASE_MS: [f32; 2] = [20.0, 500.0];
+// The limits of the settings that are not dials. The parameters in `lib.rs` take their
+// ranges from these, and their defaults from `AmpSettings::default`
+pub const IN_GAIN_DB: [f32; 2] = [-24.0, 24.0];
+pub const GATE_THRESHOLD_DB: [f32; 2] = [-80.0, -20.0];
+pub const GATE_RELEASE_MS: [f32; 2] = [20.0, 500.0];
 
 /// What the knobs say, read once per block. The chain smooths the values itself
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -85,6 +86,7 @@ pub struct AmpSettings {
     pub out_level: f32,
 }
 
+/// What the plugin starts with. The parameters in `lib.rs` take their defaults from here
 impl Default for AmpSettings {
     fn default() -> Self {
         Self {
@@ -485,19 +487,23 @@ impl AmpChain {
             self.power.snap();
         }
 
+        // The filters of the dials glide to where the dial is now over the piece that
+        // follows, so that reading the dials once per piece is not heard as steps
         let oversampled_rate = self.oversampled_rate();
+        let steps = if snap { 0 } else { self.oversampled_chunk() };
         let tone = [self.dials.bass, self.dials.mid, self.dials.treble];
         if tone != self.tone_applied {
-            self.tone.set(&ToneCurve::new(&model.tone, tone[0], tone[1], tone[2], oversampled_rate));
+            self.tone.set(&ToneCurve::new(&model.tone, tone[0], tone[1], tone[2], oversampled_rate), steps);
             self.tone_applied = tone;
         }
         if self.dials.presence != self.presence_applied {
-            self.power.set_presence(&model.power, self.dials.presence, oversampled_rate);
+            self.power.set_presence(&model.power, self.dials.presence, oversampled_rate, steps);
             self.presence_applied = self.dials.presence;
         }
         let cab = [self.dials.cab_mic, self.dials.cab_res];
         if cab != self.cab_applied {
-            self.cab_voicing.set(&model.cab, cab[0], cab[1], self.sample_rate);
+            let steps = if snap { 0 } else { CHUNK as u32 };
+            self.cab_voicing.set(&model.cab, cab[0], cab[1], self.sample_rate, steps);
             self.cab_applied = cab;
         }
     }
@@ -836,6 +842,37 @@ mod tests {
         fit_partials(&output[len / 3..], sample_rate, &harmonics_of(freq_hz, sample_rate)).1
     }
 
+    /// The six dials that are filters, with a tone each one moves
+    const SWEPT_DIALS: [(&str, f32); 6] = [("bass", 110.0), ("mid", 550.0), ("treble", 5000.0), ("presence", 6000.0), ("cab_mic", 5000.0), ("cab_res", 80.0)];
+
+    /// Zipper noise of a dial swept from 0 to 10 in `sweep_s` seconds while a sine plays
+    /// through Klar at Gain 0: the dials are read once per `CHUNK` samples, and what that
+    /// leaves in the sound is beside the sine, at that rate above and below it. The louder
+    /// of the two against the sine, in dB, in the middle of the sweep
+    fn zipper_db(dial: &str, freq_hz: f32, sweep_s: f32, sample_rate: f32) -> f32 {
+        let len = (sweep_s * sample_rate) as usize;
+        let mut output = sine(freq_hz, 0.178, sample_rate, len);
+        let mut chain = new_chain(sample_rate);
+        for (index, block) in output.chunks_mut(CHUNK).enumerate() {
+            let position = (index * CHUNK) as f32 / len as f32;
+            let mut settings = with_amp(Amp::Klar, 0.0);
+            match dial {
+                "bass" => settings.bass = position,
+                "mid" => settings.mid = position,
+                "treble" => settings.treble = position,
+                "cab_mic" => settings.cab_mic = position,
+                "cab_res" => settings.cab_res = position,
+                _ => settings.presence = position,
+            }
+            chain.process(&settings, block, None);
+        }
+        let tick_hz = (sample_rate / CHUNK as f32) as f64;
+        let freq = freq_hz as f64;
+        let partials = [freq, freq - tick_hz, freq + tick_hz];
+        let (levels, _) = fit_partials(&output[len / 4..3 * len / 4], sample_rate, &partials);
+        to_db((levels[1].max(levels[2]) / levels[0]) as f32)
+    }
+
     const STAGE_NAMES: [&str; 11] = [
         "gate", "up", "drive", "preamp", "tone", "power", "down", "cabinet", "delay", "reverb", "output",
     ];
@@ -930,12 +967,12 @@ mod tests {
         preamp.reset();
         preamp.set_gain(model, settings.gain, 0);
         let mut tone = ToneStack::new();
-        tone.set(&ToneCurve::new(&model.tone, settings.bass, settings.mid, settings.treble, oversampled_rate));
+        tone.set(&ToneCurve::new(&model.tone, settings.bass, settings.mid, settings.treble, oversampled_rate), 0);
         let mut power = PowerAmp::new();
         power.configure(&model.power, oversampled_rate);
         power.reset();
         power.set_master(&model.power, settings.master, curve(&model.makeup_db, settings.gain), 0);
-        power.set_presence(&model.power, settings.presence, oversampled_rate);
+        power.set_presence(&model.power, settings.presence, oversampled_rate, 0);
         let mut cabinet = Cabinet::new();
         cabinet.set_sample_rate(sample_rate);
         cabinet.set_ir(&design_ir(&model.cab, sample_rate));
@@ -1344,6 +1381,15 @@ mod tests {
             let own_step = largest_step(&output[4800..jump]).max(largest_step(&output[jump + 9600..]));
             let step = largest_step(&output[jump - 1..jump + 9600]);
             assert!(step < own_step * 1.3, "Step of {} against {} for {:?}", step, own_step, high);
+        }
+    }
+
+    #[test]
+    fn test_fast_dial_sweeps_leave_no_zipper_noise() {
+        // The filters of the dials glide between the positions the dials are read at
+        for (dial, freq_hz) in SWEPT_DIALS {
+            let zipper = zipper_db(dial, freq_hz, 0.2, SAMPLE_RATE);
+            assert!(zipper < -90.0, "{} swept in 200 ms: {:.1} dB beside the sine", dial, zipper);
         }
     }
 
@@ -2007,8 +2053,8 @@ mod tests {
         assert!(peak(&tail[24_000..]) < 1e-6, "The gate is not closed: {}", peak(&tail[24_000..]));
         let closed = block_time_us(&mut chain, &settings, &hiss(-75.0, 12_000));
         let silent = block_time_us(&mut chain, &settings, &vec![0.0; 12_000]);
-        assert!(closed < playing * 2.0, "{:.1} us per block playing, {:.1} us with the gate closed", playing, closed);
-        assert!(silent < playing * 2.0, "{:.1} us per block playing, {:.1} us silent", playing, silent);
+        assert!(closed < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us with the gate closed", playing, closed);
+        assert!(silent < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us silent", playing, silent);
     }
 
     /// Median time to process one block, in microseconds
@@ -2036,7 +2082,7 @@ mod tests {
         let playing = block_time_us(&mut chain, &settings, &power_chords(SAMPLE_RATE, 0.25));
         run_blocks(&mut chain, &settings, &vec![0.0; 24_000], BLOCK);
         let silent = block_time_us(&mut chain, &settings, &vec![0.0; 12_000]);
-        assert!(silent < playing * 2.0, "{:.1} us per block playing, {:.1} us silent", playing, silent);
+        assert!(silent < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us silent", playing, silent);
     }
 
     #[test]
@@ -2367,10 +2413,14 @@ mod tests {
         };
         let playing = block_time_us(&mut chain, &settings, &power_chords(SAMPLE_RATE, 0.25));
         assert!(!chain.is_idle());
-        let ringing = block_time_us(&mut chain, &settings, &vec![0.0; 60_000]);
+        // A third of a second in which both still ring, then the rest of the way down
+        let ringing = block_time_us(&mut chain, &settings, &vec![0.0; 14_400]);
+        assert!(!chain.is_idle());
+        run_blocks(&mut chain, &settings, &vec![0.0; 48_000], BLOCK);
+        assert!(chain.is_idle());
         let silent = block_time_us(&mut chain, &settings, &vec![0.0; 12_000]);
-        assert!(ringing < playing * 2.0, "{:.1} us per block playing, {:.1} us while the tail ends", playing, ringing);
-        assert!(silent < playing * 2.0, "{:.1} us per block playing, {:.1} us silent", playing, silent);
+        assert!(ringing < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us while the tail ends", playing, ringing);
+        assert!(silent < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us silent", playing, silent);
     }
 
     /// Prints levels, distortion, aliasing, tightness, dynamics, latency and cost for every
@@ -3174,6 +3224,18 @@ mod tests {
                 let off = levels.iter().zip(&reference.0).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
                 println!("{:>14}", format!("{:.2} / {:.2}", off, (thd - reference.1).abs()));
             }
+        }
+
+        println!();
+        println!("Zipper noise: a dial swept from 0 to 10 while a sine plays through Klar at Gain 0. Level");
+        println!("beside the sine, at the rate the dials are read ({} Hz), against the sine, in dB", SAMPLE_RATE / CHUNK as f32);
+        println!("{:<10}{:>8}{:>12}{:>12}{:>12}", "dial", "sine Hz", "in 50 ms", "in 200 ms", "in 1 s");
+        for (dial, freq_hz) in SWEPT_DIALS {
+            print!("{:<10}{:>8}", dial, freq_hz);
+            for sweep_s in [0.05, 0.2, 1.0] {
+                print!("{:>12.1}", zipper_db(dial, freq_hz, sweep_s, SAMPLE_RATE));
+            }
+            println!();
         }
 
         println!();

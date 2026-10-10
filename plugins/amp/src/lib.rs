@@ -14,9 +14,9 @@ mod reverb;
 #[cfg(test)]
 mod test_util;
 pub use amp::model::Amp;
-use chain::{AmpChain, AmpSettings};
-use delay::DelaySettings;
-use reverb::ReverbSettings;
+use chain::{AmpChain, AmpSettings, GATE_RELEASE_MS, GATE_THRESHOLD_DB, IN_GAIN_DB};
+use delay::{DelaySettings, FEEDBACK_MAX, TIME_MAX_MS, TIME_MIN_MS};
+use reverb::{ReverbSettings, DECAY_MAX_S, DECAY_MIN_S};
 
 const LEVEL_MIN_DB: f32 = -30.0;
 const LEVEL_MAX_DB: f32 = 6.0;
@@ -133,35 +133,51 @@ impl Default for GuitarAmpPlugin {
 
 impl Default for GuitarAmpParams {
     fn default() -> Self {
+        // Every default comes from the settings the chain itself starts with, and the
+        // ranges from the limits the chain and the effects keep to
         let defaults = AmpSettings::default();
         Self {
             editor_state: editor::default_state(),
 
-            bypass: BoolParam::new("Bypass", false).make_bypass(),
+            bypass: BoolParam::new("Bypass", defaults.bypass).make_bypass(),
 
-            in_gain: FloatParam::new("Input", 0.0, FloatRange::Linear { min: -24.0, max: 24.0 })
-                .with_unit(" dB")
-                .with_value_to_string(formatters::v2s_f32_rounded(1)),
-            gate_on: BoolParam::new("Gate", true),
-            gate_thresh: FloatParam::new("Gate Threshold", -60.0, FloatRange::Linear { min: -80.0, max: -20.0 })
-                .with_unit(" dB")
-                .with_value_to_string(formatters::v2s_f32_rounded(0)),
+            in_gain: FloatParam::new(
+                "Input",
+                defaults.in_gain_db,
+                FloatRange::Linear {
+                    min: IN_GAIN_DB[0],
+                    max: IN_GAIN_DB[1],
+                },
+            )
+            .with_unit(" dB")
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            gate_on: BoolParam::new("Gate", defaults.gate_on),
+            gate_thresh: FloatParam::new(
+                "Gate Threshold",
+                defaults.gate_thresh_db,
+                FloatRange::Linear {
+                    min: GATE_THRESHOLD_DB[0],
+                    max: GATE_THRESHOLD_DB[1],
+                },
+            )
+            .with_unit(" dB")
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
             gate_release: FloatParam::new(
                 "Gate Release",
-                100.0,
+                defaults.gate_release_ms,
                 FloatRange::Skewed {
-                    min: 20.0,
-                    max: 500.0,
+                    min: GATE_RELEASE_MS[0],
+                    max: GATE_RELEASE_MS[1],
                     factor: FloatRange::skew_factor(-1.0), // More resolution at low end
                 },
             )
             .with_unit(" ms")
             .with_value_to_string(formatters::v2s_f32_rounded(0)),
 
-            drive_on: BoolParam::new("Drive", false),
-            drive_gain: dial_param("Drive Gain", 0.3),
-            drive_tone: dial_param("Drive Tone", 0.5),
-            drive_level: dial_param("Drive Level", 0.5),
+            drive_on: BoolParam::new("Drive", defaults.drive_on),
+            drive_gain: dial_param("Drive Gain", defaults.drive_gain),
+            drive_tone: dial_param("Drive Tone", defaults.drive_tone),
+            drive_level: dial_param("Drive Level", defaults.drive_level),
 
             amp: EnumParam::new("Amp", defaults.amp),
 
@@ -172,38 +188,38 @@ impl Default for GuitarAmpParams {
             presence: dial_param("Presence", defaults.presence),
             master: dial_param("Master", defaults.master),
 
-            cab_on: BoolParam::new("Cabinet", true),
-            cab_mic: dial_param("Cab Mic", 0.5),
-            cab_res: dial_param("Cab Resonance", 0.5),
+            cab_on: BoolParam::new("Cabinet", defaults.cab_on),
+            cab_mic: dial_param("Cab Mic", defaults.cab_mic),
+            cab_res: dial_param("Cab Resonance", defaults.cab_res),
 
-            delay_on: BoolParam::new("Delay", false),
+            delay_on: BoolParam::new("Delay", defaults.delay.on),
             delay_time: FloatParam::new(
                 "Delay Time",
-                350.0,
+                defaults.delay.time_ms,
                 FloatRange::Skewed {
-                    min: 20.0,
-                    max: 1000.0,
+                    min: TIME_MIN_MS,
+                    max: TIME_MAX_MS,
                     factor: FloatRange::skew_factor(-1.0), // More resolution at low end
                 },
             )
             .with_unit(" ms")
             .with_value_to_string(formatters::v2s_f32_rounded(0)),
-            delay_feedback: percent_param("Delay Feedback", 0.35, 0.9),
-            delay_mix: percent_param("Delay Mix", 0.25, 1.0),
+            delay_feedback: percent_param("Delay Feedback", defaults.delay.feedback, FEEDBACK_MAX),
+            delay_mix: percent_param("Delay Mix", defaults.delay.mix, 1.0),
 
-            reverb_on: BoolParam::new("Reverb", false),
+            reverb_on: BoolParam::new("Reverb", defaults.reverb.on),
             reverb_decay: FloatParam::new(
                 "Reverb Decay",
-                1.5,
+                defaults.reverb.decay_s,
                 FloatRange::Skewed {
-                    min: 0.3,
-                    max: 6.0,
+                    min: DECAY_MIN_S,
+                    max: DECAY_MAX_S,
                     factor: FloatRange::skew_factor(-1.0), // More resolution at low end
                 },
             )
             .with_unit(" s")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
-            reverb_mix: percent_param("Reverb Mix", 0.2, 1.0),
+            reverb_mix: percent_param("Reverb Mix", defaults.reverb.mix, 1.0),
 
             out_level: FloatParam::new(
                 "Output",
@@ -217,6 +233,45 @@ impl Default for GuitarAmpParams {
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_gain_to_db(1))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
+        }
+    }
+}
+
+impl GuitarAmpParams {
+    /// What the knobs say now
+    fn settings(&self) -> AmpSettings {
+        AmpSettings {
+            bypass: self.bypass.value(),
+            in_gain_db: self.in_gain.value(),
+            gate_on: self.gate_on.value(),
+            gate_thresh_db: self.gate_thresh.value(),
+            gate_release_ms: self.gate_release.value(),
+            drive_on: self.drive_on.value(),
+            drive_gain: self.drive_gain.value(),
+            drive_tone: self.drive_tone.value(),
+            drive_level: self.drive_level.value(),
+            amp: self.amp.value(),
+            gain: self.gain.value(),
+            bass: self.bass.value(),
+            mid: self.mid.value(),
+            treble: self.treble.value(),
+            presence: self.presence.value(),
+            master: self.master.value(),
+            cab_on: self.cab_on.value(),
+            cab_mic: self.cab_mic.value(),
+            cab_res: self.cab_res.value(),
+            delay: DelaySettings {
+                on: self.delay_on.value(),
+                time_ms: self.delay_time.value(),
+                feedback: self.delay_feedback.value(),
+                mix: self.delay_mix.value(),
+            },
+            reverb: ReverbSettings {
+                on: self.reverb_on.value(),
+                decay_s: self.reverb_decay.value(),
+                mix: self.reverb_mix.value(),
+            },
+            out_level: self.out_level.value(),
         }
     }
 }
@@ -293,39 +348,7 @@ impl Plugin for GuitarAmpPlugin {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        let settings = AmpSettings {
-            bypass: self.params.bypass.value(),
-            in_gain_db: self.params.in_gain.value(),
-            gate_on: self.params.gate_on.value(),
-            gate_thresh_db: self.params.gate_thresh.value(),
-            gate_release_ms: self.params.gate_release.value(),
-            drive_on: self.params.drive_on.value(),
-            drive_gain: self.params.drive_gain.value(),
-            drive_tone: self.params.drive_tone.value(),
-            drive_level: self.params.drive_level.value(),
-            amp: self.params.amp.value(),
-            gain: self.params.gain.value(),
-            bass: self.params.bass.value(),
-            mid: self.params.mid.value(),
-            treble: self.params.treble.value(),
-            presence: self.params.presence.value(),
-            master: self.params.master.value(),
-            cab_on: self.params.cab_on.value(),
-            cab_mic: self.params.cab_mic.value(),
-            cab_res: self.params.cab_res.value(),
-            delay: DelaySettings {
-                on: self.params.delay_on.value(),
-                time_ms: self.params.delay_time.value(),
-                feedback: self.params.delay_feedback.value(),
-                mix: self.params.delay_mix.value(),
-            },
-            reverb: ReverbSettings {
-                on: self.params.reverb_on.value(),
-                decay_s: self.params.reverb_decay.value(),
-                mix: self.params.reverb_mix.value(),
-            },
-            out_level: self.params.out_level.value(),
-        };
+        let settings = self.params.settings();
 
         match buffer.as_slice() {
             [left, right] => self.chain.process(&settings, left, Some(&mut **right)),
@@ -370,3 +393,45 @@ impl Vst3Plugin for GuitarAmpPlugin {
 
 nih_export_clap!(GuitarAmpPlugin);
 nih_export_vst3!(GuitarAmpPlugin);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parameters_start_at_the_settings_the_chain_starts_with() {
+        let params = GuitarAmpParams::default();
+        assert_eq!(params.settings(), AmpSettings::default());
+
+        // The values DAW projects were saved against. Changing a default changes how a
+        // project sounds that never touched that knob
+        let settings = params.settings();
+        assert!(!settings.bypass && settings.gate_on && !settings.drive_on && settings.cab_on);
+        assert!(!settings.delay.on && !settings.reverb.on);
+        assert_eq!(settings.amp, Amp::Brol);
+        assert_eq!((settings.in_gain_db, settings.gate_thresh_db, settings.gate_release_ms), (0.0, -60.0, 100.0));
+        assert_eq!((settings.drive_gain, settings.drive_tone, settings.drive_level), (0.3, 0.5, 0.5));
+        assert_eq!([settings.gain, settings.bass, settings.mid, settings.treble, settings.presence, settings.master], [0.5; 6]);
+        assert_eq!((settings.cab_mic, settings.cab_res), (0.5, 0.5));
+        assert_eq!((settings.delay.time_ms, settings.delay.feedback, settings.delay.mix), (350.0, 0.35, 0.25));
+        assert_eq!((settings.reverb.decay_s, settings.reverb.mix), (1.5, 0.2));
+        assert_eq!(settings.out_level, 1.0);
+    }
+
+    #[test]
+    fn test_parameter_ranges_are_the_limits_of_the_chain() {
+        let params = GuitarAmpParams::default();
+        let range = |param: &FloatParam| (param.preview_plain(0.0), param.preview_plain(1.0));
+        assert_eq!(range(&params.in_gain), (-24.0, 24.0));
+        assert_eq!(range(&params.gate_thresh), (-80.0, -20.0));
+        assert_eq!(range(&params.gate_release), (20.0, 500.0));
+        assert_eq!(range(&params.delay_time), (20.0, 1000.0));
+        assert_eq!(range(&params.delay_feedback), (0.0, 0.9));
+        assert_eq!(range(&params.delay_mix), (0.0, 1.0));
+        assert_eq!(range(&params.reverb_decay), (0.3, 6.0));
+        assert_eq!(range(&params.reverb_mix), (0.0, 1.0));
+        for dial in [&params.gain, &params.drive_gain, &params.cab_mic] {
+            assert_eq!(range(dial), (0.0, 1.0));
+        }
+    }
+}

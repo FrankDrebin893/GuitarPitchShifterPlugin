@@ -4,6 +4,11 @@ use crate::dsp::filters::{Biquad, BiquadCoeffs};
 use std::f64::consts::TAU;
 use std::path::Path;
 
+/// How many times as long as playing a block of silence or of a tail may take before a test
+/// says it was slowed down. Denormal numbers cost ten times and more. A busy machine, or
+/// a core that changes its speed between the two measurements, stays well under this
+pub const SLOWED_DOWN: f64 = 4.0;
+
 pub fn rms(samples: &[f32]) -> f32 {
     (samples.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>() / samples.len() as f64).sqrt() as f32
 }

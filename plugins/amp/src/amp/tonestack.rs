@@ -1,6 +1,6 @@
 use super::model::ToneModel;
 use crate::dsp::db_to_gain;
-use crate::dsp::filters::{Biquad, BiquadCoeffs};
+use crate::dsp::filters::{BiquadCoeffs, GlidingBiquad};
 
 // Gentle slopes, as from a network of a few resistors and capacitors
 const SHELF_Q: f32 = 0.6;
@@ -40,24 +40,25 @@ impl ToneCurve {
 
 /// Bass, Mid and Treble, between the preamp and the power amp
 pub struct ToneStack {
-    bass: Biquad,
-    mid: Biquad,
-    treble: Biquad,
+    bass: GlidingBiquad,
+    mid: GlidingBiquad,
+    treble: GlidingBiquad,
 }
 
 impl ToneStack {
     pub fn new() -> Self {
         Self {
-            bass: Biquad::new(),
-            mid: Biquad::new(),
-            treble: Biquad::new(),
+            bass: GlidingBiquad::new(),
+            mid: GlidingBiquad::new(),
+            treble: GlidingBiquad::new(),
         }
     }
 
-    pub fn set(&mut self, curve: &ToneCurve) {
-        self.bass.set(curve.bass);
-        self.mid.set(curve.mid);
-        self.treble.set(curve.treble);
+    /// Moves to a curve over the next `steps` samples; at once with no steps
+    pub fn set(&mut self, curve: &ToneCurve, steps: u32) {
+        self.bass.set(curve.bass, steps);
+        self.mid.set(curve.mid, steps);
+        self.treble.set(curve.treble, steps);
     }
 
     pub fn reset(&mut self) {
@@ -136,7 +137,7 @@ mod tests {
         let curve = ToneCurve::new(&amp.model().tone, 0.8, 0.3, 0.6, SAMPLE_RATE);
         for freq in [80.0, 650.0, 6000.0] {
             let mut stack = ToneStack::new();
-            stack.set(&curve);
+            stack.set(&curve, 0);
             let mut block = sine(freq, 0.5, SAMPLE_RATE, 48_000);
             let input_rms = rms(&block[24_000..]);
             stack.process(&mut block);

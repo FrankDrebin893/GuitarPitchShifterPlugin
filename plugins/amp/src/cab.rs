@@ -1,6 +1,6 @@
 use crate::amp::model::CabModel;
 use crate::dsp::db_to_gain;
-use crate::dsp::filters::{Biquad, BiquadCoeffs};
+use crate::dsp::filters::{Biquad, BiquadCoeffs, GlidingBiquad};
 
 /// The longest impulse response the cabinet can hold: 20 ms at 192 kHz
 pub const MAX_IR_LEN: usize = 3840;
@@ -417,9 +417,10 @@ impl Cabinet {
 /// The Mic and Resonance dials: filters after the convolution. With a dial at its centre
 /// its filters are skipped, and the cabinet is the impulse response as designed
 pub struct CabVoicing {
-    mic_high: Biquad,
-    mic_low: Biquad,
-    thump: Biquad,
+    mic_high: GlidingBiquad,
+    mic_low: GlidingBiquad,
+    thump: GlidingBiquad,
+    // The dial is at its centre, or on its last steps there
     mic_centred: bool,
     thump_centred: bool,
 }
@@ -427,12 +428,21 @@ pub struct CabVoicing {
 impl CabVoicing {
     pub fn new() -> Self {
         Self {
-            mic_high: Biquad::new(),
-            mic_low: Biquad::new(),
-            thump: Biquad::new(),
+            mic_high: GlidingBiquad::new(),
+            mic_low: GlidingBiquad::new(),
+            thump: GlidingBiquad::new(),
             mic_centred: true,
             thump_centred: true,
         }
+    }
+
+    /// The filters of a dial run unless it has arrived at its centre
+    fn mic_runs(&self) -> bool {
+        !self.mic_centred || self.mic_high.is_gliding()
+    }
+
+    fn thump_runs(&self) -> bool {
+        !self.thump_centred || self.thump.is_gliding()
     }
 
     pub fn reset(&mut self) {
@@ -443,23 +453,25 @@ impl CabVoicing {
 
     /// `mic` and `resonance` are dial positions, 0.0 to 1.0. Below 0.5 the microphone moves
     /// to the edge of the cone (darker, a little fuller), above it to the centre (brighter,
-    /// a little leaner). `resonance` is how much the cabinet thumps at its own resonance
-    pub fn set(&mut self, model: &CabModel, mic: f32, resonance: f32, sample_rate: f32) {
+    /// a little leaner). `resonance` is how much the cabinet thumps at its own resonance.
+    /// The filters move there over the next `steps` samples; at once with no steps
+    pub fn set(&mut self, model: &CabModel, mic: f32, resonance: f32, sample_rate: f32, steps: u32) {
         let (mic_coeffs, mic_centred) = Self::mic_coeffs(model, mic, sample_rate);
-        // Coming from the centre the filters start from rest
-        if self.mic_centred && !mic_centred {
+        // Coming from the centre the filters start from rest. What they hold there passes
+        // the signal as it is, so they start from where the skipped signal was
+        if !self.mic_runs() && !mic_centred {
             self.mic_high.reset();
             self.mic_low.reset();
         }
-        self.mic_high.set(mic_coeffs[0]);
-        self.mic_low.set(mic_coeffs[1]);
+        self.mic_high.set(mic_coeffs[0], steps);
+        self.mic_low.set(mic_coeffs[1], steps);
         self.mic_centred = mic_centred;
 
         let (thump_coeffs, thump_centred) = Self::thump_coeffs(model, resonance, sample_rate);
-        if self.thump_centred && !thump_centred {
+        if !self.thump_runs() && !thump_centred {
             self.thump.reset();
         }
-        self.thump.set(thump_coeffs);
+        self.thump.set(thump_coeffs, steps);
         self.thump_centred = thump_centred;
     }
 
@@ -483,13 +495,11 @@ impl CabVoicing {
     }
 
     pub fn process(&mut self, block: &mut [f32]) {
-        if !self.mic_centred {
-            for sample in block.iter_mut() {
+        for sample in block.iter_mut() {
+            if self.mic_runs() {
                 *sample = self.mic_low.process(self.mic_high.process(*sample as f64)) as f32;
             }
-        }
-        if !self.thump_centred {
-            for sample in block.iter_mut() {
+            if self.thump_runs() {
                 *sample = self.thump.process(*sample as f64) as f32;
             }
         }
@@ -808,7 +818,7 @@ mod tests {
 
     fn voiced(amp: Amp, mic: f32, resonance: f32, input: &[f32]) -> Vec<f32> {
         let mut voicing = CabVoicing::new();
-        voicing.set(&amp.model().cab, mic, resonance, 48000.0);
+        voicing.set(&amp.model().cab, mic, resonance, 48000.0, 0);
         let mut output = input.to_vec();
         voicing.process(&mut output);
         output
@@ -824,12 +834,27 @@ mod tests {
 
         // Also after a dial has been somewhere else
         let mut voicing = CabVoicing::new();
-        voicing.set(&Amp::Brol.model().cab, 0.9, 0.1, 48000.0);
+        voicing.set(&Amp::Brol.model().cab, 0.9, 0.1, 48000.0, 0);
         voicing.process(&mut input.clone());
-        voicing.set(&Amp::Brol.model().cab, 0.5, 0.5, 48000.0);
+        voicing.set(&Amp::Brol.model().cab, 0.5, 0.5, 48000.0, 0);
         let mut output = input.clone();
         voicing.process(&mut output);
         assert_eq!(output, input);
+
+        // And when the dials glide back: the same as the input once they have arrived, and
+        // no step on the way there or on the way out again
+        let largest_step = |samples: &[f32]| samples.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
+        let tone = sine(300.0, 0.5, 48000.0, 4800);
+        voicing.set(&Amp::Brol.model().cab, 0.9, 0.1, 48000.0, 0);
+        let mut output = tone.clone();
+        voicing.process(&mut output[..2400]);
+        voicing.set(&Amp::Brol.model().cab, 0.5, 0.5, 48000.0, 32);
+        voicing.process(&mut output[2400..3600]);
+        assert_eq!(output[2432..3600], tone[2432..3600]);
+        voicing.set(&Amp::Brol.model().cab, 0.6, 0.6, 48000.0, 32);
+        voicing.process(&mut output[3600..]);
+        assert!(largest_step(&output[1200..]) < 1.3 * largest_step(&output[1200..2400]));
+        assert!(output[3700..] != tone[3700..]);
     }
 
     #[test]
