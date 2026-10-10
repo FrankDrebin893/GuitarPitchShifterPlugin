@@ -123,7 +123,6 @@ impl BiquadCoeffs {
     }
 
     /// Gain of the filter at one frequency
-    #[cfg(test)]
     pub fn magnitude_db(&self, freq_hz: f32, sample_rate: f32) -> f32 {
         let (sin1, cos1) = (TAU * freq_hz as f64 / sample_rate as f64).sin_cos();
         let (sin2, cos2) = (2.0 * TAU * freq_hz as f64 / sample_rate as f64).sin_cos();

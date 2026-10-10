@@ -1,14 +1,30 @@
 use crate::amp::model::CabModel;
+use crate::dsp::db_to_gain;
 use crate::dsp::filters::{Biquad, BiquadCoeffs};
 
 /// The longest impulse response the cabinet can hold: 20 ms at 192 kHz
 pub const MAX_IR_LEN: usize = 3840;
 
-// Long enough for the speaker resonance to ring out
+// No impulse response is longer than this. The cabinets designed here are a quarter to
+// less than half of it (`CabModel.ir_ms`)
 const IR_MS: f32 = 20.0;
 
 // Share of the impulse response, at its end, that is faded to zero
-const FADE_SHARE: f32 = 0.5;
+const FADE_SHARE: f32 = 0.25;
+
+// The speaker's resonance rings many times longer than everything else a cabinet does: an
+// impulse response that holds it has to be 20 ms long, without it 5 to 8 ms do. So the
+// resonance is a filter behind the convolution. The cabinets were tuned as impulse responses
+// of `IR_MS` that held it, faded out over their second half, which took a little off its
+// ring. The filter is fitted to that response over this band, so the low end stays as tuned
+const LONG_FADE_SHARE: f32 = 0.5;
+const FIT_BAND_HZ: [f32; 2] = [60.0, 250.0];
+const FIT_PROBES: usize = 16;
+// How far the fit may move the resonance's frequency and Q, as a share of each, the number
+// of values tried either side of the best so far, and the rounds, each five times finer
+const FIT_SPAN: [f32; 2] = [0.1, 0.3];
+const FIT_STEPS: i32 = 5;
+const FIT_ROUNDS: usize = 3;
 
 // The response is levelled so that its average over this band is 0 dB
 const LEVEL_BAND_HZ: [f32; 2] = [100.0, 4000.0];
@@ -37,16 +53,123 @@ const MIC_TRIM_DB: f32 = 0.4;
 const THUMP_DB: f32 = 6.0;
 const THUMP_Q: f32 = 1.4;
 
-/// Number of samples of an impulse response at a sample rate
+/// The most samples an impulse response has at a sample rate
 pub fn ir_len(sample_rate: f32) -> usize {
     ((IR_MS * 0.001 * sample_rate).round() as usize).clamp(16, MAX_IR_LEN)
 }
 
-/// Designs a cabinet's impulse response. The same model sounds the same at every sample
-/// rate. Allocates and takes a while: not for the audio thread
-pub fn design_ir(model: &CabModel, sample_rate: f32) -> Vec<f32> {
+fn gain_to_db(gain: f32) -> f32 {
+    20.0 * gain.max(1e-9).log10()
+}
+
+/// A cabinet as it is run: a short impulse response, and the speaker's resonance as a
+/// filter behind it
+#[derive(Clone, Debug, PartialEq)]
+pub struct CabIr {
+    /// Everything but the resonance, first sample first
+    pub taps: Vec<f32>,
+    /// The resonance: a high-pass with a bump at its corner. `BiquadCoeffs::IDENTITY`
+    /// leaves the impulse response by itself
+    pub lows: BiquadCoeffs,
+}
+
+impl CabIr {
+    /// An impulse response by itself
+    #[cfg(test)]
+    pub fn plain(taps: &[f32]) -> Self {
+        Self {
+            taps: taps.to_vec(),
+            lows: BiquadCoeffs::IDENTITY,
+        }
+    }
+
+    /// Gain of the cabinet at one frequency
+    pub fn magnitude(&self, freq_hz: f32, sample_rate: f32) -> f32 {
+        ir_magnitude(&self.taps, freq_hz, sample_rate) * db_to_gain(self.lows.magnitude_db(freq_hz, sample_rate))
+    }
+}
+
+/// Designs a cabinet. The same model sounds the same at every sample rate. Allocates and
+/// takes a while: not for the audio thread
+pub fn design_ir(model: &CabModel, sample_rate: f32) -> CabIr {
+    let rest = rest_filters(model, sample_rate);
+    let len = ((model.ir_ms * 0.001 * sample_rate).round() as usize).clamp(16, ir_len(sample_rate));
+    let taps = faded_response(&rest, len, FADE_SHARE);
+    let lows = fit_lows(model, &long_response(model, sample_rate), &taps, sample_rate);
+    let mut ir = CabIr { taps, lows };
+
+    let ratio = (LEVEL_BAND_HZ[1] / LEVEL_BAND_HZ[0]).powf(1.0 / (LEVEL_PROBES - 1) as f32);
+    let power: f32 = (0..LEVEL_PROBES)
+        .map(|probe| ir.magnitude(LEVEL_BAND_HZ[0] * ratio.powi(probe as i32), sample_rate).powi(2))
+        .sum::<f32>()
+        / LEVEL_PROBES as f32;
+    let gain = 1.0 / power.sqrt().max(1e-9);
+    for tap in &mut ir.taps {
+        *tap *= gain;
+    }
+    ir
+}
+
+fn resonance_filter(model: &CabModel, sample_rate: f32) -> BiquadCoeffs {
+    BiquadCoeffs::highpass(model.resonance_hz, model.resonance_q, sample_rate)
+}
+
+/// The whole cabinet as one impulse response of `IR_MS`, not levelled: what the cabinet
+/// was tuned as, and what the short one with its filter is held against
+fn long_response(model: &CabModel, sample_rate: f32) -> Vec<f32> {
+    let mut filters = vec![resonance_filter(model, sample_rate)];
+    filters.extend(rest_filters(model, sample_rate));
+    faded_response(&filters, ir_len(sample_rate), LONG_FADE_SHARE)
+}
+
+/// The resonance filter that, behind `taps`, comes closest to `long` at the low end: the
+/// model's own, with its frequency and Q moved a little
+fn fit_lows(model: &CabModel, long: &[f32], taps: &[f32], sample_rate: f32) -> BiquadCoeffs {
+    let ratio = (FIT_BAND_HZ[1] / FIT_BAND_HZ[0]).powf(1.0 / (FIT_PROBES - 1) as f32);
+    // What the filter has to do at each probe, in dB
+    let wanted: Vec<(f32, f32)> = (0..FIT_PROBES)
+        .map(|probe| {
+            let freq_hz = FIT_BAND_HZ[0] * ratio.powi(probe as i32);
+            let long_db = gain_to_db(ir_magnitude(long, freq_hz, sample_rate));
+            (freq_hz, long_db - gain_to_db(ir_magnitude(taps, freq_hz, sample_rate)))
+        })
+        .collect();
+    let design = |moved: [f32; 2]| {
+        BiquadCoeffs::highpass(model.resonance_hz * moved[0], model.resonance_q * moved[1], sample_rate)
+    };
+    let error = |moved: [f32; 2]| {
+        let filter = design(moved);
+        wanted
+            .iter()
+            .map(|&(freq_hz, wanted_db)| (filter.magnitude_db(freq_hz, sample_rate) - wanted_db).abs())
+            .fold(0.0, f32::max)
+    };
+
+    let mut best = [1.0, 1.0];
+    let mut best_error = error(best);
+    let mut span = FIT_SPAN;
+    for _ in 0..FIT_ROUNDS {
+        let centre = best;
+        for freq_step in -FIT_STEPS..=FIT_STEPS {
+            for q_step in -FIT_STEPS..=FIT_STEPS {
+                let moved = [
+                    centre[0] + span[0] * freq_step as f32 / FIT_STEPS as f32,
+                    centre[1] + span[1] * q_step as f32 / FIT_STEPS as f32,
+                ];
+                let moved_error = error(moved);
+                if moved_error < best_error {
+                    (best, best_error) = (moved, moved_error);
+                }
+            }
+        }
+        span = [span[0] / FIT_STEPS as f32, span[1] / FIT_STEPS as f32];
+    }
+    design(best)
+}
+
+/// Everything a cabinet does but its resonance
+fn rest_filters(model: &CabModel, sample_rate: f32) -> Vec<BiquadCoeffs> {
     let mut filters = vec![
-        BiquadCoeffs::highpass(model.resonance_hz, model.resonance_q, sample_rate),
         BiquadCoeffs::peak(model.body[0], model.body[1], model.body[2], sample_rate),
         BiquadCoeffs::peak(model.dip[0], model.dip[1], model.dip[2], sample_rate),
         BiquadCoeffs::peak(model.bite[0], model.bite[1], model.bite[2], sample_rate),
@@ -66,7 +189,12 @@ pub fn design_ir(model: &CabModel, sample_rate: f32) -> Vec<f32> {
         let q = BREAKUP_Q[0] + (BREAKUP_Q[1] - BREAKUP_Q[0]) * random.next();
         filters.push(BiquadCoeffs::peak(freq, q, gain_db, sample_rate));
     }
+    filters
+}
 
+/// The first `len` samples of what a row of filters answers to an impulse, the last
+/// `fade_share` of them faded to zero
+fn faded_response(filters: &[BiquadCoeffs], len: usize, fade_share: f32) -> Vec<f32> {
     let mut sections: Vec<Biquad> = filters
         .iter()
         .map(|&coeffs| {
@@ -76,9 +204,8 @@ pub fn design_ir(model: &CabModel, sample_rate: f32) -> Vec<f32> {
         })
         .collect();
 
-    let len = ir_len(sample_rate);
-    let fade_start = ((1.0 - FADE_SHARE) * len as f32) as usize;
-    let mut ir: Vec<f32> = (0..len)
+    let fade_start = ((1.0 - fade_share) * len as f32) as usize;
+    (0..len)
         .map(|index| {
             let impulse = if index == 0 { 1.0 } else { 0.0 };
             let sample = sections.iter_mut().fold(impulse, |signal, section| section.process(signal));
@@ -90,18 +217,7 @@ pub fn design_ir(model: &CabModel, sample_rate: f32) -> Vec<f32> {
             };
             (sample * fade) as f32
         })
-        .collect();
-
-    let ratio = (LEVEL_BAND_HZ[1] / LEVEL_BAND_HZ[0]).powf(1.0 / (LEVEL_PROBES - 1) as f32);
-    let power: f32 = (0..LEVEL_PROBES)
-        .map(|probe| ir_magnitude(&ir, LEVEL_BAND_HZ[0] * ratio.powi(probe as i32), sample_rate).powi(2))
-        .sum::<f32>()
-        / LEVEL_PROBES as f32;
-    let gain = 1.0 / power.sqrt().max(1e-9);
-    for sample in &mut ir {
-        *sample *= gain;
-    }
-    ir
+        .collect()
 }
 
 /// Gain of an impulse response at one frequency
@@ -150,39 +266,62 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
     sums.iter().sum::<f32>() + rest
 }
 
-/// The cabinet: convolution with an impulse response, computed directly so it adds no
-/// latency. Holds two responses so one can be swapped for another without a click
-pub struct Cabinet {
+/// One cabinet, loaded
+struct Slot {
+    // The impulse response stored backwards, so it lines up with the history oldest first
+    taps: Vec<f32>,
     len: usize,
-    // The last `len` input samples, as a ring
+    lows: Biquad,
+    // False leaves the filter out: the impulse response by itself, to the bit
+    filtered: bool,
+}
+
+impl Slot {
+    fn new() -> Self {
+        let mut taps = vec![0.0; MAX_IR_LEN];
+        taps[0] = 1.0;
+        Self {
+            taps,
+            len: 1,
+            lows: Biquad::new(),
+            filtered: false,
+        }
+    }
+}
+
+/// The cabinet: convolution with an impulse response, computed directly so it adds no
+/// latency, and the speaker's resonance as a filter behind it. Holds two cabinets so one
+/// can be swapped for another without a click
+pub struct Cabinet {
+    // The most samples an impulse response has at this sample rate
+    ring: usize,
+    // The last `ring` input samples as a ring, each written twice, `ring` apart: the latest
+    // ones are then always one straight run, whatever the length of the impulse response
     history: Vec<f32>,
     position: usize,
-    // Impulse responses stored backwards, so they line up with the history oldest first
-    taps: [Vec<f32>; 2],
+    slots: [Slot; 2],
     active: usize,
-    // 1.0 when only the active response plays, less while the previous one fades out
+    // 1.0 when only the active cabinet plays, less while the previous one fades out
     fade: f32,
     fade_step: f32,
 }
 
 impl Cabinet {
     pub fn new() -> Self {
-        let mut through = vec![0.0; MAX_IR_LEN];
-        through[MAX_IR_LEN - 1] = 1.0;
         Self {
-            len: MAX_IR_LEN,
-            history: vec![0.0; MAX_IR_LEN],
+            ring: MAX_IR_LEN,
+            history: vec![0.0; 2 * MAX_IR_LEN],
             position: 0,
-            taps: [through.clone(), through],
+            slots: [Slot::new(), Slot::new()],
             active: 0,
             fade: 1.0,
             fade_step: 0.0,
         }
     }
 
-    /// Sets the length the impulse responses have at this rate. Load one with `set_ir` after
+    /// Sets the most samples an impulse response has at this rate. Load one with `set_ir` after
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.len = ir_len(sample_rate);
+        self.ring = ir_len(sample_rate);
         self.fade_step = 1.0 / (SWAP_MS * 0.001 * sample_rate);
         self.reset();
     }
@@ -191,18 +330,21 @@ impl Cabinet {
         self.history.fill(0.0);
         self.position = 0;
         self.fade = 1.0;
+        for slot in &mut self.slots {
+            slot.lows.reset();
+        }
     }
 
-    /// Loads an impulse response (first sample first) and uses it at once. Longer ones are
-    /// cut to the cabinet's length. Does not allocate
-    pub fn set_ir(&mut self, ir: &[f32]) {
+    /// Loads a cabinet and uses it at once. A longer impulse response is cut to the most
+    /// the cabinet holds at this sample rate. Does not allocate
+    pub fn set_ir(&mut self, ir: &CabIr) {
         self.load(self.active, ir);
         self.fade = 1.0;
     }
 
-    /// Loads an impulse response and crossfades to it. Only while `is_swapping` is false:
-    /// there are two slots, and during a crossfade both are heard
-    pub fn swap_ir(&mut self, ir: &[f32]) {
+    /// Loads a cabinet and crossfades to it. Only while `is_swapping` is false: there are
+    /// two slots, and during a crossfade both are heard
+    pub fn swap_ir(&mut self, ir: &CabIr) {
         self.active = 1 - self.active;
         self.load(self.active, ir);
         self.fade = 0.0;
@@ -222,38 +364,50 @@ impl Cabinet {
     #[cfg(test)]
     pub fn buffers(&self) -> [(usize, usize); 3] {
         let describe = |buffer: &Vec<f32>| (buffer.as_ptr() as usize, buffer.capacity());
-        [describe(&self.history), describe(&self.taps[0]), describe(&self.taps[1])]
+        [describe(&self.history), describe(&self.slots[0].taps), describe(&self.slots[1].taps)]
     }
 
-    fn load(&mut self, slot: usize, ir: &[f32]) {
-        let taps = &mut self.taps[slot][..self.len];
+    /// The filter starts from rest: it is another one than the slot held before
+    fn load(&mut self, slot: usize, ir: &CabIr) {
+        let slot = &mut self.slots[slot];
+        slot.len = ir.taps.len().clamp(1, self.ring);
+        let taps = &mut slot.taps[..slot.len];
         taps.fill(0.0);
-        for (tap, &sample) in taps.iter_mut().rev().zip(ir) {
+        for (tap, &sample) in taps.iter_mut().rev().zip(&ir.taps) {
             *tap = sample;
         }
+        slot.lows.set(ir.lows);
+        slot.lows.reset();
+        slot.filtered = ir.lows != BiquadCoeffs::IDENTITY;
     }
 
-    fn convolve(&self, slot: usize) -> f32 {
-        // The oldest sample sits right after the newest one in the ring: two straight runs
-        let taps = &self.taps[slot][..self.len];
-        let split = self.len - 1 - self.position;
-        dot(&self.history[self.position + 1..self.len], &taps[..split])
-            + dot(&self.history[..=self.position], &taps[split..])
+    /// One sample of one of the cabinets. The input has been written to the history
+    fn run(&mut self, slot: usize) -> f32 {
+        let slot = &mut self.slots[slot];
+        // The second copy of the newest sample ends the run of the latest ones
+        let end = self.position + self.ring + 1;
+        let output = dot(&self.history[end - slot.len..end], &slot.taps[..slot.len]);
+        if slot.filtered {
+            slot.lows.process(output as f64) as f32
+        } else {
+            output
+        }
     }
 
     pub fn process(&mut self, block: &mut [f32]) {
         for sample in block.iter_mut() {
             self.history[self.position] = *sample;
+            self.history[self.position + self.ring] = *sample;
 
-            let mut output = self.convolve(self.active);
+            let mut output = self.run(self.active);
             if self.fade < 1.0 {
-                output = self.fade * output + (1.0 - self.fade) * self.convolve(1 - self.active);
+                output = self.fade * output + (1.0 - self.fade) * self.run(1 - self.active);
                 self.fade = (self.fade + self.fade_step).min(1.0);
             }
             *sample = output;
 
             self.position += 1;
-            if self.position == self.len {
+            if self.position == self.ring {
                 self.position = 0;
             }
         }
@@ -363,8 +517,138 @@ mod tests {
 
     const PROBES_HZ: [f32; 7] = [100.0, 250.0, 500.0, 1000.0, 2000.0, 3000.0, 4000.0];
 
-    fn design(amp: Amp, sample_rate: f32) -> Vec<f32> {
+    fn design(amp: Amp, sample_rate: f32) -> CabIr {
         design_ir(&amp.model().cab, sample_rate)
+    }
+
+    /// What a cabinet answers to an impulse, filter and all
+    fn impulse_response(ir: &CabIr, sample_rate: f32, len: usize) -> Vec<f32> {
+        let mut cabinet = Cabinet::new();
+        cabinet.set_sample_rate(sample_rate);
+        cabinet.set_ir(ir);
+        let mut block = vec![0.0; len];
+        block[0] = 1.0;
+        cabinet.process(&mut block);
+        block
+    }
+
+    /// Largest difference in dB, from 60 Hz to 8 kHz, between a cabinet and the one long
+    /// impulse response it was tuned as, both levelled alike. And the frequency it is at
+    fn off_the_long_response(amp: Amp, sample_rate: f32, probes: usize) -> (f32, f32) {
+        let ir = design(amp, sample_rate);
+        let long = long_response(&amp.model().cab, sample_rate);
+        let ratio = (LEVEL_BAND_HZ[1] / LEVEL_BAND_HZ[0]).powf(1.0 / (LEVEL_PROBES - 1) as f32);
+        let long_level: f32 = (0..LEVEL_PROBES)
+            .map(|probe| ir_magnitude(&long, LEVEL_BAND_HZ[0] * ratio.powi(probe as i32), sample_rate).powi(2))
+            .sum::<f32>()
+            / LEVEL_PROBES as f32;
+        let long_level_db = 0.5 * gain_to_db(long_level);
+
+        let mut worst = (0.0f32, 0.0);
+        for probe in 0..probes {
+            let freq_hz = 60.0 * (8000.0f32 / 60.0).powf(probe as f32 / (probes - 1) as f32);
+            let off = gain_to_db(ir.magnitude(freq_hz, sample_rate))
+                - (gain_to_db(ir_magnitude(&long, freq_hz, sample_rate)) - long_level_db);
+            if off.abs() > worst.0.abs() {
+                worst = (off, freq_hz);
+            }
+        }
+        worst
+    }
+
+    /// Time the cabinet takes per sample, in ns: the fastest of five runs over a second of noise
+    fn convolution_ns(ir: &CabIr) -> f64 {
+        let mut cabinet = Cabinet::new();
+        cabinet.set_sample_rate(192000.0);
+        cabinet.set_ir(ir);
+        let mut noise = Noise::new(11);
+        let input: Vec<f32> = (0..48_000).map(|_| 0.1 * noise.next()).collect();
+        (0..5)
+            .map(|_| {
+                let mut block = input.clone();
+                let start = std::time::Instant::now();
+                block.chunks_mut(32).for_each(|chunk| cabinet.process(chunk));
+                std::hint::black_box(&block);
+                start.elapsed().as_secs_f64() * 1e9 / block.len() as f64
+            })
+            .fold(f64::MAX, f64::min)
+    }
+
+    /// Prints how far each cabinet is from the long impulse response it was tuned as, at
+    /// every sample rate, how long its own impulse response is, and what the convolution
+    /// costs per sample and per tap:
+    ///   cargo test -p amp --release cab_report -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn cab_report() {
+        println!("Time of the convolution per sample, filter included, and per tap");
+        for amp in Amp::ALL {
+            print!("{:<8}", amp.model().name);
+            for sample_rate in [48000.0, 192000.0] {
+                let ir = design(amp, sample_rate);
+                let time = convolution_ns(&ir);
+                print!("{:>8} taps{:>7.1} ns{:>7.3} ns/tap", ir.taps.len(), time, time / ir.taps.len() as f64);
+            }
+            println!();
+        }
+        for taps in [240, 960, 3840] {
+            let time = convolution_ns(&CabIr::plain(&vec![0.01; taps]));
+            println!("{:<8}{:>8} taps{:>7.1} ns{:>7.3} ns/tap", "plain", taps, time, time / taps as f64);
+        }
+        println!();
+
+        println!("Largest difference from the 20 ms impulse response, 60 Hz to 8 kHz, in dB");
+        for amp in Amp::ALL {
+            for sample_rate in [44100.0, 48000.0, 88200.0, 96000.0, 192000.0] {
+                let (off, freq_hz) = off_the_long_response(amp, sample_rate, 600);
+                let ir = design(amp, sample_rate);
+                println!(
+                    "{:<8}{:>8} Hz{:>6} taps (of {}){:>7.2} dB at {:>5.0} Hz",
+                    amp.model().name,
+                    sample_rate,
+                    ir.taps.len(),
+                    ir_len(sample_rate),
+                    off,
+                    freq_hz
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_cabinet_stays_within_half_a_db_of_the_long_impulse_response() {
+        for amp in Amp::ALL {
+            for sample_rate in [44100.0, 48000.0, 96000.0] {
+                let (off, freq_hz) = off_the_long_response(amp, sample_rate, 150);
+                assert!(off.abs() < 0.5, "{:?} at {} Hz: {:.2} dB at {:.0} Hz", amp, sample_rate, off, freq_hz);
+            }
+        }
+    }
+
+    #[test]
+    fn test_impulse_response_is_at_most_half_the_longest() {
+        for amp in Amp::ALL {
+            for sample_rate in [48000.0, 192000.0] {
+                let ir = design(amp, sample_rate);
+                assert!(ir.taps.len() * 2 <= ir_len(sample_rate), "{:?}: {} taps", amp, ir.taps.len());
+                assert!(ir.lows != BiquadCoeffs::IDENTITY);
+            }
+        }
+    }
+
+    #[test]
+    fn test_cabinet_plays_what_its_design_says() {
+        // The filter behind the convolution included
+        let sample_rate = 48000.0;
+        for amp in Amp::ALL {
+            let ir = design(amp, sample_rate);
+            let response = impulse_response(&ir, sample_rate, 9600);
+            for freq in [60.0, 80.0, 100.0, 150.0, 1000.0, 3000.0] {
+                let played = to_db(ir_magnitude(&response, freq, sample_rate));
+                let designed = to_db(ir.magnitude(freq, sample_rate));
+                assert!((played - designed).abs() < 0.05, "{:?} at {} Hz: {:.2} dB, {:.2} dB", amp, freq, played, designed);
+            }
+        }
     }
 
     #[test]
@@ -372,13 +656,13 @@ mod tests {
         for amp in Amp::ALL {
             for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0] {
                 let ir = design(amp, sample_rate);
-                assert_eq!(ir.len(), ir_len(sample_rate));
-                assert!(ir.iter().all(|s| s.is_finite()));
-                assert_eq!(*ir.last().unwrap(), 0.0);
+                assert!(ir.taps.len() <= ir_len(sample_rate));
+                assert!(ir.taps.iter().all(|s| s.is_finite()));
+                assert_eq!(*ir.taps.last().unwrap(), 0.0);
 
                 let ratio = (LEVEL_BAND_HZ[1] / LEVEL_BAND_HZ[0]).powf(1.0 / 99.0);
                 let power: f32 = (0..100)
-                    .map(|i| ir_magnitude(&ir, LEVEL_BAND_HZ[0] * ratio.powi(i), sample_rate).powi(2))
+                    .map(|i| ir.magnitude(LEVEL_BAND_HZ[0] * ratio.powi(i), sample_rate).powi(2))
                     .sum::<f32>()
                     / 100.0;
                 assert!(to_db(power.sqrt()).abs() < 0.5, "{:?} at {}: {:.2} dB", amp, sample_rate, to_db(power.sqrt()));
@@ -397,7 +681,7 @@ mod tests {
     fn test_ir_energy_is_at_the_start() {
         for amp in Amp::ALL {
             let sample_rate = 48000.0;
-            let ir = design(amp, sample_rate);
+            let ir = impulse_response(&design(amp, sample_rate), sample_rate, 4800);
             let energy = |samples: &[f32]| samples.iter().map(|s| s * s).sum::<f32>();
             let early = energy(&ir[..(0.005 * sample_rate) as usize]) / energy(&ir);
             assert!(early > 0.9, "{:?}: {:.2} of the energy in the first 5 ms", amp, early);
@@ -412,7 +696,7 @@ mod tests {
                 let ir = design(amp, sample_rate);
                 for freq in PROBES_HZ {
                     let difference =
-                        to_db(ir_magnitude(&ir, freq, sample_rate) / ir_magnitude(&reference, freq, 48000.0));
+                        to_db(ir.magnitude(freq, sample_rate) / reference.magnitude(freq, 48000.0));
                     assert!(
                         difference.abs() < 1.0,
                         "{:?} at {} Hz and {} Hz rate: {:.2} dB",
@@ -430,7 +714,7 @@ mod tests {
     fn test_ir_has_the_shape_of_a_guitar_speaker() {
         for amp in Amp::ALL {
             let ir = design(amp, 48000.0);
-            let level = |freq: f32| to_db(ir_magnitude(&ir, freq, 48000.0));
+            let level = |freq: f32| to_db(ir.magnitude(freq, 48000.0));
             let mids = level(1000.0);
             assert!(level(30.0) < mids - 15.0, "{:?} keeps sub bass", amp);
             assert!(level(10000.0) < mids - 20.0, "{:?} keeps fizz", amp);
@@ -441,10 +725,10 @@ mod tests {
     #[test]
     fn test_convolution_plays_back_the_impulse_response() {
         let sample_rate = 48000.0;
-        let ir = design(Amp::ALL[0], sample_rate);
+        let ir = design(Amp::ALL[0], sample_rate).taps;
         let mut cabinet = Cabinet::new();
         cabinet.set_sample_rate(sample_rate);
-        cabinet.set_ir(&ir);
+        cabinet.set_ir(&CabIr::plain(&ir));
 
         let mut block = vec![0.0; ir.len() + 100];
         block[0] = 1.0;
@@ -458,10 +742,10 @@ mod tests {
     #[test]
     fn test_convolution_matches_the_plain_sum() {
         let sample_rate = 44100.0;
-        let ir = design(Amp::ALL[0], sample_rate);
+        let ir = design(Amp::ALL[0], sample_rate).taps;
         let mut cabinet = Cabinet::new();
         cabinet.set_sample_rate(sample_rate);
-        cabinet.set_ir(&ir);
+        cabinet.set_ir(&CabIr::plain(&ir));
 
         let mut noise = Noise::new(7);
         let input: Vec<f32> = (0..3000).map(|_| noise.next()).collect();
@@ -483,7 +767,10 @@ mod tests {
     fn test_swap_crossfades_without_a_click() {
         let sample_rate = 48000.0;
         let ir = design(Amp::ALL[0], sample_rate);
-        let quieter: Vec<f32> = ir.iter().map(|s| s * 0.25).collect();
+        let quieter = CabIr {
+            taps: ir.taps.iter().map(|s| s * 0.25).collect(),
+            lows: ir.lows,
+        };
         let mut cabinet = Cabinet::new();
         cabinet.set_sample_rate(sample_rate);
         cabinet.set_ir(&ir);
@@ -507,13 +794,13 @@ mod tests {
         let mut cabinet = Cabinet::new();
         cabinet.set_sample_rate(48000.0);
 
-        cabinet.set_ir(&[0.5]);
+        cabinet.set_ir(&CabIr::plain(&[0.5]));
         let mut block = [1.0, 0.0, 0.0];
         cabinet.process(&mut block);
         assert_eq!(block, [0.5, 0.0, 0.0]);
 
         cabinet.reset();
-        cabinet.set_ir(&vec![0.1; MAX_IR_LEN * 2]);
+        cabinet.set_ir(&CabIr::plain(&vec![0.1; MAX_IR_LEN * 2]));
         let mut long = vec![1.0; 2000];
         cabinet.process(&mut long);
         assert!((long[1999] - 0.1 * 960.0).abs() < 1e-2);

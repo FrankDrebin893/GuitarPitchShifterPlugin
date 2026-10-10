@@ -113,6 +113,9 @@ pub struct CabModel {
     pub breakup_db: f32,
     /// Fixes where the peaks and notches fall
     pub breakup_seed: u32,
+    /// Length in milliseconds of the impulse response that holds all of this but the
+    /// resonance: long enough for the narrowest of the peaks to ring out
+    pub ir_ms: f32,
 }
 
 /// Everything that makes one amp differ from another
@@ -233,6 +236,7 @@ static KLAR: AmpModel = AmpModel {
         breakup_count: 24,
         breakup_db: 1.8,
         breakup_seed: 30,
+        ir_ms: 5.0,
     },
 };
 
@@ -318,6 +322,7 @@ static BROL: AmpModel = AmpModel {
         breakup_count: 28,
         breakup_db: 3.5,
         breakup_seed: 50,
+        ir_ms: 10.0,
     },
 };
 
@@ -411,6 +416,7 @@ static TORDEN: AmpModel = AmpModel {
         breakup_count: 26,
         breakup_db: 3.0,
         breakup_seed: 100,
+        ir_ms: 6.0,
     },
 };
 

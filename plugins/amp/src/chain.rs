@@ -2,7 +2,7 @@ use crate::amp::model::Amp;
 use crate::amp::poweramp::PowerAmp;
 use crate::amp::preamp::Preamp;
 use crate::amp::tonestack::{ToneCurve, ToneStack};
-use crate::cab::{design_ir, CabVoicing, Cabinet};
+use crate::cab::{design_ir, CabIr, CabVoicing, Cabinet};
 use crate::delay::{Delay, DelaySettings};
 use crate::drive::Drive;
 use crate::dsp::filters::DcBlocker;
@@ -192,8 +192,8 @@ pub struct AmpChain {
     tone: ToneStack,
     power: PowerAmp,
     cabinet: Cabinet,
-    // One impulse response per amp, designed when the sample rate is set
-    cab_irs: Vec<Vec<f32>>,
+    // One cabinet per amp, designed when the sample rate is set
+    cab_irs: Vec<CabIr>,
     cab_voicing: CabVoicing,
     // Share of the cabinet in what follows it: 1.0 on, 0.0 the amp's own signal
     cab_mix: Ramp,
@@ -625,7 +625,6 @@ impl AmpChain {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cab::ir_magnitude;
     use crate::drive::tests::new_drive;
     use crate::dsp::shaper::{asym_clip, AsymClipper, OUTPUT_CLIP_KNEE};
     use crate::gate::tests::{decaying_note, gain_trace, hiss, transitions as gate_changes};
@@ -813,7 +812,7 @@ mod tests {
     /// Address and capacity of every buffer the chain points to
     fn buffer_layout(chain: &AmpChain) -> Vec<(usize, usize)> {
         let mut layout = vec![(chain.cab_irs.as_ptr() as usize, chain.cab_irs.capacity())];
-        layout.extend(chain.cab_irs.iter().map(|ir| (ir.as_ptr() as usize, ir.capacity())));
+        layout.extend(chain.cab_irs.iter().map(|ir| (ir.taps.as_ptr() as usize, ir.taps.capacity())));
         layout.extend(chain.cabinet.buffers());
         layout.extend(chain.delay.buffers());
         layout.extend(chain.reverb.buffers());
@@ -2527,7 +2526,7 @@ mod tests {
                 let ir = design_ir(&amp.model().cab, SAMPLE_RATE);
                 print!("{:<8}", amp.model().name);
                 for probe in row {
-                    print!("{:>7.1}", to_db(ir_magnitude(&ir, probe, SAMPLE_RATE)));
+                    print!("{:>7.1}", to_db(ir.magnitude(probe, SAMPLE_RATE)));
                 }
                 println!();
             }
@@ -3105,6 +3104,7 @@ mod tests {
         time_ns("AsymClipper", &mut |x| clipper.process(x));
         time_ns("AsymClipper, 2nd order", &mut |x| second.process(x));
         time_ns("tanh", &mut |x| x.tanh());
+
 
         println!();
         println!("Aliasing per sample rate at Gain 10 (and Torden with the drive at 3, 5, 8 in front): the");
