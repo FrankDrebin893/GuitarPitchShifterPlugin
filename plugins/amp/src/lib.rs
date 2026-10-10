@@ -5,18 +5,18 @@ use std::sync::Arc;
 mod amp;
 mod cab;
 mod chain;
-#[allow(dead_code)]
 mod delay;
 mod drive;
 mod dsp;
 mod editor;
 mod gate;
-#[allow(dead_code)]
 mod reverb;
 #[cfg(test)]
 mod test_util;
 pub use amp::model::Amp;
 use chain::{AmpChain, AmpSettings};
+use delay::DelaySettings;
+use reverb::ReverbSettings;
 
 const LEVEL_MIN_DB: f32 = -30.0;
 const LEVEL_MAX_DB: f32 = 6.0;
@@ -313,6 +313,17 @@ impl Plugin for GuitarAmpPlugin {
             cab_on: self.params.cab_on.value(),
             cab_mic: self.params.cab_mic.value(),
             cab_res: self.params.cab_res.value(),
+            delay: DelaySettings {
+                on: self.params.delay_on.value(),
+                time_ms: self.params.delay_time.value(),
+                feedback: self.params.delay_feedback.value(),
+                mix: self.params.delay_mix.value(),
+            },
+            reverb: ReverbSettings {
+                on: self.params.reverb_on.value(),
+                decay_s: self.params.reverb_decay.value(),
+                mix: self.params.reverb_mix.value(),
+            },
             out_level: self.params.out_level.value(),
         };
 
@@ -322,7 +333,15 @@ impl Plugin for GuitarAmpPlugin {
             _ => {}
         }
 
-        ProcessStatus::Normal
+        // The repeats and the reverb tail go on after the input has stopped. The chain
+        // knows when the last of them has died away, to the sample; the host may stop
+        // calling from there on. `Tail` would need their length ahead of time, which with
+        // feedback is a guess, and gains nothing: CLAP hosts are told to go on either way
+        if self.chain.is_idle() {
+            ProcessStatus::Normal
+        } else {
+            ProcessStatus::KeepAlive
+        }
     }
 }
 

@@ -63,7 +63,7 @@ impl Default for DelaySettings {
             on: false,
             time_ms: 350.0,
             feedback: 0.35,
-            mix: 0.3,
+            mix: 0.25,
         }
     }
 }
@@ -197,6 +197,12 @@ impl Delay {
     #[cfg(test)]
     pub(crate) fn lines_len(&self) -> usize {
         self.lines[0].len()
+    }
+
+    /// Address and capacity of every buffer, for checking that nothing is allocated anew
+    #[cfg(test)]
+    pub(crate) fn buffers(&self) -> Vec<(usize, usize)> {
+        self.lines.iter().map(|line| (line.as_ptr() as usize, line.capacity())).collect()
     }
 
     /// Adds the repeats to a block in place. The lines are fed the average of the channels

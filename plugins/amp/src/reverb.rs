@@ -80,8 +80,8 @@ impl Default for ReverbSettings {
     fn default() -> Self {
         Self {
             on: false,
-            decay_s: 1.8,
-            mix: 0.25,
+            decay_s: 1.5,
+            mix: 0.2,
         }
     }
 }
@@ -322,6 +322,14 @@ impl Reverb {
     /// it goes in, unless the reverb is on and the block has sound in it
     pub fn is_idle(&self) -> bool {
         self.idle
+    }
+
+    /// Address and capacity of every buffer, for checking that nothing is allocated anew
+    #[cfg(test)]
+    pub(crate) fn buffers(&self) -> Vec<(usize, usize)> {
+        let lines = self.lines.iter().map(|line| &line.buffer);
+        let diffusers = self.diffusers.iter().map(|diffuser| &diffuser.buffer);
+        lines.chain(diffusers).map(|buffer| (buffer.as_ptr() as usize, buffer.capacity())).collect()
     }
 
     /// Gains, damping and level for a decay time
