@@ -94,6 +94,29 @@ pub struct GuitarAmpParams {
     #[id = "cab_res"]
     pub cab_res: FloatParam,
 
+    // Delay
+    #[id = "delay_on"]
+    pub delay_on: BoolParam,
+
+    #[id = "delay_time"]
+    pub delay_time: FloatParam,
+
+    #[id = "delay_feedback"]
+    pub delay_feedback: FloatParam,
+
+    #[id = "delay_mix"]
+    pub delay_mix: FloatParam,
+
+    // Reverb
+    #[id = "reverb_on"]
+    pub reverb_on: BoolParam,
+
+    #[id = "reverb_decay"]
+    pub reverb_decay: FloatParam,
+
+    #[id = "reverb_mix"]
+    pub reverb_mix: FloatParam,
+
     // Output
     #[id = "out_level"]
     pub out_level: FloatParam,
@@ -153,6 +176,35 @@ impl Default for GuitarAmpParams {
             cab_mic: dial_param("Cab Mic", 0.5),
             cab_res: dial_param("Cab Resonance", 0.5),
 
+            delay_on: BoolParam::new("Delay", false),
+            delay_time: FloatParam::new(
+                "Delay Time",
+                350.0,
+                FloatRange::Skewed {
+                    min: 20.0,
+                    max: 1000.0,
+                    factor: FloatRange::skew_factor(-1.0), // More resolution at low end
+                },
+            )
+            .with_unit(" ms")
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
+            delay_feedback: percent_param("Delay Feedback", 0.35, 0.9),
+            delay_mix: percent_param("Delay Mix", 0.25, 1.0),
+
+            reverb_on: BoolParam::new("Reverb", false),
+            reverb_decay: FloatParam::new(
+                "Reverb Decay",
+                1.5,
+                FloatRange::Skewed {
+                    min: 0.3,
+                    max: 6.0,
+                    factor: FloatRange::skew_factor(-1.0), // More resolution at low end
+                },
+            )
+            .with_unit(" s")
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            reverb_mix: percent_param("Reverb Mix", 0.2, 1.0),
+
             out_level: FloatParam::new(
                 "Output",
                 defaults.out_level,
@@ -174,6 +226,14 @@ fn dial_param(name: &str, default: f32) -> FloatParam {
     FloatParam::new(name, default, FloatRange::Linear { min: 0.0, max: 1.0 })
         .with_value_to_string(Arc::new(|value| format!("{:.1}", value * 10.0)))
         .with_string_to_value(Arc::new(|text| text.trim().parse::<f32>().ok().map(|dial| dial / 10.0)))
+}
+
+/// 0.0 to `max` parameter shown as a percentage
+fn percent_param(name: &str, default: f32, max: f32) -> FloatParam {
+    FloatParam::new(name, default, FloatRange::Linear { min: 0.0, max })
+        .with_unit(" %")
+        .with_value_to_string(formatters::v2s_f32_percentage(0))
+        .with_string_to_value(formatters::s2v_f32_percentage())
 }
 
 impl Plugin for GuitarAmpPlugin {
