@@ -10,6 +10,7 @@
 
 use nih_plug::prelude::*;
 
+use crate::dial_memory;
 use crate::{Amp, GuitarAmpParams};
 
 /// Shown behind the name once a knob no longer stands where the preset put it
@@ -263,7 +264,11 @@ impl Preset {
     /// All of them are set, also those that seem to stand right already: a host may apply
     /// a change some time after it was asked for, so what a parameter reads here can be
     /// older than the last preset loaded
+    ///
+    /// The amp that is left for the preset's remembers its dials, and the preset's amp
+    /// remembers the preset's: see `dial_memory`
     pub fn load(&self, params: &GuitarAmpParams, setter: &ParamSetter) {
+        dial_memory::preset_loaded(params, self.amp, self.dials.map(dial));
         set(setter, &params.amp, self.amp);
         for (param, on) in self.switches(params) {
             set(setter, param, on);

@@ -165,6 +165,17 @@ impl Dials {
         }
     }
 
+    /// The six dials of the amp itself jump to where they are going. For the sample an amp
+    /// starts from rest at
+    fn arrive_at_amp_dials(&mut self, target: &Dials) {
+        self.gain = target.gain;
+        self.bass = target.bass;
+        self.mid = target.mid;
+        self.treble = target.treble;
+        self.presence = target.presence;
+        self.master = target.master;
+    }
+
     fn approach(&mut self, target: &Dials, coeff: f32) {
         let step = |value: &mut f32, target: f32| {
             *value += coeff * (target - *value);
@@ -226,6 +237,8 @@ pub struct AmpChain {
     out_level: Ramp,
 
     dials: Dials,
+    // Where the dials are going: the settings as they were read last
+    dial_target: Dials,
     dial_coeff: f32,
     // The dial positions the tone filters were last designed for
     tone_applied: [f32; 3],
@@ -286,6 +299,7 @@ impl AmpChain {
             reverb_settings: ReverbSettings::default(),
             out_level: Ramp::new(1.0),
             dials: Dials::from_settings(&AmpSettings::default()),
+            dial_target: Dials::from_settings(&AmpSettings::default()),
             dial_coeff: 1.0,
             tone_applied: [f32::NAN; 3],
             presence_applied: f32::NAN,
@@ -373,6 +387,10 @@ impl AmpChain {
         }
         self.configure_amp();
         self.reset_amp_stages();
+        // The amp's own dials may have been turned along with the selector: every amp
+        // remembers its own. The new amp starts where they are going, not on the way there
+        // from where the old amp had them. Nothing of the amp is heard at this sample
+        self.dials.arrive_at_amp_dials(&self.dial_target);
         self.apply_dials(true);
     }
 
@@ -523,6 +541,7 @@ impl AmpChain {
     /// Moves the dials a step towards the settings and passes them on to the stages
     fn read_dials(&mut self, settings: &AmpSettings) {
         let target = Dials::from_settings(settings);
+        self.dial_target = target;
         // Nothing is heard of the amp while bypassed, so there is nothing to smooth
         let jump = !self.primed || self.wet == 0.0;
         if jump {
@@ -1730,6 +1749,90 @@ mod tests {
             }
             assert_eq!(layout(&chain), before);
             assert_eq!(chain.cab_irs.len(), Amp::ALL.len());
+        }
+    }
+
+    #[test]
+    fn test_switching_amps_with_all_six_dials_jumping_does_not_click() {
+        // Every amp remembers its own dials, so the editor turns all six along with the
+        // selector: they arrive with the same reading of the settings as the new amp
+        let at = 300 * BLOCK;
+        for input in [sine(220.0, 0.178, SAMPLE_RATE, 48_000), power_chords(SAMPLE_RATE, 2.0)] {
+            for (from, to) in transitions() {
+                for (before, after) in [(0.2, 0.9), (0.9, 0.2)] {
+                    let (before, after) = (with_all_dials(from, before, 0.5), with_all_dials(to, after, 0.5));
+                    let output = run_change(&before, &after, &input, at);
+                    let ratio = step_ratio(&output, at);
+                    assert!(ratio < 1.2, "{:?} to {:?}, dials to {}: step {} times its own", from, to, after.gain, ratio);
+
+                    // The amp is silent in between, as when only the amp changes
+                    let silent = at + (AMP_FADE_MS * 0.001 * SAMPLE_RATE) as usize;
+                    assert!(peak(&output[silent - 2..silent + 2]) < 0.5 * peak(&output[4800..at]));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_amp_switched_to_starts_at_its_own_dials() {
+        let input = power_chords(SAMPLE_RATE, 2.0);
+        let at = 300 * BLOCK;
+        let amp_dials = |dials: &Dials| [dials.gain, dials.bass, dials.mid, dials.treble, dials.presence, dials.master];
+        for (from, to) in transitions() {
+            let before = with_all_dials(from, 0.2, 0.5);
+            let after = AmpSettings {
+                gain: 0.9,
+                bass: 0.3,
+                mid: 0.8,
+                treble: 0.4,
+                presence: 0.7,
+                master: 0.6,
+                cab_mic: 0.9,
+                ..with_all_dials(to, 0.5, 0.5)
+            };
+            let mut chain = new_chain(SAMPLE_RATE);
+            let mut output = input.clone();
+            let (first, second) = output.split_at_mut(at);
+            run_blocks_in_place(&mut chain, &before, first, BLOCK);
+
+            // Sample by sample up to the one the stages become the new amp at. The old amp
+            // fades out on its way to the new dials, and has not reached them
+            let mut switched_at = None;
+            for (index, sample) in second.iter_mut().enumerate() {
+                chain.process(&after, std::slice::from_mut(sample), None);
+                if switched_at.is_none() && chain.amp == to {
+                    switched_at = Some(index);
+                    // The new amp is at its dials from its first sample. The other dials
+                    // are heard through the switch, so they go on gliding
+                    assert_eq!(amp_dials(&chain.dials), amp_dials(&Dials::from_settings(&after)), "{from:?} to {to:?}");
+                    assert!(chain.dials.cab_mic > 0.2 && chain.dials.cab_mic < 0.9);
+                } else if switched_at.is_none() {
+                    assert!(index == 0 || chain.dials.gain < 0.9);
+                }
+            }
+            let fade = (AMP_FADE_MS * 0.001 * SAMPLE_RATE) as usize;
+            assert!(switched_at.is_some_and(|index| index <= fade + 1), "{from:?} to {to:?}: {switched_at:?}");
+
+            // What block size the host uses makes no difference to any of it
+            let mut chain = new_chain(SAMPLE_RATE);
+            let mut uneven = input.clone();
+            let (first, second) = uneven.split_at_mut(at);
+            run_blocks_in_place(&mut chain, &before, first, 7);
+            run_blocks_in_place(&mut chain, &after, second, 7);
+            assert_eq!(output, uneven, "{from:?} to {to:?}");
+
+            // And it ends up as the amp with those dials, played from the start
+            let reference = run(&after, &input, SAMPLE_RATE);
+            let settled = input.len() - 24_000;
+            let level = rms(&reference[settled..]);
+            let off = largest_difference(&output[settled..], &reference[settled..]);
+            assert!(off < 0.01 * level, "{from:?} to {to:?}: off by {off} at a level of {level}");
+        }
+    }
+
+    fn run_blocks_in_place(chain: &mut AmpChain, settings: &AmpSettings, samples: &mut [f32], block: usize) {
+        for chunk in samples.chunks_mut(block) {
+            chain.process(settings, chunk, None);
         }
     }
 

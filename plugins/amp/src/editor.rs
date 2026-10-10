@@ -9,6 +9,7 @@ use suite_common::ui::{
 };
 
 use crate::cab_stage::{CabLoader, CabStatus};
+use crate::dial_memory;
 use crate::presets::{self, PRESETS};
 use crate::tuner::{Note, TunerReading};
 use crate::user_cab;
@@ -166,15 +167,8 @@ pub fn create(
                     }
                 }
 
-                let dials = [
-                    (&params.gain, "Gain"),
-                    (&params.bass, "Bass"),
-                    (&params.mid, "Mid"),
-                    (&params.treble, "Treble"),
-                    (&params.presence, "Presence"),
-                    (&params.master, "Master"),
-                ];
-                for (index, (param, label)) in dials.into_iter().enumerate() {
+                let dials = ["Gain", "Bass", "Mid", "Treble", "Presence", "Master"];
+                for (index, (param, label)) in params.amp_dials().into_iter().zip(dials).enumerate() {
                     let x = DIAL_X + DIAL_SPACING * index as f32;
                     param_knob(ui, setter, param, origin + vec2(x, KNOB_Y), KNOB_RADIUS, label, None);
                 }
@@ -184,9 +178,8 @@ pub fn create(
                     rig_led(ui.painter(), origin + vec2(x + CAPTION_OFFSET, LED_Y), params.amp.value() == amp);
                     silk_label(ui.painter(), origin + vec2(x + CAPTION_OFFSET, CAPTION_Y), label, CAPTION_SIZE);
                     if small_footswitch(ui, origin + vec2(x, SWITCH_Y), label).clicked() {
-                        setter.begin_set_parameter(&params.amp);
-                        setter.set_parameter(&params.amp, amp);
-                        setter.end_set_parameter(&params.amp);
+                        // The amp that is left keeps its dials, and the one picked gets its own back
+                        dial_memory::switch_amp(&params, setter, amp);
                     }
                 }
 

@@ -7,6 +7,7 @@ mod cab;
 mod cab_stage;
 mod chain;
 mod delay;
+mod dial_memory;
 mod drive;
 mod dsp;
 mod editor;
@@ -20,6 +21,7 @@ mod user_cab;
 pub use amp::model::Amp;
 use cab_stage::CabLoader;
 use chain::{AmpChain, AmpSettings, GATE_RELEASE_MS, GATE_THRESHOLD_DB, IN_GAIN_DB};
+use dial_memory::DialMemory;
 use delay::{DelaySettings, FEEDBACK_MAX, TIME_MAX_MS, TIME_MIN_MS};
 use reverb::{ReverbSettings, DECAY_MAX_S, DECAY_MIN_S};
 
@@ -59,6 +61,12 @@ pub struct GuitarAmpParams {
     /// own. Not a parameter: a file name cannot be one. The audio thread never reads it
     #[persist = "cabinet"]
     pub cabinet: std::sync::Mutex<String>,
+
+    /// Where each amp's six dials stood when the player last switched away from it. Not
+    /// parameters: the editor sets the dials themselves when an amp is picked on the head.
+    /// The audio thread never reads it
+    #[persist = "amp-dials"]
+    pub dial_memory: DialMemory,
 
     #[id = "bypass"]
     pub bypass: BoolParam,
@@ -174,6 +182,14 @@ impl Default for GuitarAmpParams {
             editor_state: editor::default_state(),
             preset: std::sync::atomic::AtomicU32::new(0),
             cabinet: std::sync::Mutex::new(String::new()),
+            dial_memory: DialMemory::new([
+                defaults.gain,
+                defaults.bass,
+                defaults.mid,
+                defaults.treble,
+                defaults.presence,
+                defaults.master,
+            ]),
 
             bypass: BoolParam::new("Bypass", defaults.bypass).make_bypass(),
 
@@ -276,6 +292,11 @@ impl Default for GuitarAmpParams {
 }
 
 impl GuitarAmpParams {
+    /// The amp's own six dials, in the order they stand on the head
+    pub fn amp_dials(&self) -> [&FloatParam; 6] {
+        [&self.gain, &self.bass, &self.mid, &self.treble, &self.presence, &self.master]
+    }
+
     /// What the knobs say now
     fn settings(&self) -> AmpSettings {
         AmpSettings {
