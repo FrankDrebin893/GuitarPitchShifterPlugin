@@ -163,7 +163,7 @@ pub fn small_footswitch(ui: &mut Ui, center: Pos2, id_source: &str) -> Response 
 /// Small stomp switch with its LED, bound to an on/off parameter: lit while it is on, a click toggles it
 pub fn param_switch(ui: &mut Ui, setter: &ParamSetter, param: &BoolParam, switch_center: Pos2, led_center: Pos2) {
     let on = param.value();
-    led(ui.painter(), led_center, on);
+    rig_led(ui.painter(), led_center, on);
     if small_footswitch(ui, switch_center, param.name()).clicked() {
         setter.begin_set_parameter(param);
         setter.set_parameter(param, !on);
@@ -204,6 +204,16 @@ fn stomp_switch(ui: &mut Ui, center: Pos2, id_source: &str, size: f32) -> Respon
 
 /// Indicator light in a chrome bezel
 pub fn led(painter: &Painter, center: Pos2, on: bool) {
+    lamp(painter, center, on, LED_OFF, false);
+}
+
+/// The indicator light of a rig. On dark paint an unlit `led` looks like an empty bezel,
+/// so this one has a black socket around a darker lens
+pub fn rig_led(painter: &Painter, center: Pos2, on: bool) {
+    lamp(painter, center, on, LED_OFF_DARK, true);
+}
+
+fn lamp(painter: &Painter, center: Pos2, on: bool, off_color: Color32, socket: bool) {
     if on {
         for (radius, alpha) in [(15.0, 22), (11.5, 40), (8.5, 70)] {
             painter.circle_filled(center, radius, LED_ON.gamma_multiply(alpha as f32 / 255.0));
@@ -211,7 +221,10 @@ pub fn led(painter: &Painter, center: Pos2, on: bool) {
     }
     painter.circle_filled(center, 8.5, CHROME_LIGHT);
     painter.circle_stroke(center, 8.5, Stroke::new(1.0, Color32::from_black_alpha(110)));
-    painter.circle_filled(center, 5.5, if on { LED_ON } else { LED_OFF });
+    if socket {
+        painter.circle_filled(center, 6.8, TAPE);
+    }
+    painter.circle_filled(center, 5.5, if on { LED_ON } else { off_color });
     if on {
         painter.circle_filled(center + vec2(-1.2, -1.5), 2.0, Color32::from_rgb(255, 208, 196));
     }

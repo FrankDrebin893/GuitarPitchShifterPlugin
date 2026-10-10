@@ -36,6 +36,8 @@ pub const CHROME_SHINE: Color32 = Color32::from_rgb(246, 245, 241);
 
 pub const LED_ON: Color32 = Color32::from_rgb(255, 59, 36);
 pub const LED_OFF: Color32 = Color32::from_rgb(90, 26, 18);
+// Unlit lens on the dark paint of a rig
+pub const LED_OFF_DARK: Color32 = Color32::from_rgb(58, 12, 10);
 
 pub const SHADOW: Color32 = Color32::from_black_alpha(80);
 

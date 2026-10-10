@@ -11,4 +11,4 @@ pub mod widgets;
 
 pub use frame::{enclosure, head, mini_pedal, pedal, rig, Ornament, PedalStyle, BENCH_MARGIN};
 pub use theme::install;
-pub use widgets::{footswitch, led, param_knob, param_switch, silk_frame, silk_label, small_footswitch};
+pub use widgets::{footswitch, led, param_knob, param_switch, rig_led, silk_frame, silk_label, small_footswitch};

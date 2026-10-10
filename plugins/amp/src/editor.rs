@@ -3,7 +3,7 @@ use nih_plug_egui::egui::{vec2, Rect, Vec2};
 use nih_plug_egui::{create_egui_editor, EguiState};
 use std::sync::Arc;
 use suite_common::ui::{
-    self, led, param_knob, param_switch, silk_label, small_footswitch, Ornament, PedalStyle, BENCH_MARGIN,
+    self, param_knob, param_switch, rig_led, silk_label, small_footswitch, Ornament, PedalStyle, BENCH_MARGIN,
 };
 
 use crate::{Amp, GuitarAmpParams};
@@ -91,7 +91,7 @@ pub fn create(params: Arc<GuitarAmpParams>, editor_state: Arc<EguiState>) -> Opt
                 param_knob(ui, setter, &params.out_level, origin + vec2(OUTPUT_X, KNOB_Y), KNOB_RADIUS, "Output", None);
 
                 for (amp, label, x) in AMP_SWITCHES {
-                    led(ui.painter(), origin + vec2(x + CAPTION_OFFSET, LED_Y), params.amp.value() == amp);
+                    rig_led(ui.painter(), origin + vec2(x + CAPTION_OFFSET, LED_Y), params.amp.value() == amp);
                     silk_label(ui.painter(), origin + vec2(x + CAPTION_OFFSET, CAPTION_Y), label, CAPTION_SIZE);
                     if small_footswitch(ui, origin + vec2(x, SWITCH_Y), label).clicked() {
                         setter.begin_set_parameter(&params.amp);
@@ -102,7 +102,7 @@ pub fn create(params: Arc<GuitarAmpParams>, editor_state: Arc<EguiState>) -> Opt
 
                 // Bypass switch, lit while the amp is on
                 let bypassed = params.bypass.value();
-                led(ui.painter(), origin + vec2(BYPASS_X + CAPTION_OFFSET, LED_Y), !bypassed);
+                rig_led(ui.painter(), origin + vec2(BYPASS_X + CAPTION_OFFSET, LED_Y), !bypassed);
                 silk_label(ui.painter(), origin + vec2(BYPASS_X + CAPTION_OFFSET, CAPTION_Y), "On", CAPTION_SIZE);
                 if small_footswitch(ui, origin + vec2(BYPASS_X, SWITCH_Y), "bypass").clicked() {
                     setter.begin_set_parameter(&params.bypass);
