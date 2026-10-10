@@ -4,12 +4,13 @@ use nih_plug_egui::{create_egui_editor, EguiState};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, PoisonError};
 use suite_common::ui::{
-    self, param_knob, param_switch, rig_led, silk_label, small_footswitch, stepper, tuner_display, Ornament,
-    PedalStyle, Step, BENCH_MARGIN,
+    self, param_knob, param_switch, rig_led, signal_lamp, silk_label, small_footswitch, stepper, tuner_display,
+    Ornament, PedalStyle, Step, BENCH_MARGIN,
 };
 
 use crate::cab_stage::{CabLoader, CabStatus};
 use crate::dial_memory;
+use crate::lamps::{LampReading, LampView};
 use crate::presets::{self, PRESETS};
 use crate::tuner::{Note, TunerReading};
 use crate::user_cab;
@@ -46,6 +47,12 @@ const KNOB_RADIUS: f32 = 30.0;
 const DIAL_X: f32 = 150.0;
 const DIAL_SPACING: f32 = 100.0;
 const OUTPUT_X: f32 = 790.0;
+
+// The clip lamp, to the right of the output knob: lit while the output is rounded off by
+// the safety clip. A signal lamp has its caption this far under it
+const CLIP_LAMP: Vec2 = vec2(872.0, 104.0);
+const LAMP_CAPTION: Vec2 = vec2(0.0, 18.0);
+const LAMP_CAPTION_SIZE: f32 = 13.0;
 
 // Small switches below the band. Left of each, its LED above its caption. The amp selector
 // sits under the dials, the bypass under the output knob, and the tuner beside the bypass,
@@ -84,6 +91,11 @@ const CAB_STEPPER: Vec2 = vec2(0.0, 198.0);
 const CAB_STEPPER_WIDTH: f32 = 100.0;
 const CAB_NAME_CHARS: usize = 10;
 
+// The Gate pedal has a lamp beside its lowest knob that is lit while the gate lets the
+// guitar through. The pedal's LED says that the gate is switched on, like every other
+const GATE_SLOT: usize = 0;
+const GATE_LAMP: Vec2 = vec2(60.0, 164.0);
+
 /// One pedal of the board: its title, its switch and up to three knobs with their captions
 type Pedal<'a> = (&'a str, &'a BoolParam, &'a [(&'a FloatParam, &'a str)]);
 
@@ -116,23 +128,36 @@ pub fn create(
     params: Arc<GuitarAmpParams>,
     editor_state: Arc<EguiState>,
     tuner: Arc<TunerReading>,
+    lamp_reading: Arc<LampReading>,
     cab_loader: Arc<CabLoader>,
     async_executor: AsyncExecutor<GuitarAmpPlugin>,
 ) -> Option<Box<dyn Editor>> {
     let (opened_loader, opened_executor) = (cab_loader.clone(), async_executor.clone());
+    let opened_reading = lamp_reading.clone();
     create_egui_editor(
         editor_state,
-        (),
-        move |egui_ctx, _| {
+        LampView::new(&lamp_reading),
+        move |egui_ctx, lamps| {
             ui::install(egui_ctx);
+            // What was clipped while the window was closed is not news
+            *lamps = LampView::new(&opened_reading);
             // A cabinet file that was missing or unusable may have been put right since:
             // look again whenever the window opens
             if opened_loader.status() != CabStatus::Fine {
                 opened_executor.execute_background(Task::LoadCabinet);
             }
         },
-        move |egui_ctx, setter, _state| {
+        move |egui_ctx, setter, lamps| {
             ui::rig(egui_ctx, |ui, origin| {
+                // The update runs with every frame of the window whether it is painted
+                // or not, so this costs two atomic reads per frame, and a repaint only
+                // when a lamp changes
+                let now = ui.input(|input| input.time);
+                if lamps.look(&lamp_reading, params.gate_on.value(), now) {
+                    ui.ctx().request_repaint();
+                }
+                let (gate_open, clipping) = lamps.shown();
+
                 let head = Rect::from_min_size(
                     origin + vec2(BENCH_MARGIN, BENCH_MARGIN),
                     vec2(WINDOW_WIDTH as f32 - 2.0 * BENCH_MARGIN, HEAD_HEIGHT),
@@ -173,6 +198,8 @@ pub fn create(
                     param_knob(ui, setter, param, origin + vec2(x, KNOB_Y), KNOB_RADIUS, label, None);
                 }
                 param_knob(ui, setter, &params.out_level, origin + vec2(OUTPUT_X, KNOB_Y), KNOB_RADIUS, "Output", None);
+                signal_lamp(ui.painter(), origin + CLIP_LAMP, clipping);
+                silk_label(ui.painter(), origin + CLIP_LAMP + LAMP_CAPTION, "Clip", LAMP_CAPTION_SIZE);
 
                 for (amp, label, x) in AMP_SWITCHES {
                     rig_led(ui.painter(), origin + vec2(x + CAPTION_OFFSET, LED_Y), params.amp.value() == amp);
@@ -235,6 +262,11 @@ pub fn create(
                         param_knob(ui, setter, param, top + offset, radius, caption, None);
                     }
                     param_switch(ui, setter, on, top + PEDAL_SWITCH, top + PEDAL_LED);
+
+                    if slot == GATE_SLOT {
+                        signal_lamp(ui.painter(), top + GATE_LAMP, gate_open);
+                        silk_label(ui.painter(), top + GATE_LAMP + LAMP_CAPTION, "Open", LAMP_CAPTION_SIZE);
+                    }
 
                     if slot == CAB_SLOT {
                         // The cabinet that plays: the amp's own, or a file from the cabinets

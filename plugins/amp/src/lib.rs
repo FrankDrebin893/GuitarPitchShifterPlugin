@@ -12,6 +12,7 @@ mod drive;
 mod dsp;
 mod editor;
 mod gate;
+mod lamps;
 mod presets;
 mod reverb;
 #[cfg(test)]
@@ -397,6 +398,7 @@ impl Plugin for GuitarAmpPlugin {
             self.params.clone(),
             self.params.editor_state.clone(),
             self.chain.tuner_reading(),
+            self.chain.lamp_reading(),
             self.cab_loader.clone(),
             async_executor,
         )

@@ -23,6 +23,9 @@ const LABEL_SPACING: f32 = 0.14;
 const FOOTSWITCH_SIZE: f32 = 74.0;
 const SMALL_FOOTSWITCH_SIZE: f32 = 50.0;
 
+// Size of a rig's signal lamp against its LEDs
+const SIGNAL_LAMP_SCALE: f32 = 0.68;
+
 // The display of a stepper: a strip of label tape with a push button at each end
 const STEPPER_TEXT_SIZE: f32 = 13.0;
 const STEPPER_TAPE_HEIGHT: f32 = 22.0;
@@ -373,29 +376,37 @@ fn stomp_switch(ui: &mut Ui, center: Pos2, id_source: &str, size: f32) -> Respon
 
 /// Indicator light in a chrome bezel
 pub fn led(painter: &Painter, center: Pos2, on: bool) {
-    lamp(painter, center, on, LED_OFF, false);
+    lamp(painter, center, on, LED_OFF, false, 1.0);
 }
 
 /// The indicator light of a rig. On dark paint an unlit `led` looks like an empty bezel,
 /// so this one has a black socket around a darker lens
 pub fn rig_led(painter: &Painter, center: Pos2, on: bool) {
-    lamp(painter, center, on, LED_OFF_DARK, true);
+    lamp(painter, center, on, LED_OFF_DARK, true, 1.0);
 }
 
-fn lamp(painter: &Painter, center: Pos2, on: bool, off_color: Color32, socket: bool) {
+/// A signal lamp of a rig: a `rig_led` at two thirds of the size, with no switch of its
+/// own. It shows what the sound is doing (a gate that is open, an output that clips), not
+/// what is switched on. Give it a `silk_label` of size 13 under it, 18 px down
+pub fn signal_lamp(painter: &Painter, center: Pos2, on: bool) {
+    lamp(painter, center, on, LED_OFF_DARK, true, SIGNAL_LAMP_SCALE);
+}
+
+/// The measures in here are those of the full-size light
+fn lamp(painter: &Painter, center: Pos2, on: bool, off_color: Color32, socket: bool, scale: f32) {
     if on {
         for (radius, alpha) in [(15.0, 22), (11.5, 40), (8.5, 70)] {
-            painter.circle_filled(center, radius, LED_ON.gamma_multiply(alpha as f32 / 255.0));
+            painter.circle_filled(center, radius * scale, LED_ON.gamma_multiply(alpha as f32 / 255.0));
         }
     }
-    painter.circle_filled(center, 8.5, CHROME_LIGHT);
-    painter.circle_stroke(center, 8.5, Stroke::new(1.0, Color32::from_black_alpha(110)));
+    painter.circle_filled(center, 8.5 * scale, CHROME_LIGHT);
+    painter.circle_stroke(center, 8.5 * scale, Stroke::new(1.0, Color32::from_black_alpha(110)));
     if socket {
-        painter.circle_filled(center, 6.8, TAPE);
+        painter.circle_filled(center, 6.8 * scale, TAPE);
     }
-    painter.circle_filled(center, 5.5, if on { LED_ON } else { off_color });
+    painter.circle_filled(center, 5.5 * scale, if on { LED_ON } else { off_color });
     if on {
-        painter.circle_filled(center + vec2(-1.2, -1.5), 2.0, Color32::from_rgb(255, 208, 196));
+        painter.circle_filled(center + vec2(-1.2, -1.5) * scale, 2.0 * scale, Color32::from_rgb(255, 208, 196));
     }
 }
 

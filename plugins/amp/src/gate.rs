@@ -109,7 +109,6 @@ impl Gate {
     }
 
     /// The gain the gate is at, 0.0 closed to 1.0 open
-    #[cfg(test)]
     pub fn gain(&self) -> f32 {
         self.gain
     }

@@ -8,9 +8,10 @@ use crate::delay::{Delay, DelaySettings};
 use crate::drive::Drive;
 use crate::dsp::filters::DcBlocker;
 use crate::dsp::oversample::{factor_for, Oversampler, MAX_FACTOR};
-use crate::dsp::shaper::output_clip;
+use crate::dsp::shaper::{output_clip, OUTPUT_CLIP_KNEE};
 use crate::dsp::{curve, db_to_gain, smoothing_coeff, Ramp};
 use crate::gate::Gate;
+use crate::lamps::LampReading;
 use crate::reverb::{Reverb, ReverbSettings};
 use crate::tuner::{Tuner, TunerReading};
 use std::sync::Arc;
@@ -269,6 +270,11 @@ pub struct AmpChain {
     // 0.0 tuning
     tuner_mute: Ramp,
     tuner_fade_steps: u32,
+
+    // What the editor's lamps show: left there at the end of every block
+    lamps: Arc<LampReading>,
+    // Whether a sample of this block was over the knee of the safety clip
+    clipped: bool,
 }
 
 impl AmpChain {
@@ -315,6 +321,8 @@ impl AmpChain {
             tuning: false,
             tuner_mute: Ramp::new(1.0),
             tuner_fade_steps: 1,
+            lamps: Arc::new(LampReading::new()),
+            clipped: false,
         };
         chain.set_sample_rate(44100.0);
         chain
@@ -459,6 +467,13 @@ impl AmpChain {
         // Starts again with the first block if it is still switched on
         self.tuning = false;
         self.tuner.stop();
+        self.clipped = false;
+        self.lamps.set_gate_gain(self.gate.gain());
+    }
+
+    /// Whether the gate is open and the output clips, for the editor
+    pub fn lamp_reading(&self) -> Arc<LampReading> {
+        self.lamps.clone()
     }
 
     /// What the tuner hears, for the editor
@@ -535,6 +550,14 @@ impl AmpChain {
             self.cabinet_busy = self.cabinet_busy.saturating_sub(len);
             self.until_tick -= len;
             start = end;
+        }
+
+        // For the lamps. Two stores per block, and nothing is read back: the sound does
+        // not depend on them. While bypassed the gate is at rest, which reads as closed
+        self.lamps.set_gate_gain(self.gate.gain());
+        if self.clipped {
+            self.lamps.count_clip();
+            self.clipped = false;
         }
     }
 
@@ -755,7 +778,9 @@ impl AmpChain {
                 self.wet = (self.wet + self.wet_step.copysign(wet_target - self.wet)).clamp(0.0, 1.0);
             }
 
-            let mut output = output_clip(wide_left[index] * level);
+            let driven = wide_left[index] * level;
+            self.clipped |= driven.abs() > OUTPUT_CLIP_KNEE;
+            let mut output = output_clip(driven);
             if muting {
                 output *= heard_share[index];
             }
@@ -765,7 +790,9 @@ impl AmpChain {
                 left[index] += self.wet * (output - left[index]);
             }
             if let Some(right) = right.as_deref_mut() {
-                let mut output = output_clip(wide_right[index] * level);
+                let driven = wide_right[index] * level;
+                self.clipped |= driven.abs() > OUTPUT_CLIP_KNEE;
+                let mut output = output_clip(driven);
                 if muting {
                     output *= heard_share[index];
                 }
@@ -791,7 +818,7 @@ mod tests {
     use crate::cab::{user_ir_len, MAX_USER_IR_LEN, USER_IR_MS};
     use crate::cab_stage::{CabLoader, CabStatus};
     use crate::drive::tests::new_drive;
-    use crate::dsp::shaper::{asym_clip, AsymClipper, OUTPUT_CLIP_KNEE};
+    use crate::dsp::shaper::{asym_clip, AsymClipper};
     use crate::gate::tests::{decaying_note, gain_trace, hiss, transitions as gate_changes};
     use crate::test_util::*;
     use crate::tuner::tests::{note_hz as tuner_note_hz, string as tuner_string};
@@ -1966,6 +1993,132 @@ mod tests {
             assert!(difference < 0.02 * rms(&open[playing]), "{:?}: the note differs by {}", amp, difference);
             assert!(peak(&gated[60_000..]) < 1e-6, "{:?} after the note: {}", amp, peak(&gated[60_000..]));
         }
+    }
+
+    #[test]
+    fn test_gate_lamp_reads_open_while_a_note_plays_and_closed_after_it() {
+        // Silence, half a second of a note, silence: what the editor is told after each block
+        let mut input = vec![0.0; 4800];
+        input.extend(sine(110.0, 0.2, SAMPLE_RATE, 24_000));
+        input.resize(72_000, 0.0);
+        let settings = AmpSettings {
+            gate_thresh_db: -50.0,
+            gate_release_ms: 100.0,
+            ..AmpSettings::default()
+        };
+        let mut chain = new_chain(SAMPLE_RATE);
+        let lamps = chain.lamp_reading();
+        assert_eq!(lamps.gate_gain(), 0.0);
+
+        let mut readings = Vec::new();
+        for block in input.chunks_mut(BLOCK) {
+            chain.process(&settings, block, None);
+            readings.push(lamps.gate_gain());
+            assert_eq!(lamps.gate_gain(), chain.gate.gain());
+        }
+        let block_at = |sample: usize| sample / BLOCK;
+        assert!(readings[..block_at(4800)].iter().all(|&gain| gain == 0.0));
+        // Open from the block the note starts in, to the end of the note and through the hold
+        assert!(readings[block_at(4800)..block_at(28_800 + 1200)].iter().all(|&gain| gain == 1.0));
+        // Closing over the release, then closed
+        let closing = &readings[block_at(28_800 + 1200)..];
+        assert!(closing.windows(2).all(|pair| pair[1] <= pair[0]));
+        assert!(closing.iter().any(|&gain| gain > 0.0 && gain < 1.0));
+        assert!(readings[block_at(28_800 + 12_000)..].iter().all(|&gain| gain == 0.0));
+
+        // A gate that is switched off reads as open, with or without a note. Bypassed, the
+        // gate is at rest. And a reset closes it
+        let off = AmpSettings { gate_on: false, ..settings };
+        chain.process(&off, &mut [0.0; BLOCK], None);
+        assert_eq!(lamps.gate_gain(), 1.0);
+        let bypassed = AmpSettings { bypass: true, ..settings };
+        run_blocks(&mut chain, &bypassed, &sine(110.0, 0.2, SAMPLE_RATE, 4800), BLOCK);
+        assert_eq!(lamps.gate_gain(), 0.0);
+        run_blocks(&mut chain, &settings, &sine(110.0, 0.2, SAMPLE_RATE, 4800), BLOCK);
+        assert_eq!(lamps.gate_gain(), 1.0);
+        chain.reset();
+        assert_eq!(lamps.gate_gain(), 0.0);
+    }
+
+    #[test]
+    fn test_clip_lamp_counts_the_blocks_over_the_knee_and_no_others() {
+        // Chords that ring out, turned up until their attacks are over the knee
+        let input = power_chords(SAMPLE_RATE, 0.5)
+            .into_iter()
+            .chain(vec![0.0; 24_000])
+            .collect::<Vec<f32>>();
+        for (settings, clips_expected) in [
+            (with_effects(AmpSettings { out_level: 2.0, ..with_amp(Amp::Brol, 0.5) }), true),
+            (AmpSettings { out_level: 2.0, ..with_amp(Amp::Klar, 0.5) }, true),
+            (with_amp(Amp::Torden, 1.0), false),
+        ] {
+            let mut chain = new_chain(SAMPLE_RATE);
+            let lamps = chain.lamp_reading();
+            let (mut left, mut right) = (input.clone(), input.clone());
+            let (mut over, mut under) = (0, 0);
+            for (left, right) in left.chunks_mut(BLOCK).zip(right.chunks_mut(BLOCK)) {
+                let before = lamps.clips();
+                chain.process(&settings, left, Some(right));
+                let counted = lamps.clips().wrapping_sub(before);
+                // The clip leaves everything up to the knee as it is and nothing above it
+                // comes out at or under the knee, so the output says what went into it
+                let top = peak(left).max(peak(right));
+                if top > OUTPUT_CLIP_KNEE {
+                    assert_eq!(counted, 1, "A block peaking at {top} was not counted");
+                    over += 1;
+                } else if top < OUTPUT_CLIP_KNEE {
+                    assert_eq!(counted, 0, "A block peaking at {top} was counted");
+                    under += 1;
+                }
+            }
+            assert_eq!(over > 0, clips_expected, "{over} blocks over the knee");
+            assert!(under > 100);
+        }
+
+        // The right channel alone is enough, and one channel counts as well as two
+        let mut chain = new_chain(SAMPLE_RATE);
+        let settings = with_effects_at_most(AmpSettings { out_level: 2.0, ..with_amp(Amp::Brol, 0.5) });
+        let mut mono = input.clone();
+        for block in mono.chunks_mut(BLOCK) {
+            chain.process(&settings, block, None);
+        }
+        assert!(chain.lamp_reading().clips() > 0);
+
+        // Bypassed nothing is clipped, whatever comes in
+        let mut chain = new_chain(SAMPLE_RATE);
+        let bypassed = AmpSettings { bypass: true, ..settings };
+        run_blocks(&mut chain, &bypassed, &sine(220.0, 0.95, SAMPLE_RATE, 9600), BLOCK);
+        assert_eq!(chain.lamp_reading().clips(), 0);
+    }
+
+    #[test]
+    fn test_reading_the_lamps_does_not_change_the_sound() {
+        // The editor reads while the audio thread plays. The chain only ever writes
+        let input = power_chords(SAMPLE_RATE, 1.0);
+        let settings = with_effects(AmpSettings { out_level: 2.0, ..everything_on(Amp::Torden, 0.8) });
+        let alone = run_stereo(&settings, &input, SAMPLE_RATE);
+
+        let mut chain = new_chain(SAMPLE_RATE);
+        let lamps = chain.lamp_reading();
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let reader = {
+            let (lamps, done) = (lamps.clone(), done.clone());
+            std::thread::spawn(move || {
+                let mut hold = crate::lamps::ClipHold::new(lamps.clips());
+                let mut seen = (0u32, 0u32);
+                while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                    seen.0 += crate::lamps::gate_open(true, lamps.gate_gain()) as u32;
+                    seen.1 += hold.lit(lamps.clips(), 0.0) as u32;
+                    std::thread::yield_now();
+                }
+                seen
+            })
+        };
+        let watched = run_stereo_blocks(&mut chain, &settings, &input, BLOCK);
+        done.store(true, std::sync::atomic::Ordering::Relaxed);
+        reader.join().unwrap();
+        assert_eq!(alone, watched);
+        assert!(lamps.clips() > 0 && lamps.gate_gain() == 1.0);
     }
 
     #[test]
