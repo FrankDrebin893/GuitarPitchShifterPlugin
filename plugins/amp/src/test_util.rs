@@ -455,3 +455,69 @@ mod tests {
         assert!(peak(&di) <= DI_PEAK * 1.001, "Peak: {}", peak(&di));
     }
 }
+
+// Measurements for the delay and the reverb
+
+pub fn dot(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b).map(|(x, y)| *x as f64 * *y as f64).sum::<f64>() as f32
+}
+
+/// How alike two signals are: 1.0 the same, 0.0 unrelated, -1.0 the same upside down
+pub fn correlation(a: &[f32], b: &[f32]) -> f32 {
+    let scale = (dot(a, a) as f64 * dot(b, b) as f64).sqrt().max(1e-30);
+    (dot(a, b) as f64 / scale) as f32
+}
+
+/// The largest jump from one sample to the next
+pub fn largest_step(samples: &[f32]) -> f32 {
+    samples.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max)
+}
+
+/// What a signal has in the octave around a frequency
+pub fn octave_band(signal: &[f32], sample_rate: f32, centre_hz: f32) -> Vec<f32> {
+    let (from_hz, to_hz) = (centre_hz / std::f32::consts::SQRT_2, centre_hz * std::f32::consts::SQRT_2);
+    let mut filters = [Biquad::new(); 4];
+    filters[0].set(BiquadCoeffs::highpass(from_hz, 0.541, sample_rate));
+    filters[1].set(BiquadCoeffs::highpass(from_hz, 1.307, sample_rate));
+    filters[2].set(BiquadCoeffs::lowpass(to_hz, 0.541, sample_rate));
+    filters[3].set(BiquadCoeffs::lowpass(to_hz, 1.307, sample_rate));
+    signal
+        .iter()
+        .map(|&sample| filters.iter_mut().fold(sample as f64, |signal, filter| filter.process(signal)) as f32)
+        .collect()
+}
+
+/// Reverb time of an impulse response: seconds to fall by 60 dB, from a line through the
+/// part of its decay curve between `from_db` and `to_db` below the start. The curve is the
+/// energy that is still to come at each moment, so it is smooth where the response is not
+pub fn decay_time_s(response: &[f32], sample_rate: f32, from_db: f32, to_db: f32) -> f32 {
+    let mut remaining = vec![0.0f64; response.len()];
+    let mut energy = 0.0f64;
+    for (index, sample) in response.iter().enumerate().rev() {
+        energy += (*sample as f64) * (*sample as f64);
+        remaining[index] = energy;
+    }
+    let level_db = |index: usize| 10.0 * (remaining[index] / energy.max(1e-300)).max(1e-30).log10();
+    let from = (0..response.len()).find(|&index| level_db(index) <= from_db as f64).unwrap_or(0);
+    let to = (from..response.len()).find(|&index| level_db(index) <= to_db as f64).unwrap_or(response.len() - 1);
+
+    // Least squares line through the curve, in dB per sample
+    let count = (to - from + 1) as f64;
+    let mean_x = (from + to) as f64 / 2.0;
+    let mean_y = (from..=to).map(level_db).sum::<f64>() / count;
+    let (mut above, mut below) = (0.0, 0.0);
+    for index in from..=to {
+        above += (index as f64 - mean_x) * (level_db(index) - mean_y);
+        below += (index as f64 - mean_x) * (index as f64 - mean_x);
+    }
+    (-60.0 / (above / below.max(1e-30)) / sample_rate as f64) as f32
+}
+
+/// How far the values of a signal are from a bell curve: 3.0 for noise, more when a few
+/// peaks stand out (single echoes), 1.5 for one sine (a tail that rings)
+pub fn kurtosis(samples: &[f32]) -> f32 {
+    let count = samples.len() as f64;
+    let mean = samples.iter().map(|s| *s as f64).sum::<f64>() / count;
+    let moment = |power: i32| samples.iter().map(|s| (*s as f64 - mean).powi(power)).sum::<f64>() / count;
+    (moment(4) / (moment(2) * moment(2)).max(1e-300)) as f32
+}
