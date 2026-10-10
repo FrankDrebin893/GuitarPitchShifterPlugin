@@ -54,6 +54,8 @@ Every plugin is drawn as a painted stompbox. All of it is vector, drawn with egu
 - `widgets.rs` - `param_knob` (fluted knob, name, value on label tape), `footswitch`, `led`,
   `small_footswitch`, `rig_led` and `param_switch` (the switch and LED of a rig, bound to an on/off
   parameter), `stepper` (label tape with a chrome button at each end, for picking one of many),
+  `tuner_display` (note name and a row of lamps on one strip of label tape) and `cents_meter`
+  (the lamps alone),
   `silk_frame`, `silk_label`, and `badge` (the HØJT logo: the Ø is a knob, its slash the pointer)
 - `frame.rs` - `pedal`: enclosure, screws, jack captions, tilted name band, model number, logo.
   A plugin describes itself with a `PedalStyle`. For a window with several enclosures: `rig`
@@ -108,6 +110,12 @@ controls, portrait) or `plugins/drums/src/editor.rs` (many controls, landscape) 
   `*` on the tape means a control was moved since loading
 - **A preset choice is never a parameter.** The editor sets the real parameters through the
   `ParamSetter` and keeps only the index in a `#[persist]` field
+- **Tuner:** a `small_footswitch` with `rig_led` and a `silk_label` on the head, beside the On
+  switch and further from the amp switches than they are from each other. While it is on, a
+  `tuner_display` under its own caption takes the place of the preset `stepper`: note name in
+  `mono` capitals at the left, 17 lamps, flat to the left and sharp to the right, the larger
+  middle lamp lit alone within 2 cents. Lamps are `LED_ON` and `LED_OFF` on `TAPE`; no needles,
+  numbers or other colours. The editor repaints continuously only while the tuner is on
 
 After changing an editor, run it standalone (see Build Commands) and look at it before bundling.
 
@@ -218,12 +226,16 @@ gain). They share the six dials.
 - `src/dsp/` - `filters.rs` (f64 biquads), `oversample.rs` (minimum-phase IIR half-bands),
   `shaper.rs` (antialiased clippers)
 - `src/presets.rs` - Factory presets as plain data, and `preset_report`
-- `src/editor.rs` - egui GUI: oxblood head (960 x 694 window) with the preset picker, over five pedals
+- `src/tuner.rs` - Tuner: pitch detector on the mono input, `TunerReading` (one atomic shared
+  with the editor), `Note`
+- `src/editor.rs` - egui GUI: oxblood head (960 x 694 window) with the preset stepper or the tuner display
+  top centre, over five pedals
 
 Signal flow:
 
 1. Input (a stereo input is averaged to mono), input gain, gate. The gate's detector reads the
-   input before the input gain; no lookahead
+   input before the input gain; no lookahead. The tuner, when on, hears the same input in front
+   of the input gain and the gate
 2. One oversampled region: drive pedal, preamp stages, tone stack, power amp. 4x at 44.1 and
    48 kHz, 2x from 88.2 kHz on. The clippers are antialiased (antiderivative method; second
    order where the gain is highest)
@@ -244,6 +256,11 @@ How it behaves:
 - Latency is 0.1 to 0.3 ms and nothing is reported to the host
 - A mono host layout gets the left channel of the effects
 - `process` returns `KeepAlive` while a delay or reverb tail rings
+- Tuner on gives the amp silence and turns its output down in 10 ms (exactly silent, tails
+  included); off brings it back as fast. Bypass still passes the input while tuning. The tuner
+  costs nothing when off and under 3 us in its worst 64-sample block when on
+- The tuner reads 48 Hz to 1420 Hz against A = 440 Hz (`REFERENCE_A_HZ`), a new reading every
+  30 ms, none for silence, noise or chords. A loaded project never opens with the tuner on
 - `lib.rs` takes every parameter default and range from `AmpSettings::default` and the limits in
   the DSP modules; a test pins the values
 - A preset holds everything except Bypass, Input and Output, so every preset must fit at
@@ -274,6 +291,7 @@ How it behaves:
 | Reverb Decay (`reverb_decay`) | 0.3-6.0 s | 1.5 s | Time for the tail to fall by 60 dB |
 | Reverb Mix (`reverb_mix`) | 0-100 % | 20 % | Level of the tail |
 | Output (`out_level`) | -30 to +6 dB | 0 dB | Output level, in front of the safety clip |
+| Tuner (`tuner`) | on / off | off | Silent tuning. Not automatable, not in presets, not changed when a project is loaded |
 
 Dials are stored 0.0-1.0 and shown as 0.0-10.0.
 
@@ -291,6 +309,9 @@ cargo test -p amp --release effects_report -- --ignored --nocapture
 # Time per stage of the chain, and level, peak and tightness of every factory preset.
 cargo test -p amp --release stage_report -- --ignored --nocapture
 cargo test -p amp --release preset_report -- --ignored --nocapture
+
+# Tuner: error in cents per note and signal, time to the first reading, drift, cost.
+cargo test -p amp --release tuner_report -- --ignored --nocapture
 
 # A DI guitar through each amp and setting, as WAV files in target/renders (amp_*.wav).
 # Optional: AMP_INPUT_WAV=<recording>. render_effects writes the effects alone (amp_fx_*.wav)

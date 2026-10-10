@@ -30,18 +30,19 @@ for something destructive or something that truly needs Rasmus.
 | M4 Delay and reverb | done 2026-10-10 |
 | M5 Tuning and cost | done 2026-10-10 |
 | Backlog 1: factory presets | done 2026-10-10 |
+| Backlog 3: tuner | done 2026-10-10 |
 
 ## Next
 
-The planned milestones are done. Continue with the backlog at the end of this file, top to
-bottom. Next up: the user IR loader (backlog 2), then the tuner (3).
+The planned milestones, the presets and the tuner are done. Continue with the backlog at the
+end of this file. Next up: the user IR loader (backlog 2). It needs a file dialog, which
+means a new dependency (the suite has none beyond nih-plug): keep it to one small crate and
+write down the choice, or use nih-plug's own means if it has any.
 
 Before more DSP: nobody has listened to anything yet. If Rasmus has listened and left notes,
 they come first.
 
-Things that would be quick wins by the numbers:
-- Klar presets (Glas, Varm, Tåge) are now about 1 dB quieter than when they were made
-  (M5 lowered Klar); trim their Master up, watching the peak test
+Quick wins by the numbers:
 - Torden with the drive at 10 / 10 / 10 at 44.1 kHz aliases at -67.6 dB (target -70)
 - Gate thresholds in the metal presets (-46 to -50 dB) may chop quiet playing
 
@@ -75,6 +76,7 @@ from this table and never changes.
 |---|---|---|
 | Global | `bypass`, `out_level` | M1 |
 | Global | `in_gain` | M3 |
+| Global | `tuner` (not automatable, not in presets) | tuner |
 | Gate | `gate_on`, `gate_thresh`, `gate_release` | M3 |
 | Drive | `drive_on`, `drive_gain`, `drive_tone`, `drive_level` | M3 |
 | Amp | `gain`, `bass`, `mid`, `treble`, `presence`, `master` | M1 |
@@ -177,6 +179,17 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
   gain staging). The choice is not a parameter: the editor sets the parameters and persists
   the index. Twelve presets, Danish names. The picker is a `stepper` top centre of the head;
   the head grew 34 px (window 960 x 694, persist key `editor-state-rig2`)
+- 2026-10-10 Tuner: muting is the behaviour. The amp's input (after the tuner tap) and its
+  output both fade in 10 ms, so tails are silent and tuned strings do not end up in the delay
+- 2026-10-10 Tuner: `Plugin::filter_state` drops `tuner` from a loaded state, so a project
+  saved while tuning does not open muted
+- 2026-10-10 Tuner: the detector works at about 5.5 kHz: normalised difference function for
+  the rough period, harmonic check against octave errors and chords, then the phase advance
+  of the first three harmonics for the exact pitch (interpolating the difference function
+  cannot reach a cent on high notes at that rate). Median of three readings is shown
+- 2026-10-10 Tuner: the amp switches moved 40 px left (x 255 / 385 / 515) so the Tuner switch
+  at x 680 does not read as a fourth amp
+- 2026-10-10 Klar presets trimmed back to level with Master (Glas 5.0, Varm 4.8, Tåge 4.9)
 - 2026-10-10 Worktrees for subagents start from `main`, not from `amp-sim`. Tell each agent to
   run `git merge --ff-only amp-sim` first
 
@@ -237,6 +250,15 @@ worst latency 0.317 ms (Torden, 44.1 kHz, everything on). Run `amp_report` for t
 - Presets: no direct pick from a list; reaching the far side is up to six clicks
 - Projects saved before the preset picker open at the default window size (new persist key)
 
+- Tuner: only run on synthetic signals. No guitar, no DAW; the path from detector to display
+  was exercised in halves (atomic hand-off by tests, drawing by captures with fixed readings)
+- Tuner: mains hum alone above -70 dBFS reads as a note; strong hum near a low string's
+  fundamental can pull the reading. Octaves and root-plus-octave read as the root
+- Tuner: low limit 48 Hz; readings stop below -70 dBFS; first reading on low A after 133 ms
+- Tuner and Bypass both on: the dry signal is heard while tuning (bypass wins, by decision)
+- Tuner: `non_automatable` and the state filter that keeps a project from opening muted were
+  not checked in a real host
+
 ## Last report
 
 After M5 and the presets (2026-10-10). Run the reports for the full tables.
@@ -279,7 +301,7 @@ Idle after the last note: 3.5 s at default effects, 63 s at delay 1000 ms / 90 %
 
 1. Factory preset browser (done)
 2. User IR loader
-3. Tuner
+3. Tuner (done)
 4. More amps and pedals (compressor, fuzz, chorus)
 5. Mic choices per cabinet
 6. Lower CPU (shorter or partitioned IRs, SIMD)
