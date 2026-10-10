@@ -199,7 +199,9 @@ static KLAR: AmpModel = AmpModel {
     fizz_hz: None,
     lowcut_hz: None,
     level_db: [24.0, 17.0, 8.0, 0.0, -5.5],
-    makeup_db: [0.0; 5],
+    // Nothing squeezes the peaks of a clean amp, so it is turned down where it is cleanest:
+    // chords then stay 1.2 to 1.4 dB under where the output starts to round them off
+    makeup_db: [-1.3, -1.4, -0.8, -0.4, 0.0],
     tone: ToneModel {
         bass_hz: 120.0,
         bass_db: 10.0,

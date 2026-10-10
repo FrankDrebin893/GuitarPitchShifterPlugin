@@ -1064,6 +1064,19 @@ mod tests {
     }
 
     #[test]
+    fn test_klar_leaves_room_under_the_safety_clip() {
+        // The clean amp has the highest peaks for its level. With the delay and the reverb
+        // on as the plugin starts, chords stay a decibel under the knee of the output clip
+        let chords = power_chords(SAMPLE_RATE, 2.0);
+        for gain in [0.0, 0.25, 0.5] {
+            let settings = with_default_effects(with_amp(Amp::Klar, gain));
+            let (left, right) = run_stereo(&settings, &chords, SAMPLE_RATE);
+            let room = to_db(OUTPUT_CLIP_KNEE) - to_db(peak(&left).max(peak(&right)));
+            assert!(room > 1.0, "Gain {}: {:.2} dB under the knee", gain * 10.0, room);
+        }
+    }
+
+    #[test]
     fn test_amps_are_equally_loud_at_the_defaults() {
         let input = power_chords(SAMPLE_RATE, 2.0);
         let levels: Vec<f32> =
