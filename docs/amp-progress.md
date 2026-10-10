@@ -32,25 +32,28 @@ for something destructive or something that truly needs Rasmus.
 | Backlog 1: factory presets | done 2026-10-10 |
 | Backlog 3: tuner | done 2026-10-10 |
 | Backlog 2: user IR loader | done 2026-10-10 |
+| Backlog 9: per-amp dial memory | done 2026-10-10 |
+| Backlog 7, small version: gate-open and clip lamps | done 2026-10-10 |
 
 ## Next
 
-The planned milestones, the presets, the tuner and the IR loader are done. Continue with the
-backlog at the end of this file. Next up: more amps and pedals (backlog 4). Adding an amp
-means a new `Amp` variant with its own `#[id]` appended after `torden` (never reorder), a
-model in `amp/model.rs`, a place for a fourth switch on the head (the bottom row is full:
-this needs a layout decision, for example the amp choice as a `stepper`), presets for it.
-Adding a pedal means a sixth slot on the board (the window is 960 wide with five pedals of
-180: a wider window or a second row).
+Waiting on Rasmus for one layout decision before backlog 4 (more amps and pedals): the head's
+bottom row is full (three amp switches, Tuner, On), the board holds exactly five pedals at
+960 wide, and the model print says GA-3. Recommended to him on 2026-10-10: the amp selector
+becomes a `stepper` (any number of amps), and pedals are added by widening the window to six
+slots. Do not start backlog 4 without his answer.
 
-Before more DSP: nobody has listened to anything yet. If Rasmus has listened and left notes,
-they come first.
+Until then, report-driven work that needs no layout decision:
+- Brøl with the drive at 10 / 10 / 10 aliases at -55 dB at 44.1 kHz and Klar at -66 dB
+  (Brøl: first-order stages fed square waves, the `finer_when_driven` idea applies; Klar:
+  the base-rate safety clip). Neither is a report row yet: add the rows first
+- The built-in cabinets differ between sample rates by up to 3 dB at 8 kHz (in the roll-off).
+  Design them at one rate and resample (the resampler in `user_cab.rs` is within 0.02 dB),
+  or pre-warp the roll-off filters
+- A 40 ms user cabinet at 192 kHz takes the plugin from 7.2 % to 15.7 % of a core
+- Backlog 5 (mic choices per cabinet), 6 (lower CPU), 8 (shared `suite_common::dsp`)
 
-Quick wins by the numbers:
-- Torden with the drive at 10 / 10 / 10 at 44.1 kHz aliases at -67.6 dB (target -70)
-- Gate thresholds in the metal presets (-46 to -50 dB) may chop quiet playing
-- A 40 ms user cabinet at 192 kHz takes the plugin from 7.2 % to 15.7 % of a core. Capping
-  taps instead of milliseconds would halve that but change the low end per rate
+Nobody has listened to anything yet. If Rasmus has listened and left notes, they come first.
 
 ## What was decided with Rasmus
 
@@ -211,6 +214,19 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
   cabinet's free slot when no crossfade runs
 - 2026-10-10 IR loader: the choice is a persisted file name, not a parameter, not in presets,
   and stays when the amp is switched
+- 2026-10-10 Dial memory: editor-side state, persisted as `amp-dials` (atomics, since nih-plug
+  restores state on the audio thread). The six dials stay shared parameters
+- 2026-10-10 Dial memory: at the silent sample of an amp switch the six amp dials jump to their
+  target, so the new amp starts at its own dials
+- 2026-10-10 Lamps: the gate gets its own small `OPEN` lamp. A half-lit pedal LED was built
+  first and rejected: at 30 % the lens is about the colour of the paint
+- 2026-10-10 Aliasing: Torden with the drive at 10s was limited by square waves reaching the
+  second stage, not by the order of antialiasing. `FineClipper` takes two second-order steps
+  per sample there, only while the drive is on: -67.6 to -74.8 dB at 44.1 kHz for 0.3 % of
+  a core at 48 kHz. Drive off is bit-identical
+- 2026-10-10 Preset gates: -54 dB is the highest threshold that leaves palm mutes at -30 dBFS
+  untouched; release, not threshold, sets how tight the rests are. Stram -56 dB / 50 ms,
+  Granit -54 / 60, Dyb -54 / 40, Lyn -54 / 180. A test holds every preset to it
 - 2026-10-10 Worktrees for subagents start from `main`, not from `amp-sim`. Tell each agent to
   run `git merge --ff-only amp-sim` first
 
@@ -296,6 +312,19 @@ worst latency 0.317 ms (Torden, 44.1 kHz, everything on). Run `amp_report` for t
   agree within 0.16 dB
 - Mic and Res use the selected amp's frequencies also under a user cabinet
 
+- Dial memory: a switch is 7 host undo steps, and host undo does not undo the memory;
+  automation that writes the dials while the player switches amps fights it; a host that
+  changes Amp itself leaves the dials alone (by decision)
+- Lamps: the cost of repainting could not be measured: the standalone's UI thread already
+  uses 0.4 to 0.7 of a core on this machine with frames arriving in bursts about 250 ms
+  apart. The unchanged Drum Synth standalone does the same, so it predates the amp. Worth a
+  look in a real host: if frames really come that slowly, lamps and the tuner lag as much
+- Lamps: the 150 ms clip hold was unit-tested, not watched on screen
+- Finer clipping with the drive on made a few 1245 Hz aliasing figures slightly worse while
+  the 4186 Hz ones improved (largest: Torden 10, drive 3/5/8, 44.1 kHz, -87.4 to -83.2 dB)
+- Gates: mutes quieter than -36 dBFS are still chopped at -54 dB; a guitar noisier than
+  -62 dBFS RMS holds the preset gates open. All measured on synthetic plucks
+
 ## Last report
 
 After M5 and the presets (2026-10-10). Run the reports for the full tables.
@@ -342,6 +371,6 @@ Idle after the last note: 3.5 s at default effects, 63 s at delay 1000 ms / 90 %
 4. More amps and pedals (compressor, fuzz, chorus)
 5. Mic choices per cabinet
 6. Lower CPU (shorter or partitioned IRs, SIMD)
-7. Input and output meters
+7. Input and output meters (small version done: gate-open and clip lamps)
 8. Shared `suite_common::dsp` for filters used by more than one plugin
-9. Per-amp knob memory
+9. Per-amp knob memory (done)

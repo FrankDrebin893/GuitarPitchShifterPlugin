@@ -55,7 +55,7 @@ Every plugin is drawn as a painted stompbox. All of it is vector, drawn with egu
   `small_footswitch`, `rig_led` and `param_switch` (the switch and LED of a rig, bound to an on/off
   parameter), `stepper` (label tape with a chrome button at each end, for picking one of many),
   `tuner_display` (note name and a row of lamps on one strip of label tape) and `cents_meter`
-  (the lamps alone),
+  (the lamps alone), `signal_lamp` (a small lamp with no switch, for what the sound is doing),
   `silk_frame`, `silk_label`, and `badge` (the HØJT logo: the Ø is a knob, its slash the pointer)
 - `frame.rs` - `pedal`: enclosure, screws, jack captions, tilted name band, model number, logo.
   A plugin describes itself with a `PedalStyle`. For a window with several enclosures: `rig`
@@ -103,6 +103,11 @@ controls, portrait) or `plugins/drums/src/editor.rs` (many controls, landscape) 
   `small_footswitch` and the LEDs `rig_led` (an unlit `led` disappears on dark paint), beside or
   above the switch. A mini pedal holds two knobs of radius 24 side by side or three of radius 17
   in a triangle. Everything else in this guide applies
+- **Signal lamps:** a light that follows the sound and not a switch (gate open, output clipping)
+  is a `signal_lamp`, with a `silk_label` of size 13 centred 18 px under it, placed beside the
+  control it belongs to. An LED above or beside a switch only ever says that the switch is on.
+  Lamps are read from atomics the audio thread writes once per block; the editor asks for a
+  repaint only when one changes, 20 times a second at most
 - **Pick one of many (presets):** a `stepper` with a `silk_label` caption above it, top centre of
   the head on the jack-caption line, at least 12 px clear of the knob ticks. No dropdowns, lists
   or pop-ups. Step arrows are engraved in chrome buttons; silk triangles on the paint mean signal
@@ -237,6 +242,10 @@ gain). They share the six dials.
 - `src/dsp/` - `filters.rs` (f64 biquads), `oversample.rs` (minimum-phase IIR half-bands),
   `shaper.rs` (antialiased clippers)
 - `src/presets.rs` - Factory presets as plain data, and `preset_report`
+- `src/dial_memory.rs` - Each amp's six dial positions, kept by the editor and saved with the
+  project (`amp-dials`)
+- `src/lamps.rs` - Gate-open and clip lamps: what the chain tells the editor, and how long the
+  editor shows it
 - `src/tuner.rs` - Tuner: pitch detector on the mono input, `TunerReading` (one atomic shared
   with the editor), `Note`
 - `src/editor.rs` - egui GUI: oxblood head (960 x 694 window) with the preset stepper or the tuner display
@@ -284,6 +293,15 @@ How it behaves:
 - The folder is created the first time the stepper is used, not by loading the plugin
 - A 40 ms cabinet adds about 0.3 % of a core at 48 kHz, 2.3 % at 96 kHz, 8.5 % at 192 kHz
 - `hound` is the amp's one dependency besides nih-plug; it reads the WAV files
+- Each amp remembers its own six dials: the selector on the head stores them under the amp that
+  is left and sets them to what the amp that is picked had (defaults if never left). The dials
+  are still six shared parameters. A host that changes Amp itself leaves the dials alone; a
+  preset's dials become its amp's memory
+- An amp that is switched to starts at the dials' target, at the silent sample of the switch
+- The Gate pedal's `OPEN` lamp is lit while the gate is on and lets the guitar through; `CLIP`
+  beside Output is lit for 150 ms after the output went over the safety clip's knee
+- While the drive pedal is on, Torden's second stage clips at twice the rate
+  (`StageModel.finer_when_driven`); with the pedal off the output is the same to the bit
 - `lib.rs` takes every parameter default and range from `AmpSettings::default` and the limits in
   the DSP modules; a test pins the values
 - A preset holds everything except Bypass, Input and Output, so every preset must fit at
@@ -332,6 +350,9 @@ cargo test -p amp --release effects_report -- --ignored --nocapture
 # Time per stage of the chain, and level, peak and tightness of every factory preset.
 cargo test -p amp --release stage_report -- --ignored --nocapture
 cargo test -p amp --release preset_report -- --ignored --nocapture
+
+# How every preset's gate treats ringing notes, quiet playing, palm mutes and hiss.
+cargo test -p amp --release preset_gate_report -- --ignored --nocapture
 
 # Tuner: error in cents per note and signal, time to the first reading, drift, cost.
 cargo test -p amp --release tuner_report -- --ignored --nocapture
