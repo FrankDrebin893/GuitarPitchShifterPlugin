@@ -42,6 +42,7 @@ Copy VST3 to system folder (requires admin):
 ```
 xcopy /E /I /Y "target\bundled\HojtPitchShifter.vst3" "C:\Program Files\Common Files\VST3\HojtPitchShifter.vst3"
 xcopy /E /I /Y "target\bundled\HojtDrumSynth.vst3" "C:\Program Files\Common Files\VST3\HojtDrumSynth.vst3"
+xcopy /E /I /Y "target\bundled\HojtGuitarAmp.vst3" "C:\Program Files\Common Files\VST3\HojtGuitarAmp.vst3"
 ```
 
 ## Look
@@ -52,7 +53,8 @@ Every plugin is drawn as a painted stompbox. All of it is vector, drawn with egu
 - `theme.rs` - Colours, the three embedded fonts (`install`), text helpers. One paint colour per plugin
 - `widgets.rs` - `param_knob` (fluted knob, name, value on label tape), `footswitch`, `led`,
   `small_footswitch`, `rig_led` and `param_switch` (the switch and LED of a rig, bound to an on/off
-  parameter), `silk_frame`, `silk_label`, and `badge` (the HØJT logo: the Ø is a knob, its slash the pointer)
+  parameter), `stepper` (label tape with a chrome button at each end, for picking one of many),
+  `silk_frame`, `silk_label`, and `badge` (the HØJT logo: the Ø is a knob, its slash the pointer)
 - `frame.rs` - `pedal`: enclosure, screws, jack captions, tilted name band, model number, logo.
   A plugin describes itself with a `PedalStyle`. For a window with several enclosures: `rig`
   (the bare bench), `head` (wide enclosure with everything a pedal has printed on it) and
@@ -99,6 +101,13 @@ controls, portrait) or `plugins/drums/src/editor.rs` (many controls, landscape) 
   `small_footswitch` and the LEDs `rig_led` (an unlit `led` disappears on dark paint), beside or
   above the switch. A mini pedal holds two knobs of radius 24 side by side or three of radius 17
   in a triangle. Everything else in this guide applies
+- **Pick one of many (presets):** a `stepper` with a `silk_label` caption above it, top centre of
+  the head on the jack-caption line, at least 12 px clear of the knob ticks. No dropdowns, lists
+  or pop-ups. Step arrows are engraved in chrome buttons; silk triangles on the paint mean signal
+  direction at the jacks only. Names have at most 14 characters and are our own words. A trailing
+  `*` on the tape means a control was moved since loading
+- **A preset choice is never a parameter.** The editor sets the real parameters through the
+  `ParamSetter` and keeps only the index in a `#[persist]` field
 
 After changing an editor, run it standalone (see Build Commands) and look at it before bundling.
 
@@ -206,17 +215,20 @@ gain). They share the six dials.
 - `src/cab.rs` - Cabinet: impulse response designed in code per sample rate, direct FIR, Mic and
   Resonance filters behind it
 - `src/delay.rs`, `src/reverb.rs` - Stereo delay; stereo reverb (8-line feedback delay network)
-- `src/dsp/` - `filters.rs` (f64 biquads), `oversample.rs` (4x, minimum-phase IIR half-bands),
+- `src/dsp/` - `filters.rs` (f64 biquads), `oversample.rs` (minimum-phase IIR half-bands),
   `shaper.rs` (antialiased clippers)
-- `src/editor.rs` - egui GUI: oxblood head over five pedals
+- `src/presets.rs` - Factory presets as plain data, and `preset_report`
+- `src/editor.rs` - egui GUI: oxblood head (960 x 694 window) with the preset picker, over five pedals
 
 Signal flow:
 
 1. Input (a stereo input is averaged to mono), input gain, gate. The gate's detector reads the
    input before the input gain; no lookahead
-2. One 4x oversampled region: drive pedal, preamp stages, tone stack, power amp. The clippers
-   are antialiased (antiderivative method; second order where the gain is highest)
-3. Cabinet, DC blocker
+2. One oversampled region: drive pedal, preamp stages, tone stack, power amp. 4x at 44.1 and
+   48 kHz, 2x from 88.2 kHz on. The clippers are antialiased (antiderivative method; second
+   order where the gain is highest)
+3. Cabinet: a short impulse response (5 to 10 ms) with the speaker resonance as a filter behind
+   it, then the Mic and Resonance dials, DC blocker
 4. Stereo delay, then stereo reverb. They add wet to an untouched dry signal, smooth their own
    settings, ring out when switched off and cost nothing once idle
 5. Output level, safety clip
@@ -232,6 +244,11 @@ How it behaves:
 - Latency is 0.1 to 0.3 ms and nothing is reported to the host
 - A mono host layout gets the left channel of the effects
 - `process` returns `KeepAlive` while a delay or reverb tail rings
+- `lib.rs` takes every parameter default and range from `AmpSettings::default` and the limits in
+  the DSP modules; a test pins the values
+- A preset holds everything except Bypass, Input and Output, so every preset must fit at
+  Output 0 dB (a test checks peak and level of each)
+- Cost with everything on (Torden): about 2 % of a core at 48 kHz, 2.6 % at 96 kHz, 5.6 % at 192 kHz
 
 | Parameter (id) | Range | Default | Description |
 |----------------|-------|---------|-------------|
@@ -260,7 +277,7 @@ How it behaves:
 
 Dials are stored 0.0-1.0 and shown as 0.0-10.0.
 
-Amp tests sit next to the code. The ones for the whole chain are in `chain.rs`. Three ignored
+Amp tests sit next to the code. The ones for the whole chain are in `chain.rs`. These ignored
 tests are the tools for working on the sound:
 
 ```bash
@@ -270,6 +287,10 @@ cargo test -p amp --release amp_report -- --ignored --nocapture
 
 # Delay and reverb by themselves: echo times, decay times, density, width, cost.
 cargo test -p amp --release effects_report -- --ignored --nocapture
+
+# Time per stage of the chain, and level, peak and tightness of every factory preset.
+cargo test -p amp --release stage_report -- --ignored --nocapture
+cargo test -p amp --release preset_report -- --ignored --nocapture
 
 # A DI guitar through each amp and setting, as WAV files in target/renders (amp_*.wav).
 # Optional: AMP_INPUT_WAV=<recording>. render_effects writes the effects alone (amp_fx_*.wav)

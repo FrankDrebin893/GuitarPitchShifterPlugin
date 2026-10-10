@@ -28,25 +28,22 @@ for something destructive or something that truly needs Rasmus.
 | M2 Three amps | done 2026-10-10 |
 | M3 Gate, drive, pedalboard | done 2026-10-10 |
 | M4 Delay and reverb | done 2026-10-10 |
-| M5 Tuning and cost | not started |
+| M5 Tuning and cost | done 2026-10-10 |
+| Backlog 1: factory presets | done 2026-10-10 |
 
 ## Next
 
-M5, tuning and cost, in this order:
+The planned milestones are done. Continue with the backlog at the end of this file, top to
+bottom. Next up: the user IR loader (backlog 2), then the tuner (3).
 
-1. 2x oversampling at 88.2 kHz and above (192 kHz is 16 to 17.6 % of a core, almost all in
-   the oversampled region). `FACTOR` becomes a runtime value; re-check aliasing at 96 kHz
-   (Torden Gain 10 with the drive is the row to watch)
-2. Shorter cabinet IR at high rates (3840 taps at 192 kHz): measure how many taps hold the
-   response within 0.5 dB, or cap the IR
-3. Klar headroom: Gain 0 with default effects peaks 0.1 dB under the safety clip's knee;
-   1 to 1.5 dB less makeup, keeping the 2 dB level match between amps
-4. Faster idle: the delay waits a full line (1 s) of silence and both run down to -120 dBFS
-   (77 s at 1000 ms / 90 %)
-5. Bundle VST3 and CLAP (`cargo xtask bundle amp --release`) and check the bundle is there
-6. Then the backlog at the end of this file
+Before more DSP: nobody has listened to anything yet. If Rasmus has listened and left notes,
+they come first.
 
-CLAUDE.md has the plugin's structure, signal flow and parameter table.
+Things that would be quick wins by the numbers:
+- Klar presets (Glas, Varm, Tåge) are now about 1 dB quieter than when they were made
+  (M5 lowered Klar); trim their Master up, watching the peak test
+- Torden with the drive at 10 / 10 / 10 at 44.1 kHz aliases at -67.6 dB (target -70)
+- Gate thresholds in the metal presets (-46 to -50 dB) may chop quiet playing
 
 ## What was decided with Rasmus
 
@@ -162,6 +159,24 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
   the tail length ahead of time, and gains nothing in CLAP
 - 2026-10-10 M4: rigs use `ui::rig_led` (black socket, darker unlit lens); `ui::led` and the
   other two plugins are unchanged
+- 2026-10-10 M5: oversampling is 4x at 44.1 and 48 kHz and 2x (the steep half-band alone)
+  from 88.2 kHz on. Aliasing at 96 kHz equals 48 kHz; the sound matches across rates
+- 2026-10-10 M5: the speaker resonance is a biquad behind the convolution, fitted to the old
+  20 ms response; the rest fits in 5 ms (Klar), 10 ms (Brøl), 6 ms (Torden), within 0.4 dB
+  from 60 Hz to 8 kHz
+- 2026-10-10 M5: the preamp runs one stage over the whole block, then the next (same output
+  to the bit, a third less time)
+- 2026-10-10 M5: Klar is 0.8 to 1.4 dB quieter below Gain 10 for room under the safety clip;
+  at default dials it is 1.1 dB under the loudest amp
+- 2026-10-10 M5: delay and reverb go idle at -100 dBFS, and the delay as soon as its read
+  positions have only zeros ahead
+- 2026-10-10 M5: Tone, Presence and cabinet dial filters glide sample by sample (zipper
+  -77 dB or less in a 50 ms sweep)
+- 2026-10-10 M5: `lib.rs` takes defaults and ranges from the chain's settings; a test pins them
+- 2026-10-10 Presets: a preset holds everything except Bypass, Input and Output (the player's
+  gain staging). The choice is not a parameter: the editor sets the parameters and persists
+  the index. Twelve presets, Danish names. The picker is a `stepper` top centre of the head;
+  the head grew 34 px (window 960 x 694, persist key `editor-state-rig2`)
 - 2026-10-10 Worktrees for subagents start from `main`, not from `amp-sim`. Tell each agent to
   run `git merge --ff-only amp-sim` first
 
@@ -171,10 +186,6 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
   `target/renders/amp_*.wav` may ask for another voicing (cab bite, low end, gain at 5)
 - Brøl at Gain 0 is not fully clean on hard pick attacks (the level table pushes transients
   into the power stage)
-- CPU at 192 kHz is about 11 % of one core per instance: always 4x, 3840-tap FIR. Going to 2x
-  at 96 kHz and above is the obvious saving (M5)
-- Tone and presence filters are redesigned once per 32 samples while a dial moves; a fast
-  automated sweep could zipper faintly
 - Klar: chord peaks reach -3.0 dBFS at Gain 0, just under the output clip's knee; its low end
   is the fullest of the three and may boom with a neck pickup; its sparkle is EQ only
 - Torden: aliasing at Gain 10 is -74 dB, 4 dB inside the -70 dB target; the drive pedal in
@@ -196,8 +207,6 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
 - M3: the output safety clip runs at base rate. Klar with Drive 10 and Level 10 hits it and
   aliases at -49 dB
 - M3: Brøl at Gain 0 now peaks at -3.1 dBFS on chords, just under the output clip's knee
-- M3: `AmpSettings::default()` mirrors the parameter defaults in `lib.rs` by hand
-- M3: Torden costs 2.9 % at 48 kHz and 14.5 % at 192 kHz (16.1 % with every pedal on)
 - Delay and reverb (not merged yet): the reverb blooms late (loudest around 95 ms); the
   delay's odd repeats lose 2.8 dB in mono; neither limits its own output; the delay at
   1000 ms and feedback 0.9 takes 76 s to go idle
@@ -213,43 +222,62 @@ worst latency 0.317 ms (Torden, 44.1 kHz, everything on). Run `amp_report` for t
   antialiased (an antialiased one costs half a sample and rolls off the top even when idle)
 - M4: with the gate off and a hissy amp the effects never go idle, so the status stays KeepAlive
 - M4: VST3 hosts that read the tail length only once at load see 0
-- M4: everything on in stereo, Torden: 3.6 % / 7.8 % / 17.6 % of a core at 48 / 96 / 192 kHz.
-  The effects cost about 5 us per 64-sample block (delay 1.3, reverb 3.7)
 - M4: latency is unchanged by the effects (Klar 8, Brøl 10, Torden 14 samples at 48 kHz with
   every pedal on)
 
+- M5: the agent doing it was cut off before its final report. Its six commits were complete
+  and are verified by the tests and the reports, but its own account of what it left undone
+  is missing
+- Presets: nobody has heard them. Values come from the model constants and `preset_report`
+- Presets: loading one is 24 separate parameter changes, so a host may need 24 undo steps;
+  host undo does not restore the preset index (the display then shows the newer name with `*`)
+- Presets: mouse clicks on the stepper, host undo, and saving and restoring the preset index
+  in a DAW project were not exercised (stepping, wrap and the `*` were, through a temporary
+  debug path)
+- Presets: no direct pick from a list; reaching the far side is up to six clicks
+- Projects saved before the preset picker open at the default window size (new persist key)
+
 ## Last report
 
-After M2 (2026-10-10), 48 kHz, dials at 5 except Gain. The full report has more tables
-(tightness, dynamics, cabinet responses, switching steps).
+After M5 and the presets (2026-10-10). Run the reports for the full tables.
 
 ```
+48 kHz, dials at 5 except Gain
 amp      gain  chords RMS   chords pk  sine RMS   sine pk   THD dB  alias 1245  alias 4186
-Klar      0.0       -17.6        -3.0     -19.7     -16.7    -53.4      -125.2      -120.0
-Klar      5.0       -17.0        -3.6     -17.1     -14.1    -44.7      -125.6      -125.1
-Klar     10.0       -16.2        -4.5     -14.9     -12.3    -21.5      -124.8      -123.2
-Brøl      0.0       -19.5        -6.8     -20.5     -17.5    -37.4      -122.0      -123.9
-Brøl      5.0       -16.6        -6.5     -14.9     -12.0    -15.5      -121.3      -121.7
-Brøl     10.0       -15.6        -6.2     -14.3      -9.0     -8.2       -98.4       -86.6
-Torden    0.0       -17.4        -6.9     -13.5     -10.1    -24.5      -123.2      -122.6
-Torden    5.0       -16.9        -6.5     -13.0      -8.2    -18.0      -116.6       -99.8
-Torden   10.0       -16.3        -5.6     -12.3      -6.1    -14.3       -76.8       -73.8
+Klar      0.0       -18.8        -4.3     -20.8     -17.8    -53.6      -125.9      -122.8
+Klar      5.0       -17.7        -4.4     -17.7     -14.7    -44.9      -125.4      -123.0
+Klar     10.0       -16.1        -4.4     -14.7     -12.0    -21.7      -124.8      -122.5
+Brøl      0.0       -19.7        -3.1     -21.4     -18.4    -44.9      -123.7      -124.7
+Brøl      5.0       -16.6        -6.5     -15.0     -12.0    -15.5      -122.5      -121.8
+Brøl     10.0       -15.6        -6.2     -14.4      -9.1     -8.2       -98.6       -86.7
+Torden    0.0       -17.5        -7.0     -13.7     -10.0    -24.5      -125.1      -122.1
+Torden    5.0       -17.0        -6.7     -13.2      -8.3    -18.0      -119.4      -111.7
+Torden   10.0       -16.3        -5.7     -12.5      -6.0    -14.4       -91.5       -90.4
 
-Tightness (palm mutes on 65 and 73 Hz roots), dB relative to the whole signal
-Hz                       to 100  100-400  400-1k6  1k6-6k4   6k4 up
-Brøl 5.0                  -21.6     -6.3     -2.7     -6.5    -28.8
-Torden 5.0                -25.1     -7.2     -3.7     -4.3    -27.4
-Torden 5.0 boosted        -26.3     -9.7     -3.0     -4.1    -26.5
+Aliasing per sample rate at Gain 10 (1245 Hz / 4186 Hz tone)
+                                   44100             48000             96000            192000
+Brøl 10.0                  -93.3 / -83.8     -98.6 / -86.7     -98.7 / -86.7   -118.5 / -117.6
+Torden 10.0                -87.3 / -90.3     -91.5 / -90.4     -91.5 / -90.5   -117.3 / -118.4
+Torden 10.0 drive          -87.4 / -77.8     -91.2 / -79.5     -91.3 / -79.5   -114.3 / -110.1
+Torden 10.0 drive 10s      -75.8 / -67.6     -76.9 / -70.1     -77.0 / -70.1     -98.0 / -91.8
 
-Dynamics at Gain 5, 24 dB between soft and hard playing: squeezed by Klar 0.8, Brøl 11.0, Torden 23.2 dB
-Latency at 48 kHz: Klar 7, Brøl 8, Torden 12 samples (0.15 / 0.17 / 0.25 ms)
-Time per 64-sample block at 48 kHz: Klar 19 us (1.4 %), Brøl 24 us (1.8 %), Torden 29 us (2.2 %)
-At 192 kHz: 8.7 % / 10.2 % / 11.8 %
+Latency with every pedal on, samples at 44.1 / 48 / 96 / 192 kHz
+Klar 8 / 8 / 13 / 23, Brøl 10 / 10 / 17 / 31, Torden 14 / 14 / 25 / 48 (0.32 ms at most)
+
+Time per 64-sample block, stereo, everything on (Torden, Gain 10), both effects
+48 kHz 27.3 us (2.0 %), 96 kHz 17.2 us (2.6 %), 192 kHz 18.6 us (5.6 %)
+Before M5: 48.5 us (3.6 %), 51.8 us (7.8 %), 58.6 us (17.6 %)
+
+Time per stage at 48 kHz, ns per sample: preamp 206, power 65, drive 51, reverb 42,
+cabinet 21, delay 16, tone 12, the rest under 6 each
+
+The same chords at 44.1, 48, 96 and 192 kHz differ by at most 0.17 dB and 0.03 dB THD
+Idle after the last note: 3.5 s at default effects, 63 s at delay 1000 ms / 90 %
 ```
 
 ## Backlog after M5 (top to bottom)
 
-1. Factory preset browser
+1. Factory preset browser (done)
 2. User IR loader
 3. Tuner
 4. More amps and pedals (compressor, fuzz, chorus)
