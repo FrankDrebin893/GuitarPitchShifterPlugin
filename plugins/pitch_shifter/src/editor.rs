@@ -1,14 +1,23 @@
 use nih_plug::prelude::*;
-use nih_plug_egui::egui;
+use nih_plug_egui::egui::vec2;
 use nih_plug_egui::{create_egui_editor, EguiState};
 use std::sync::Arc;
 
-use suite_common::ui::{dial, BACKGROUND, LABEL_TEXT, TITLE_TEXT, VALUE_TEXT};
+use suite_common::ui::{self, footswitch, led, param_knob, Ornament, PedalStyle};
 
 use crate::GuitarPitchShifterParams;
 
 const WINDOW_WIDTH: u32 = 400;
-const WINDOW_HEIGHT: u32 = 300;
+const WINDOW_HEIGHT: u32 = 560;
+
+const STYLE: PedalStyle = PedalStyle {
+    name: "Pitch Shifter",
+    model: "PS-10",
+    paint: ui::theme::PAINT_ORANGE,
+    ornament: Ornament::Arrows,
+    jacks: ["Out", "In"],
+    band_y: 367.0,
+};
 
 pub fn default_state() -> Arc<EguiState> {
     EguiState::from_size(WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -18,107 +27,31 @@ pub fn create(params: Arc<GuitarPitchShifterParams>, editor_state: Arc<EguiState
     create_egui_editor(
         editor_state,
         (),
-        |_, _| {},
+        |egui_ctx, _| ui::install(egui_ctx),
         move |egui_ctx, setter, _state| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::default().fill(BACKGROUND))
-                .show(egui_ctx, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(15.0);
+            ui::pedal(egui_ctx, &STYLE, |ui, origin| {
+                // Three knobs in a triangle
+                param_knob(ui, setter, &params.latency_ms, origin + vec2(83.0, 103.0), 27.0, "Max Latency", None);
+                param_knob(ui, setter, &params.smoothness_ms, origin + vec2(317.0, 103.0), 27.0, "Smoothness", None);
+                param_knob(
+                    ui,
+                    setter,
+                    &params.semitones,
+                    origin + vec2(200.0, 205.0),
+                    48.0,
+                    "Semitones",
+                    Some(["-12", "0", "+12"]),
+                );
 
-                        // Title
-                        ui.label(
-                            egui::RichText::new("PITCH SHIFTER")
-                                .size(24.0)
-                                .color(TITLE_TEXT),
-                        );
-
-                        ui.add_space(20.0);
-
-                        // Main semitones dial (large)
-                        ui.vertical_centered(|ui| {
-                            let semitones = params.semitones.value();
-                            let response = dial(ui, 80.0, semitones as f32, -12.0, 12.0, true);
-
-                            if response.dragged() {
-                                let delta = -response.drag_delta().y * 0.1;
-                                let new_value = (semitones as f32 + delta).clamp(-12.0, 12.0);
-                                setter.begin_set_parameter(&params.semitones);
-                                setter.set_parameter(&params.semitones, new_value.round() as i32);
-                                setter.end_set_parameter(&params.semitones);
-                            }
-
-                            ui.add_space(5.0);
-                            ui.label(
-                                egui::RichText::new(format!("{:+} st", semitones))
-                                    .size(18.0)
-                                    .color(VALUE_TEXT),
-                            );
-                            ui.label(
-                                egui::RichText::new("Semitones")
-                                    .size(12.0)
-                                    .color(LABEL_TEXT),
-                            );
-                        });
-
-                        ui.add_space(20.0);
-
-                        // Smaller dials for max latency and smoothness
-                        ui.columns(2, |columns| {
-                            // Max latency dial (left column)
-                            columns[0].vertical_centered(|ui| {
-                                let latency = params.latency_ms.value();
-                                let response = dial(ui, 40.0, latency, 2.0, 50.0, false);
-
-                                if response.dragged() {
-                                    let delta = -response.drag_delta().y * 0.2;
-                                    let new_value = (latency + delta).clamp(2.0, 50.0);
-                                    setter.begin_set_parameter(&params.latency_ms);
-                                    setter.set_parameter(&params.latency_ms, new_value);
-                                    setter.end_set_parameter(&params.latency_ms);
-                                }
-
-                                ui.add_space(3.0);
-                                ui.label(
-                                    egui::RichText::new(format!("{:.1} ms", latency))
-                                        .size(12.0)
-                                        .color(VALUE_TEXT),
-                                );
-                                ui.label(
-                                    egui::RichText::new("Max Latency")
-                                        .size(10.0)
-                                        .color(LABEL_TEXT),
-                                );
-                            });
-
-                            // Smoothness dial (right column)
-                            columns[1].vertical_centered(|ui| {
-                                let smoothness = params.smoothness_ms.value();
-                                let response = dial(ui, 40.0, smoothness, 0.5, 10.0, false);
-
-                                if response.dragged() {
-                                    let delta = -response.drag_delta().y * 0.05;
-                                    let new_value = (smoothness + delta).clamp(0.5, 10.0);
-                                    setter.begin_set_parameter(&params.smoothness_ms);
-                                    setter.set_parameter(&params.smoothness_ms, new_value);
-                                    setter.end_set_parameter(&params.smoothness_ms);
-                                }
-
-                                ui.add_space(3.0);
-                                ui.label(
-                                    egui::RichText::new(format!("{:.1} ms", smoothness))
-                                        .size(12.0)
-                                        .color(VALUE_TEXT),
-                                );
-                                ui.label(
-                                    egui::RichText::new("Smoothness")
-                                        .size(10.0)
-                                        .color(LABEL_TEXT),
-                                );
-                            });
-                        });
-                    });
-                });
+                // Bypass switch, lit while the effect is on
+                let bypassed = params.bypass.value();
+                led(ui.painter(), origin + vec2(200.0, 418.0), !bypassed);
+                if footswitch(ui, origin + vec2(200.0, 478.0), "bypass").clicked() {
+                    setter.begin_set_parameter(&params.bypass);
+                    setter.set_parameter(&params.bypass, !bypassed);
+                    setter.end_set_parameter(&params.bypass);
+                }
+            });
         },
     )
 }

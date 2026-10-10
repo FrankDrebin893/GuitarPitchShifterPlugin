@@ -1,12 +1,13 @@
 # Audio Plugin Suite
 
-A suite of VST3/CLAP plugins built with Rust and the nih-plug framework. The suite has no brand name yet; the vendor string lives in one place (`crates/suite_common/src/lib.rs`).
+A suite of VST3/CLAP plugins built with Rust and the nih-plug framework. The brand is **HØJT** (Danish for "loud" and "high"). The vendor string is the ASCII form `Hojt Audio` and lives in one place (`crates/suite_common/src/lib.rs`).
 
 ## Layout
 
 - `plugins/pitch_shifter/` - Real-time guitar pitch shifter (effect)
 - `plugins/drums/` - Synthesized drum instrument (full kit, Rock/Jazz/Metal)
-- `crates/suite_common/` - Shared code: `VENDOR` constant, `ui` module (dial widget, theme colours)
+- `crates/suite_common/` - Shared code: `VENDOR` and `BRAND` constants, `ui` module (the pedal look, see Look below)
+- `crates/suite_common/assets/fonts/` - Embedded fonts (SIL OFL) with their licence files
 - `xtask/` - nih-plug bundler
 - `bundler.toml` - Bundle name per plugin package
 
@@ -24,6 +25,10 @@ cargo check --workspace
 
 # Run tests (always run before committing!)
 cargo test --workspace
+
+# Open a plugin's editor as a program, without a DAW (no audio: dummy backend)
+cargo run -p pitch_shifter --features standalone -- --backend dummy
+cargo run -p drums --features standalone -- --backend dummy
 ```
 
 Output location: `target/bundled/<BundleName>.vst3`
@@ -32,8 +37,23 @@ Output location: `target/bundled/<BundleName>.vst3`
 
 Copy VST3 to system folder (requires admin):
 ```
-xcopy /E /I /Y "target\bundled\GuitarPitchShifterPlugin_vX.vst3" "C:\Program Files\Common Files\VST3\GuitarPitchShifterPlugin_vX.vst3"
+xcopy /E /I /Y "target\bundled\HojtPitchShifter.vst3" "C:\Program Files\Common Files\VST3\HojtPitchShifter.vst3"
+xcopy /E /I /Y "target\bundled\HojtDrumSynth.vst3" "C:\Program Files\Common Files\VST3\HojtDrumSynth.vst3"
 ```
+
+## Look
+
+Every plugin is drawn as a painted stompbox. All of it is vector, drawn with egui's painter in
+`crates/suite_common/src/ui/`; there are no image files.
+
+- `theme.rs` - Colours, the three embedded fonts (`install`), text helpers. One paint colour per plugin
+- `widgets.rs` - `param_knob` (fluted knob, name, value on label tape), `footswitch`, `led`,
+  `silk_frame`, `silk_label`, and `badge` (the HØJT logo: the Ø is a knob, its slash the pointer)
+- `frame.rs` - `pedal`: enclosure, screws, jack captions, tilted name band, model number, logo.
+  A plugin describes itself with a `PedalStyle`
+
+Controls are placed at fixed positions relative to the window's top left corner. Knobs: drag up and
+down, Shift for fine steps, double-click for the default.
 
 ## Plugins
 
@@ -43,7 +63,7 @@ Shift guitar audio by semitones (-12 to +12) with minimal latency for live playi
 
 - `src/lib.rs` - Plugin entry point, parameters, nih-plug integration
 - `src/pitch_shifter.rs` - DSP: circular buffer, variable-rate playback, waveform-matched splices
-- `src/editor.rs` - egui GUI with dial controls
+- `src/editor.rs` - egui GUI: orange pedal, three knobs, bypass footswitch
 
 Algorithm:
 
@@ -66,12 +86,13 @@ Both stereo channels share one read head.
 | Semitones | -12 to +12 | 0 | Pitch shift amount |
 | Max Latency | 2-50 ms | 15 ms | Delay limit = longest period that splices cleanly |
 | Smoothness | 0.5-10 ms | 2 ms | Crossfade length at each splice |
+| Bypass | on / off | off | The footswitch. Bypass is a shift of 0 semitones, so it switches without a click |
 
 Actual delay is about one pitch period of the note being played, not the Max Latency value.
 Single notes need Max Latency >= one period of the lowest note (12 ms for low E). Chords have a
 longer combined period (~24 ms for a power chord on low E) and get cleaner at 25-30 ms.
 
-Its CLAP ID, VST3 class ID scheme and bundle name predate the suite and are kept as they were.
+Its CLAP ID and VST3 class ID predate the suite and are kept as they were.
 
 ### Drum Synth (`plugins/drums`)
 
@@ -83,7 +104,7 @@ Fully synthesized drums: no sample files, nothing loaded from disk. MIDI in, ste
 - `src/voices/` - `kick.rs`, `snare.rs`, `tom.rs`, `cymbal.rs`, and `mod.rs` (`Hit`, `Voice`, `VoicePair`)
 - `src/dsp.rs` - Shared building blocks: noise, filters, membrane modes, clippers
 - `src/reverb.rs` - Room: 8-line feedback delay network
-- `src/editor.rs` - egui GUI: kit buttons, dials
+- `src/editor.rs` - egui GUI: teal pedal, knobs, one footswitch per kit
 
 How the voices work:
 
@@ -124,17 +145,24 @@ Not there yet: separate outputs per drum, hi-hat openness from CC4, cymbal choke
 
 1. Create `plugins/<name>/` with a `Cargo.toml` that uses the workspace dependencies (copy `plugins/drums/Cargo.toml`)
 2. Add a `[<name>]` entry to `bundler.toml`
-3. Use `suite_common::VENDOR` and the `suite_common::ui` widgets and colours
+3. Use `suite_common::VENDOR`. In the editor, call `ui::install` in the build closure and draw with
+   `ui::pedal` and a `PedalStyle` (own paint colour in `ui/theme.rs`, model number, ornament)
 4. Pick a unique `VST3_CLASS_ID` (16 bytes) and `CLAP_ID`; DAW projects reference plugins by these
 
 ## Versioning
 
-When iterating on a plugin:
-1. Increment version in `bundler.toml` (e.g. name = "GuitarPitchShifterPlugin_vX")
-2. Update `NAME` constant in `plugins/<name>/src/lib.rs`
-3. Update `VST3_CLASS_ID` in `plugins/<name>/src/lib.rs` (change last digit)
+A new build replaces the old one in place: install it over the old bundle and every DAW project
+picks it up, with its settings. For that to hold, these never change once a plugin is in use:
 
-This allows testing multiple versions side-by-side in DAW.
+- the bundle name in `bundler.toml`
+- `NAME`, `VST3_CLASS_ID` and `CLAP_ID` in `plugins/<name>/src/lib.rs`
+- the `#[id = "..."]` of every existing parameter (adding parameters is fine; removing or renaming
+  an id loses that setting in saved projects)
+
+The version number lives in `Cargo.toml` (`[workspace.package]`) and is what hosts show.
+
+Only to compare two builds side by side in the DAW: temporarily give one of them another bundle
+name, `NAME`, `VST3_CLASS_ID` and `CLAP_ID`, and do not commit that.
 
 ## Testing
 

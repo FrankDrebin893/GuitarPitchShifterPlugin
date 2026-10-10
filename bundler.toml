@@ -1,5 +1,5 @@
 [pitch_shifter]
-name = "GuitarPitchShifterPlugin_v10"
+name = "HojtPitchShifter"
 
 [drums]
-name = "DrumSynth_v2"
+name = "HojtDrumSynth"

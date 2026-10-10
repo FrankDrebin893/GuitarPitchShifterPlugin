@@ -6,4 +6,5 @@ authors.workspace = true
 license-file.workspace = true
 
 [dependencies]
+nih_plug = { workspace = true }
 nih_plug_egui = { workspace = true }

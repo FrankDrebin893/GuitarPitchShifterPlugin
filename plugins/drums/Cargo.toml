@@ -6,7 +6,17 @@ authors.workspace = true
 license-file.workspace = true
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
+
+# Runs the plugin as a program, for working on the editor without a DAW:
+# cargo run -p drums --features standalone
+[features]
+standalone = ["nih_plug/standalone"]
+
+[[bin]]
+name = "drums_standalone"
+path = "src/main.rs"
+required-features = ["standalone"]
 
 [dependencies]
 nih_plug = { workspace = true }

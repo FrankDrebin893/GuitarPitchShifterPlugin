@@ -13,7 +13,8 @@ pub struct GuitarPitchShifterPlugin {
 
 #[derive(Params)]
 pub struct GuitarPitchShifterParams {
-    #[persist = "editor-state"]
+    // Key changed with the pedal layout, so that projects saved with the old window size open at the new one
+    #[persist = "editor-state-pedal"]
     pub editor_state: Arc<EguiState>,
 
     #[id = "semitones"]
@@ -24,6 +25,9 @@ pub struct GuitarPitchShifterParams {
 
     #[id = "smoothness"]
     pub smoothness_ms: FloatParam,
+
+    #[id = "bypass"]
+    pub bypass: BoolParam,
 }
 
 impl Default for GuitarPitchShifterPlugin {
@@ -70,12 +74,14 @@ impl Default for GuitarPitchShifterParams {
             )
             .with_unit(" ms")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
+
+            bypass: BoolParam::new("Bypass", false).make_bypass(),
         }
     }
 }
 
 impl Plugin for GuitarPitchShifterPlugin {
-    const NAME: &'static str = "Guitar Pitch Shifter v10";
+    const NAME: &'static str = "Hojt Pitch Shifter";
     const VENDOR: &'static str = suite_common::VENDOR;
     const URL: &'static str = "";
     const EMAIL: &'static str = "";
@@ -130,7 +136,10 @@ impl Plugin for GuitarPitchShifterPlugin {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        self.pitch_shifter.set_semitones(self.params.semitones.value());
+        // Bypass is a shift of 0 semitones: the shifter settles on its minimum delay
+        // and then passes the input through bit-exactly, without a click
+        let semitones = if self.params.bypass.value() { 0 } else { self.params.semitones.value() };
+        self.pitch_shifter.set_semitones(semitones);
         self.pitch_shifter.set_latency_ms(self.params.latency_ms.value());
         self.pitch_shifter.set_smoothness_ms(self.params.smoothness_ms.value());
 
@@ -167,6 +176,7 @@ impl ClapPlugin for GuitarPitchShifterPlugin {
 }
 
 impl Vst3Plugin for GuitarPitchShifterPlugin {
+    // Frozen: DAW projects find the plugin by this ID. Never change it
     const VST3_CLASS_ID: [u8; 16] = *b"GuitarPShift0010";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
         Vst3SubCategory::Fx,

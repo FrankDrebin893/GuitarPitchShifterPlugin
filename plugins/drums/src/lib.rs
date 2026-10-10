@@ -23,7 +23,8 @@ pub struct DrumSynthPlugin {
 
 #[derive(Params)]
 pub struct DrumSynthParams {
-    #[persist = "editor-state"]
+    // Key changed with the pedal layout, so that projects saved with the old window size open at the new one
+    #[persist = "editor-state-pedal"]
     pub editor_state: Arc<EguiState>,
 
     #[id = "kit"]
@@ -119,7 +120,7 @@ fn percent_param(name: &str, default: f32) -> FloatParam {
 }
 
 impl Plugin for DrumSynthPlugin {
-    const NAME: &'static str = "Drum Synth v2";
+    const NAME: &'static str = "Hojt Drum Synth";
     const VENDOR: &'static str = suite_common::VENDOR;
     const URL: &'static str = "";
     const EMAIL: &'static str = "";
@@ -222,6 +223,7 @@ impl ClapPlugin for DrumSynthPlugin {
 }
 
 impl Vst3Plugin for DrumSynthPlugin {
+    // Frozen: DAW projects find the plugin by this ID. Never change it
     const VST3_CLASS_ID: [u8; 16] = *b"SuiteDrumSyn0002";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
         Vst3SubCategory::Instrument,
