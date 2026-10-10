@@ -2,8 +2,13 @@ use nih_plug::prelude::*;
 use nih_plug_egui::EguiState;
 use std::sync::Arc;
 
+mod amp;
+mod cab;
 mod chain;
+mod dsp;
 mod editor;
+#[cfg(test)]
+mod test_util;
 use chain::{AmpChain, AmpSettings};
 
 const LEVEL_MIN_DB: f32 = -30.0;
