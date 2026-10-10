@@ -6,7 +6,7 @@ use crate::cab::{design_ir, CabVoicing, Cabinet};
 use crate::delay::{Delay, DelaySettings};
 use crate::drive::Drive;
 use crate::dsp::filters::DcBlocker;
-use crate::dsp::oversample::{Oversampler, FACTOR};
+use crate::dsp::oversample::{factor_for, Oversampler, MAX_FACTOR};
 use crate::dsp::shaper::output_clip;
 use crate::dsp::{curve, db_to_gain, smoothing_coeff, Ramp};
 use crate::gate::Gate;
@@ -14,7 +14,8 @@ use crate::reverb::{Reverb, ReverbSettings};
 
 // The chain works in pieces of at most this many samples, and reads the dials once per piece
 const CHUNK: usize = 32;
-const OVERSAMPLED_CHUNK: usize = CHUNK * FACTOR;
+// Room for a piece at the highest oversampled rate
+const OVERSAMPLED_CHUNK: usize = CHUNK * MAX_FACTOR;
 
 // How fast the chain follows a dial
 const DIAL_SMOOTH_MS: f32 = 20.0;
@@ -176,6 +177,9 @@ impl Dials {
 /// The whole signal chain. Mono through the amp and cabinet, stereo from the delay on
 pub struct AmpChain {
     sample_rate: f32,
+    // How many times the drive and the amp run faster than the host: 4 at the usual sample
+    // rates, 2 from 88.2 kHz on
+    factor: usize,
     // The amp the stages are set up as, and the one the settings ask for
     amp: Amp,
     wanted_amp: Amp,
@@ -232,6 +236,7 @@ impl AmpChain {
     pub fn new() -> Self {
         let mut chain = Self {
             sample_rate: 44100.0,
+            factor: MAX_FACTOR,
             amp: Amp::Brol,
             wanted_amp: Amp::Brol,
             in_gain: Ramp::new(1.0),
@@ -278,8 +283,10 @@ impl AmpChain {
         self.amp_fade_len = ((AMP_FADE_MS * 0.001 * sample_rate).round() as u32).max(1);
         self.cab_fade_steps = ((CAB_FADE_MS * 0.001 * sample_rate).round() as u32).max(1);
 
+        self.factor = factor_for(sample_rate);
+        self.oversampler.set_factor(self.factor);
         self.gate.set_sample_rate(sample_rate);
-        self.drive.configure(sample_rate * FACTOR as f32);
+        self.drive.configure(self.oversampled_rate());
         self.delay.set_sample_rate(sample_rate);
         self.reverb.set_sample_rate(sample_rate);
 
@@ -289,6 +296,16 @@ impl AmpChain {
 
         self.configure_amp();
         self.reset();
+    }
+
+    /// The rate the drive and the amp run at
+    fn oversampled_rate(&self) -> f32 {
+        self.sample_rate * self.factor as f32
+    }
+
+    /// Samples at that rate in a piece of `CHUNK`: the time the stages take to follow a dial
+    fn oversampled_chunk(&self) -> u32 {
+        (CHUNK * self.factor) as u32
     }
 
     /// Moves towards the amp the settings ask for. Does not allocate. While the amp is heard
@@ -321,7 +338,7 @@ impl AmpChain {
 
     fn configure_amp(&mut self) {
         let model = self.amp.model();
-        let oversampled_rate = self.sample_rate * FACTOR as f32;
+        let oversampled_rate = self.oversampled_rate();
         self.preamp.configure(model, oversampled_rate);
         self.power.configure(&model.power, oversampled_rate);
         self.tone_applied = [f32::NAN; 3];
@@ -432,7 +449,7 @@ impl AmpChain {
             self.dials.drive_gain,
             self.dials.drive_tone,
             self.dials.drive_level,
-            OVERSAMPLED_CHUNK as u32,
+            self.oversampled_chunk(),
         );
         let cab_target = if settings.cab_on { 1.0 } else { 0.0 };
         if cab_target != self.cab_mix.target() {
@@ -456,19 +473,19 @@ impl AmpChain {
     /// up as reads them
     fn apply_dials(&mut self, snap: bool) {
         let model = self.amp.model();
-        self.preamp.set_gain(model, self.dials.gain, OVERSAMPLED_CHUNK as u32);
+        self.preamp.set_gain(model, self.dials.gain, self.oversampled_chunk());
         self.power.set_master(
             &model.power,
             self.dials.master,
             curve(&model.makeup_db, self.dials.gain),
-            OVERSAMPLED_CHUNK as u32,
+            self.oversampled_chunk(),
         );
         if snap {
             self.preamp.snap();
             self.power.snap();
         }
 
-        let oversampled_rate = self.sample_rate * FACTOR as f32;
+        let oversampled_rate = self.oversampled_rate();
         let tone = [self.dials.bass, self.dials.mid, self.dials.treble];
         if tone != self.tone_applied {
             self.tone.set(&ToneCurve::new(&model.tone, tone[0], tone[1], tone[2], oversampled_rate));
@@ -550,7 +567,7 @@ impl AmpChain {
         self.gate.process(&heard[..len], &mut signal[..len]);
 
         let mut oversampled = [0.0f32; OVERSAMPLED_CHUNK];
-        let high = &mut oversampled[..len * FACTOR];
+        let high = &mut oversampled[..len * self.factor];
         self.oversampler.upsample(&signal[..len], high);
         self.drive.process(high);
         self.preamp.process(high);
@@ -809,17 +826,106 @@ mod tests {
     }
 
     fn aliasing_db_with(settings: &AmpSettings, freq_hz: f32) -> f64 {
-        let input = sine(freq_hz, 0.178, SAMPLE_RATE, 36_000);
-        let output = run(settings, &input, SAMPLE_RATE);
-        fit_partials(&output[12_000..], SAMPLE_RATE, &harmonics_of(freq_hz, SAMPLE_RATE)).1
+        aliasing_db_at(settings, freq_hz, SAMPLE_RATE)
+    }
+
+    /// Three quarters of a second of the tone, the last half second measured
+    fn aliasing_db_at(settings: &AmpSettings, freq_hz: f32, sample_rate: f32) -> f64 {
+        let len = (0.75 * sample_rate) as usize;
+        let input = sine(freq_hz, 0.178, sample_rate, len);
+        let output = run(settings, &input, sample_rate);
+        fit_partials(&output[len / 3..], sample_rate, &harmonics_of(freq_hz, sample_rate)).1
+    }
+
+    const STAGE_NAMES: [&str; 11] = [
+        "gate", "up", "drive", "preamp", "tone", "power", "down", "cabinet", "delay", "reverb", "output",
+    ];
+
+    /// Time each stage of the chain takes by itself over `input`, in the order of
+    /// `STAGE_NAMES`, in ns per sample at the host's rate. The stages are the chain's own,
+    /// set up by playing through it first, and run in pieces of `CHUNK` samples as there
+    fn stage_times_ns(settings: &AmpSettings, input: &[f32], sample_rate: f32) -> Vec<f64> {
+        let mut chain = new_chain(sample_rate);
+        run_stereo_blocks(&mut chain, settings, &input[..input.len() / 4], BLOCK);
+        let factor = chain.factor;
+        let len = input.len();
+        let mut times = Vec::new();
+        let mut timed = |work: &mut dyn FnMut()| {
+            let start = Instant::now();
+            work();
+            times.push(start.elapsed().as_secs_f64() * 1e9 / len as f64);
+        };
+
+        let mut signal = input.to_vec();
+        timed(&mut || {
+            for (heard, chunk) in input.chunks(CHUNK).zip(signal.chunks_mut(CHUNK)) {
+                for sample in chunk.iter_mut() {
+                    *sample *= chain.in_gain.next();
+                }
+                chain.gate.process(heard, chunk);
+            }
+        });
+        let mut high = vec![0.0; len * factor];
+        timed(&mut || {
+            for (chunk, high_chunk) in signal.chunks(CHUNK).zip(high.chunks_mut(CHUNK * factor)) {
+                chain.oversampler.upsample(chunk, high_chunk);
+            }
+        });
+        timed(&mut || high.chunks_mut(CHUNK * factor).for_each(|chunk| chain.drive.process(chunk)));
+        timed(&mut || high.chunks_mut(CHUNK * factor).for_each(|chunk| chain.preamp.process(chunk)));
+        timed(&mut || high.chunks_mut(CHUNK * factor).for_each(|chunk| chain.tone.process(chunk)));
+        timed(&mut || high.chunks_mut(CHUNK * factor).for_each(|chunk| chain.power.process(chunk)));
+        timed(&mut || {
+            for (high_chunk, chunk) in high.chunks(CHUNK * factor).zip(signal.chunks_mut(CHUNK)) {
+                chain.oversampler.downsample(high_chunk, chunk);
+            }
+        });
+        timed(&mut || {
+            for chunk in signal.chunks_mut(CHUNK) {
+                chain.cabinet.process(chunk);
+                chain.cab_voicing.process(chunk);
+            }
+        });
+
+        // The output stage is in two parts, around the effects: the DC blocker and the
+        // split into two channels, then the output level and the safety clip
+        let (mut left, mut right) = (vec![0.0; len], vec![0.0; len]);
+        let start = Instant::now();
+        for ((sample, l), r) in signal.iter().zip(left.iter_mut()).zip(right.iter_mut()) {
+            *l = chain.dc.process(*sample);
+            *r = *l;
+        }
+        let split_ns = start.elapsed().as_secs_f64() * 1e9 / len as f64;
+        timed(&mut || {
+            for (l, r) in left.chunks_mut(CHUNK).zip(right.chunks_mut(CHUNK)) {
+                chain.delay.process(&settings.delay, l, r);
+            }
+        });
+        timed(&mut || {
+            for (l, r) in left.chunks_mut(CHUNK).zip(right.chunks_mut(CHUNK)) {
+                chain.reverb.process(&settings.reverb, l, r);
+            }
+        });
+        timed(&mut || {
+            for (l, r) in left.iter_mut().zip(right.iter_mut()) {
+                let level = chain.out_level.next();
+                *l = output_clip(*l * level);
+                *r = output_clip(*r * level);
+            }
+        });
+        std::hint::black_box((&left, &right));
+        *times.last_mut().unwrap() += split_ns;
+        times
     }
 
     /// The amp and its cabinet put together from their parts, with nothing else around
     /// them: what the chain was before it had pedals and effects
     fn amp_alone(settings: &AmpSettings, input: &[f32], sample_rate: f32) -> Vec<f32> {
         let model = settings.amp.model();
-        let oversampled_rate = sample_rate * FACTOR as f32;
+        let factor = factor_for(sample_rate);
+        let oversampled_rate = sample_rate * factor as f32;
         let mut oversampler = Oversampler::new();
+        oversampler.set_factor(factor);
         let mut preamp = Preamp::new();
         preamp.configure(model, oversampled_rate);
         preamp.reset();
@@ -837,7 +943,7 @@ mod tests {
         let mut dc = DcBlocker::new();
         dc.set_sample_rate(sample_rate);
 
-        let mut high = vec![0.0; input.len() * FACTOR];
+        let mut high = vec![0.0; input.len() * factor];
         oversampler.upsample(input, &mut high);
         preamp.process(&mut high);
         tone.process(&mut high);
@@ -1097,6 +1203,29 @@ mod tests {
             assert!(low < limits[0], "{:?}: {:.1} dB at {} Hz", amp, low, ALIAS_TONES_HZ[0]);
             assert!(high < limits[1], "{:?}: {:.1} dB at {} Hz", amp, high, ALIAS_TONES_HZ[1]);
         }
+    }
+
+    #[test]
+    fn test_twice_oversampled_at_96_khz_sounds_like_48_khz_and_aliases_as_little() {
+        // From 88.2 kHz on the amp runs at twice the host's rate, not four times
+        assert_eq!(new_chain(48000.0).factor, 4);
+        assert_eq!(new_chain(88200.0).factor, 2);
+        assert_eq!(new_chain(96000.0).factor, 2);
+
+        let settings = with_drive(Amp::Torden, 1.0, 0.3, 0.5, 0.8);
+        let measure = |sample_rate: f32| {
+            let output = run(&settings, &same_chords(sample_rate, 0.5), sample_rate);
+            let mut levels = vec![to_db(rms(&output))];
+            levels.extend(band_levels_db(&output, sample_rate));
+            levels
+        };
+        let (low, high) = (measure(SAMPLE_RATE), measure(96000.0));
+        for (index, (a, b)) in low.iter().zip(&high).enumerate() {
+            assert!((a - b).abs() < 0.5, "Level {}: {:.2} dB at 48 kHz, {:.2} dB at 96 kHz", index, a, b);
+        }
+
+        let aliasing = aliasing_db_at(&settings, ALIAS_TONES_HZ[1], 96000.0);
+        assert!(aliasing < -70.0, "Aliasing at 96 kHz: {:.1} dB", aliasing);
     }
 
     #[test]
@@ -2368,13 +2497,13 @@ mod tests {
         for amp in Amp::ALL {
             print!("{:<8}", amp.model().name);
             for step in 0..=4 {
-                let oversampled_rate = SAMPLE_RATE * FACTOR as f32;
+                let oversampled_rate = SAMPLE_RATE * MAX_FACTOR as f32;
                 let mut oversampler = Oversampler::new();
                 let mut preamp = Preamp::new();
                 preamp.configure(amp.model(), oversampled_rate);
                 preamp.reset();
                 preamp.set_gain(amp.model(), step as f32 * 0.25, 0);
-                let mut high = vec![0.0; 96_000 * FACTOR];
+                let mut high = vec![0.0; 96_000 * MAX_FACTOR];
                 oversampler.upsample(&chords[..96_000], &mut high);
                 preamp.process(&mut high);
                 print!("{:>8.1}", to_db(rms(&high)));
@@ -2542,8 +2671,8 @@ mod tests {
         println!("the chords against the pedal switched off, and the chords per band relative to the whole");
         let pedal_alone = |drive: f32, tone: f32, level: f32, input: &[f32]| {
             let mut oversampler = Oversampler::new();
-            let mut pedal = new_drive(SAMPLE_RATE * FACTOR as f32, drive, tone, level);
-            let mut high = vec![0.0; input.len() * FACTOR];
+            let mut pedal = new_drive(SAMPLE_RATE * MAX_FACTOR as f32, drive, tone, level);
+            let mut high = vec![0.0; input.len() * MAX_FACTOR];
             oversampler.upsample(input, &mut high);
             pedal.process(&mut high);
             let mut output = vec![0.0; input.len()];
@@ -2976,6 +3105,108 @@ mod tests {
         time_ns("AsymClipper", &mut |x| clipper.process(x));
         time_ns("AsymClipper, 2nd order", &mut |x| second.process(x));
         time_ns("tanh", &mut |x| x.tanh());
+
+        println!();
+        println!("Aliasing per sample rate at Gain 10 (and Torden with the drive at 3, 5, 8 in front): the");
+        println!("1245 Hz and the 4186 Hz tone, energy not at harmonics up to half the rate, dB below the total");
+        let rates = [44100.0, 48000.0, 96000.0, 192000.0];
+        print!("{:<22}", "");
+        for sample_rate in rates {
+            print!("{:>18}", sample_rate);
+        }
+        println!();
+        let alias_rows = [
+            ("Klar 10.0".to_string(), with_amp(Amp::Klar, 1.0)),
+            ("Brøl 10.0".to_string(), with_amp(Amp::Brol, 1.0)),
+            ("Torden 10.0".to_string(), with_amp(Amp::Torden, 1.0)),
+            ("Torden 10.0 drive".to_string(), with_drive(Amp::Torden, 1.0, 0.3, 0.5, 0.8)),
+            ("Torden 10.0 drive 10s".to_string(), with_drive(Amp::Torden, 1.0, 1.0, 1.0, 1.0)),
+        ];
+        for (name, settings) in &alias_rows {
+            print!("{:<22}", name);
+            for sample_rate in rates {
+                let levels = ALIAS_TONES_HZ.map(|freq_hz| aliasing_db_at(settings, freq_hz, sample_rate));
+                print!("{:>18}", format!("{:.1} / {:.1}", levels[0], levels[1]));
+            }
+            println!();
+        }
+
+        println!();
+        println!("The same sound at every sample rate: chords put together from sines (RMS in dBFS and octave");
+        println!("bands in dB relative to the whole signal) and the 220 Hz sine (THD in dB). `off` is the");
+        println!("largest difference from the 48 kHz row in the levels and in the THD");
+        print!("{:<20}{:>8}{:>8}{:>8}", "", "Hz", "RMS", "THD");
+        for edge in &BAND_EDGES_HZ[..BAND_EDGES_HZ.len() - 1] {
+            print!("{:>7}", edge);
+        }
+        println!("{:>14}", "off");
+        let rate_rows = [
+            ("Klar 5.0".to_string(), with_amp(Amp::Klar, 0.5)),
+            ("Brøl 5.0".to_string(), with_amp(Amp::Brol, 0.5)),
+            ("Torden 5.0".to_string(), with_amp(Amp::Torden, 0.5)),
+            ("Torden 10.0 drive".to_string(), with_drive(Amp::Torden, 1.0, 0.3, 0.5, 0.8)),
+        ];
+        for (name, settings) in &rate_rows {
+            let measure = |sample_rate: f32| {
+                let chords_out = run(settings, &same_chords(sample_rate, 3.0), sample_rate);
+                let half = (0.5 * sample_rate) as usize;
+                let tone_out = run(settings, &sine(220.0, 0.178, sample_rate, 2 * half), sample_rate);
+                let mut levels = vec![to_db(rms(&chords_out))];
+                levels.extend(band_levels_db(&chords_out, sample_rate));
+                (levels, thd_db(&tone_out[half..], sample_rate, 220.0))
+            };
+            let reference = measure(SAMPLE_RATE);
+            for sample_rate in rates {
+                let (levels, thd) = measure(sample_rate);
+                print!("{:<20}{:>8}{:>8.1}{:>8.1}", name, sample_rate, levels[0], thd);
+                for level in &levels[1..] {
+                    print!("{:>7.1}", level);
+                }
+                let off = levels.iter().zip(&reference.0).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+                println!("{:>14}", format!("{:.2} / {:.2}", off, (thd - reference.1).abs()));
+            }
+        }
+
+        println!();
+        println!("Time per stage: Torden, Gain 10, everything on, default delay and reverb, stereo. Each stage");
+        println!("is run by itself over two seconds of chords in pieces of {} samples; the fastest of seven", CHUNK);
+        println!("runs, in ns per sample at the host's rate and as a share of real time. `whole` is the chain");
+        println!("itself (median block)");
+        let profile_settings = with_default_effects(everything_on(Amp::Torden, 1.0));
+        let mut profile = Vec::new();
+        for sample_rate in [48000.0, 96000.0, 192000.0] {
+            let chords = power_chords(sample_rate, 2.0);
+            // The fastest run is the one the rest of the machine disturbed least
+            let runs: Vec<Vec<f64>> = (0..7).map(|_| stage_times_ns(&profile_settings, &chords, sample_rate)).collect();
+            let medians: Vec<f64> = (0..STAGE_NAMES.len())
+                .map(|stage| runs.iter().map(|run| run[stage]).fold(f64::MAX, f64::min))
+                .collect();
+            let mut chain = new_chain(sample_rate);
+            run_stereo_blocks(&mut chain, &profile_settings, &chords, BLOCK);
+            let whole = block_time_stereo_us(&mut chain, &profile_settings, &chords) * 1000.0 / BLOCK as f64;
+            profile.push((sample_rate, medians, whole));
+        }
+        print!("{:<10}", "");
+        for (sample_rate, _, _) in &profile {
+            print!("{:>16} Hz", sample_rate);
+        }
+        println!();
+        let share = |ns: f64, sample_rate: f32| ns * 1e-9 * sample_rate as f64 * 100.0;
+        for (stage, name) in STAGE_NAMES.iter().enumerate() {
+            print!("{:<10}", name);
+            for (sample_rate, medians, _) in &profile {
+                print!("{:>8.1} ns{:>6.2} %", medians[stage], share(medians[stage], *sample_rate));
+            }
+            println!();
+        }
+        for (name, pick) in [("sum", 0), ("whole", 1)] {
+            print!("{:<10}", name);
+            for (sample_rate, medians, whole) in &profile {
+                let ns = if pick == 0 { medians.iter().sum::<f64>() } else { *whole };
+                print!("{:>8.1} ns{:>6.2} %", ns, share(ns, *sample_rate));
+            }
+            println!();
+        }
     }
 
     /// Writes WAV files to target/renders for listening: a direct guitar signal, dry and

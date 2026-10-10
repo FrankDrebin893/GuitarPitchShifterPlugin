@@ -264,6 +264,40 @@ pub fn power_chords(sample_rate: f32, seconds: f32) -> Vec<f32> {
     recording
 }
 
+// The highest partial of `same_chords`
+const SAME_CHORDS_TOP_HZ: f32 = 6000.0;
+
+/// A power chord struck every half second, put together from decaying sines, so it is the
+/// same sound at every sample rate (a plucked string from `pluck` is not: its delay line
+/// has another length). For comparing what the amp does at one rate and at another. At
+/// -18 dBFS RMS
+pub fn same_chords(sample_rate: f32, seconds: f32) -> Vec<f32> {
+    let len = (seconds * sample_rate) as usize;
+    let mut recording = vec![0.0f64; len];
+    for (string, &freq) in POWER_CHORD_HZ.iter().enumerate() {
+        let mut harmonic = 1;
+        while freq * (harmonic as f32) < SAME_CHORDS_TOP_HZ {
+            let partial_hz = (freq * harmonic as f32) as f64;
+            // Higher partials are weaker and die sooner
+            let level = 1.0 / harmonic as f64;
+            let decay_per_s = 1.5 + 0.004 * partial_hz;
+            for (index, sample) in recording.iter_mut().enumerate() {
+                let time = index as f64 / sample_rate as f64;
+                let since_strike = (time - string as f64 * 0.004).rem_euclid(0.5);
+                // Two milliseconds to rise, the last ten of the half second to fall
+                let attack = (since_strike / 0.002).min(1.0);
+                let release = ((0.5 - since_strike) / 0.01).min(1.0);
+                let shape = attack * attack * (3.0 - 2.0 * attack) * release * release * (3.0 - 2.0 * release);
+                *sample += level * shape * (-decay_per_s * since_strike).exp() * (TAU * partial_hz * since_strike).sin();
+            }
+            harmonic += 1;
+        }
+    }
+    let mut recording: Vec<f32> = recording.iter().map(|&sample| sample as f32).collect();
+    set_rms_db(&mut recording, -18.0);
+    recording
+}
+
 // Roots of the lowest power chords in two drop tunings
 const DROP_ROOTS_HZ: [f32; 2] = [65.41, 73.42];
 const PALM_MUTE_STEP_S: f32 = 0.15;
