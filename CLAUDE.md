@@ -55,6 +55,39 @@ Every plugin is drawn as a painted stompbox. All of it is vector, drawn with egu
 Controls are placed at fixed positions relative to the window's top left corner. Knobs: drag up and
 down, Shift for fine steps, double-click for the default.
 
+### Style guide
+
+Every plugin, existing and new, follows these. Copy `plugins/pitch_shifter/src/editor.rs` (few
+controls, portrait) or `plugins/drums/src/editor.rs` (many controls, landscape) as the starting point.
+
+- **One pedal per plugin.** The whole window is one enclosure from `ui::pedal`. No panels, tabs,
+  menus or default egui widgets on top of it
+- **Paint:** each plugin has its own saturated paint colour, a `PAINT_*` constant in `theme.rs`.
+  Taken: orange (Pitch Shifter), teal (Drum Synth). A new one must be clearly different from those
+  and dark enough for cream print to read on it
+- **Print on the paint is always `SILK` (cream).** Black is only for knobs, label tape and the logo plate.
+  `BRAND_ORANGE` is only the pointer in the logo
+- **Fonts, by role:** `display` (Bebas Neue) for every caption, in capitals; `model` (Bowlby One SC)
+  only for the name on the band; `mono` (IBM Plex Mono) only for values on label tape
+- **Top to bottom:** jack captions, knobs, name band, footswitches. Model number bottom left and
+  the logo badge bottom right come from `ui::pedal` and stay there
+- **Knobs:** every continuous parameter is a `param_knob`. Radius about 48 for the one main control,
+  about 30 for normal ones, about 19 for a row of secondary ones inside a `silk_frame` with a title.
+  The value is always shown on label tape under the name, formatted by the parameter itself
+- **Footswitches:** every on/off or pick-one-of-few parameter is a `footswitch` with an `led` above
+  it (lit = on or selected) and, when there are several, a `silk_label` below
+- **Name band:** the plugin's plain name (what it does, two short words), with an `Ornament` that
+  hints at it. Add a new `Ornament` variant in `frame.rs` for a new plugin
+- **Model number:** two letters from the name and a number, like `PS-10` and `DS-2`. It is print,
+  not the version, and does not change with releases
+- **Jack captions** say what really goes in and out (`In`, `MIDI In`, `Stereo Out`)
+- **Window size:** fixed, sized to the controls. Portrait about 400 wide for up to four controls,
+  landscape about 660 wide for more
+- **Clean factory paint:** no wear, textures, gradients or images
+- **New shared pieces go in `suite_common::ui`,** not in a plugin's editor, so every plugin gets them
+
+After changing an editor, run it standalone (see Build Commands) and look at it before bundling.
+
 ## Plugins
 
 ### Pitch Shifter (`plugins/pitch_shifter`)
