@@ -5,10 +5,14 @@ use std::sync::Arc;
 mod amp;
 mod cab;
 mod chain;
+#[allow(dead_code)]
+mod delay;
 mod drive;
 mod dsp;
 mod editor;
 mod gate;
+#[allow(dead_code)]
+mod reverb;
 #[cfg(test)]
 mod test_util;
 pub use amp::model::Amp;
