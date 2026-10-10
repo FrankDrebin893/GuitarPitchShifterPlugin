@@ -25,7 +25,7 @@ const MINI_CORNER_RADIUS: f32 = 14.0;
 const MINI_SCREW_INSET: f32 = 13.0;
 const MINI_SCREW_SCALE: f32 = 0.75;
 // Centre of the title, from the top of the mini pedal
-const MINI_TITLE_Y: f32 = 36.0;
+const MINI_TITLE_Y: f32 = 30.0;
 
 /// Drawing printed at both ends of the name band
 #[derive(Clone, Copy, PartialEq)]

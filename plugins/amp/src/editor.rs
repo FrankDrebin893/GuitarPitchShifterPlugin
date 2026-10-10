@@ -1,15 +1,17 @@
 use nih_plug::prelude::*;
-use nih_plug_egui::egui::{vec2, Rect};
+use nih_plug_egui::egui::{vec2, Rect, Vec2};
 use nih_plug_egui::{create_egui_editor, EguiState};
 use std::sync::Arc;
-use suite_common::ui::{self, led, param_knob, silk_label, small_footswitch, Ornament, PedalStyle, BENCH_MARGIN};
+use suite_common::ui::{
+    self, led, param_knob, param_switch, silk_label, small_footswitch, Ornament, PedalStyle, BENCH_MARGIN,
+};
 
 use crate::{Amp, GuitarAmpParams};
 
 const WINDOW_WIDTH: u32 = 960;
-const WINDOW_HEIGHT: u32 = 340;
+const WINDOW_HEIGHT: u32 = 660;
 
-// The head keeps this height when the window grows for the pedals below it
+// The head across the top, the pedalboard in the rest of the window below it
 const HEAD_HEIGHT: f32 = 320.0;
 
 const STYLE: PedalStyle = PedalStyle {
@@ -37,6 +39,25 @@ const CAPTION_OFFSET: f32 = -58.0;
 const LED_Y: f32 = 275.0;
 const CAPTION_Y: f32 = 301.0;
 const CAPTION_SIZE: f32 = 17.0;
+
+// The pedalboard: five slots in signal order, left to right
+const PEDAL_SLOTS: usize = 5;
+const PEDAL_TOP: f32 = BENCH_MARGIN + HEAD_HEIGHT + BENCH_MARGIN;
+const PEDAL_WIDTH: f32 = (WINDOW_WIDTH as f32 - BENCH_MARGIN) / PEDAL_SLOTS as f32 - BENCH_MARGIN;
+const PEDAL_HEIGHT: f32 = WINDOW_HEIGHT as f32 - BENCH_MARGIN - PEDAL_TOP;
+
+// On every pedal, from its top centre: the LED under the title, the knobs, the switch at the bottom.
+// Two knobs sit side by side. Three do not fit in a row, so they are smaller and in a triangle,
+// with the LED between the upper two
+const PEDAL_LED: Vec2 = vec2(0.0, 71.0);
+const PEDAL_SWITCH: Vec2 = vec2(0.0, 273.0);
+const PAIR_RADIUS: f32 = 24.0;
+const PAIR_KNOBS: [Vec2; 2] = [vec2(-45.0, 144.0), vec2(45.0, 144.0)];
+const TRIO_RADIUS: f32 = 17.0;
+const TRIO_KNOBS: [Vec2; 3] = [vec2(-45.0, 71.0), vec2(45.0, 71.0), vec2(0.0, 169.0)];
+
+/// One pedal of the board: its title, its switch and up to three knobs with their captions
+type Pedal<'a> = (&'a str, &'a BoolParam, &'a [(&'a FloatParam, &'a str)]);
 
 pub fn default_state() -> Arc<EguiState> {
     EguiState::from_size(WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -87,6 +108,35 @@ pub fn create(params: Arc<GuitarAmpParams>, editor_state: Arc<EguiState>) -> Opt
                     setter.begin_set_parameter(&params.bypass);
                     setter.set_parameter(&params.bypass, !bypassed);
                     setter.end_set_parameter(&params.bypass);
+                }
+
+                let pedals: [Pedal; 3] = [
+                    (
+                        "Gate",
+                        &params.gate_on,
+                        &[(&params.in_gain, "Input"), (&params.gate_thresh, "Thresh"), (&params.gate_release, "Release")],
+                    ),
+                    (
+                        "Drive",
+                        &params.drive_on,
+                        &[(&params.drive_gain, "Drive"), (&params.drive_tone, "Tone"), (&params.drive_level, "Level")],
+                    ),
+                    ("Cab", &params.cab_on, &[(&params.cab_mic, "Mic"), (&params.cab_res, "Res")]),
+                ];
+                for (slot, (title, on, knobs)) in pedals.into_iter().enumerate() {
+                    let left = BENCH_MARGIN + (PEDAL_WIDTH + BENCH_MARGIN) * slot as f32;
+                    let rect = Rect::from_min_size(origin + vec2(left, PEDAL_TOP), vec2(PEDAL_WIDTH, PEDAL_HEIGHT));
+                    let top = ui::mini_pedal(ui, rect, STYLE.paint, title).center_top();
+
+                    let (radius, places) = if knobs.len() > PAIR_KNOBS.len() {
+                        (TRIO_RADIUS, &TRIO_KNOBS[..])
+                    } else {
+                        (PAIR_RADIUS, &PAIR_KNOBS[..])
+                    };
+                    for (&(param, caption), &offset) in knobs.iter().zip(places) {
+                        param_knob(ui, setter, param, top + offset, radius, caption, None);
+                    }
+                    param_switch(ui, setter, on, top + PEDAL_SWITCH, top + PEDAL_LED);
                 }
             });
         },

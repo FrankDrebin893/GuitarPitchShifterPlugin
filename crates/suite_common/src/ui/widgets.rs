@@ -1,4 +1,4 @@
-use nih_plug::prelude::{Param, ParamSetter};
+use nih_plug::prelude::{BoolParam, Param, ParamSetter};
 use nih_plug_egui::egui::{
     vec2, Align2, Color32, CornerRadius, Id, Painter, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2,
 };
@@ -158,6 +158,17 @@ pub fn footswitch(ui: &mut Ui, center: Pos2, id_source: &str) -> Response {
 /// The smaller stomp switch of a head or a mini pedal. Returns the click response.
 pub fn small_footswitch(ui: &mut Ui, center: Pos2, id_source: &str) -> Response {
     stomp_switch(ui, center, id_source, SMALL_FOOTSWITCH_SIZE)
+}
+
+/// Small stomp switch with its LED, bound to an on/off parameter: lit while it is on, a click toggles it
+pub fn param_switch(ui: &mut Ui, setter: &ParamSetter, param: &BoolParam, switch_center: Pos2, led_center: Pos2) {
+    let on = param.value();
+    led(ui.painter(), led_center, on);
+    if small_footswitch(ui, switch_center, param.name()).clicked() {
+        setter.begin_set_parameter(param);
+        setter.set_parameter(param, !on);
+        setter.end_set_parameter(param);
+    }
 }
 
 /// Stomp switch `size` across. The measures in here are those of the full-size one

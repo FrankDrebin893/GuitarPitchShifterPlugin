@@ -24,12 +24,39 @@ pub struct GuitarAmpPlugin {
 // The full table of ids, including the ones not added yet, is in docs/amp-progress.md
 #[derive(Params)]
 pub struct GuitarAmpParams {
-    #[persist = "editor-state"]
+    #[persist = "editor-state-rig"]
     pub editor_state: Arc<EguiState>,
 
     #[id = "bypass"]
     pub bypass: BoolParam,
 
+    // Input and gate
+    #[id = "in_gain"]
+    pub in_gain: FloatParam,
+
+    #[id = "gate_on"]
+    pub gate_on: BoolParam,
+
+    #[id = "gate_thresh"]
+    pub gate_thresh: FloatParam,
+
+    #[id = "gate_release"]
+    pub gate_release: FloatParam,
+
+    // Drive pedal
+    #[id = "drive_on"]
+    pub drive_on: BoolParam,
+
+    #[id = "drive_gain"]
+    pub drive_gain: FloatParam,
+
+    #[id = "drive_tone"]
+    pub drive_tone: FloatParam,
+
+    #[id = "drive_level"]
+    pub drive_level: FloatParam,
+
+    // Amp
     #[id = "amp"]
     pub amp: EnumParam<Amp>,
 
@@ -51,6 +78,17 @@ pub struct GuitarAmpParams {
     #[id = "master"]
     pub master: FloatParam,
 
+    // Cabinet
+    #[id = "cab_on"]
+    pub cab_on: BoolParam,
+
+    #[id = "cab_mic"]
+    pub cab_mic: FloatParam,
+
+    #[id = "cab_res"]
+    pub cab_res: FloatParam,
+
+    // Output
     #[id = "out_level"]
     pub out_level: FloatParam,
 }
@@ -72,6 +110,30 @@ impl Default for GuitarAmpParams {
 
             bypass: BoolParam::new("Bypass", false).make_bypass(),
 
+            in_gain: FloatParam::new("Input", 0.0, FloatRange::Linear { min: -24.0, max: 24.0 })
+                .with_unit(" dB")
+                .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            gate_on: BoolParam::new("Gate", true),
+            gate_thresh: FloatParam::new("Gate Threshold", -60.0, FloatRange::Linear { min: -80.0, max: -20.0 })
+                .with_unit(" dB")
+                .with_value_to_string(formatters::v2s_f32_rounded(0)),
+            gate_release: FloatParam::new(
+                "Gate Release",
+                100.0,
+                FloatRange::Skewed {
+                    min: 20.0,
+                    max: 500.0,
+                    factor: FloatRange::skew_factor(-1.0), // More resolution at low end
+                },
+            )
+            .with_unit(" ms")
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
+
+            drive_on: BoolParam::new("Drive", false),
+            drive_gain: dial_param("Drive Gain", 0.3),
+            drive_tone: dial_param("Drive Tone", 0.5),
+            drive_level: dial_param("Drive Level", 0.5),
+
             amp: EnumParam::new("Amp", defaults.amp),
 
             gain: dial_param("Gain", defaults.gain),
@@ -80,6 +142,10 @@ impl Default for GuitarAmpParams {
             treble: dial_param("Treble", defaults.treble),
             presence: dial_param("Presence", defaults.presence),
             master: dial_param("Master", defaults.master),
+
+            cab_on: BoolParam::new("Cabinet", true),
+            cab_mic: dial_param("Cab Mic", 0.5),
+            cab_res: dial_param("Cab Resonance", 0.5),
 
             out_level: FloatParam::new(
                 "Output",
