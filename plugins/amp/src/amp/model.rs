@@ -86,6 +86,12 @@ pub struct PowerModel {
     pub sag: f32,
     pub sag_attack_ms: f32,
     pub sag_release_ms: f32,
+    /// With the drive pedal on: share of the headroom lost on top of `sag`, per unit of
+    /// load above `driven_sag_from`. For a clean amp, which passes the pedal's Level on to
+    /// the output: the power stage gives way under it before the output's safety clip is
+    /// reached. 0.0 leaves the stage as it is
+    pub driven_sag: f32,
+    pub driven_sag_from: f32,
     /// Low peak from the speaker's resonance pushing back on the power stage
     pub resonance_hz: f32,
     pub resonance_db: f32,
@@ -170,7 +176,10 @@ const UNUSED_STAGE: StageModel = StageModel {
 };
 
 /// Clean: glassy, with headroom to spare. Two stages with high ceilings that only bend at
-/// the top of the Gain dial, a bright lift that is strongest at low gain, scooped mids
+/// the top of the Gain dial, a bright lift that is strongest at low gain, scooped mids.
+/// Nothing in it squeezes what the drive pedal's Level adds, so with the pedal on its power
+/// stage gives way under a heavy load: sustained notes then stay under the output's safety
+/// clip, which runs at the host's rate and aliases
 static KLAR: AmpModel = AmpModel {
     name: "Klar",
     model_number: "KL-30",
@@ -228,6 +237,8 @@ static KLAR: AmpModel = AmpModel {
         sag: 0.12,
         sag_attack_ms: 20.0,
         sag_release_ms: 100.0,
+        driven_sag: 6.0,
+        driven_sag_from: 0.45,
         resonance_hz: 85.0,
         resonance_db: 2.0,
         presence_hz: 5000.0,
@@ -252,7 +263,9 @@ static KLAR: AmpModel = AmpModel {
 /// Crunch: a mid-forward stack. Little low end goes into the clipping, so chords stay
 /// defined; the first stage has headroom to spare, so picking softly cleans it up. At the
 /// bottom of the Gain dial every stage is turned down and the level is made up after the
-/// power stage, so that hard pick attacks stay clean there
+/// power stage, so that hard pick attacks stay clean there. With the drive pedal's Level
+/// or Drive up the first stage hands the second one square waves, as in Torden: that one
+/// then clips at twice the rate
 static BROL: AmpModel = AmpModel {
     name: "Brøl",
     model_number: "BR-50",
@@ -280,7 +293,7 @@ static BROL: AmpModel = AmpModel {
             bias_shift: 0.4,
             lowpass_hz: 9000.0,
             second_order: false,
-            finer_when_driven: false,
+            finer_when_driven: true,
         },
         StageModel {
             coupling_hz: 70.0,
@@ -317,6 +330,8 @@ static BROL: AmpModel = AmpModel {
         sag: 0.15,
         sag_attack_ms: 15.0,
         sag_release_ms: 100.0,
+        driven_sag: 0.0,
+        driven_sag_from: 0.0,
         resonance_hz: 100.0,
         resonance_db: 4.0,
         presence_hz: 4000.0,
@@ -417,6 +432,8 @@ static TORDEN: AmpModel = AmpModel {
         sag: 0.04,
         sag_attack_ms: 10.0,
         sag_release_ms: 60.0,
+        driven_sag: 0.0,
+        driven_sag_from: 0.0,
         resonance_hz: 125.0,
         resonance_db: 7.0,
         presence_hz: 3800.0,

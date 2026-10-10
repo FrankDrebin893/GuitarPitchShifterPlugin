@@ -586,6 +586,7 @@ impl AmpChain {
         self.drive.set_on(settings.drive_on);
         // With the pedal in front the amp is pushed harder than it ever is without
         self.preamp.set_driven(settings.drive_on, self.drive.fade_steps());
+        self.power.set_driven(settings.drive_on, self.drive.fade_steps());
         self.drive.set(
             self.dials.drive_gain,
             self.dials.drive_tone,
@@ -2276,7 +2277,11 @@ mod tests {
                     let off = AmpSettings { drive_on: false, ..on };
                     for (before, after) in [(&off, &on), (&on, &off)] {
                         let ratio = step_ratio(&run_change(before, after, &input, at), at);
-                        assert!(ratio < 1.2, "{:?}, drive on {}: step {} times its own", amp, after.drive_on, ratio);
+                        // Pushed by the pedal's Level, Klar's power stage gives way: for the
+                        // 20 ms that takes, the amp is louder than it is once it has settled
+                        let pushed = amp == Amp::Klar && after.drive_on && level > 0.5;
+                        let limit = if pushed { 1.5 } else { 1.2 };
+                        assert!(ratio < limit, "{:?}, drive on {}: step {} times its own", amp, after.drive_on, ratio);
                     }
                 }
             }
@@ -2407,13 +2412,35 @@ mod tests {
     }
 
     #[test]
-    fn test_aliasing_stays_low_with_the_drive_flat_out_in_front_of_torden() {
-        // Drive, Tone and Level at 10: the pedal's Level makes the amp's first stage clip,
-        // and the second is handed square waves. At the lowest rate, where it is worst
-        let settings = with_drive(Amp::Torden, 1.0, 1.0, 1.0, 1.0);
-        for freq_hz in ALIAS_TONES_HZ {
-            let aliasing = aliasing_db_at(&settings, freq_hz, 44100.0);
-            assert!(aliasing < -72.0, "{:.1} dB at {} Hz", aliasing, freq_hz);
+    fn test_aliasing_stays_low_with_the_drive_flat_out_in_front_of_every_amp() {
+        // Drive, Tone and Level at 10: the pedal's Level makes the first stage of Brøl and
+        // of Torden clip, and their second is handed square waves. Klar passes the level on
+        // to its power stage, which gives way before the output's safety clip is reached.
+        // At the lowest rate, where it is worst
+        for amp in Amp::ALL {
+            let settings = with_drive(amp, 1.0, 1.0, 1.0, 1.0);
+            for freq_hz in ALIAS_TONES_HZ {
+                let aliasing = aliasing_db_at(&settings, freq_hz, 44100.0);
+                assert!(aliasing < -72.0, "{:?}: {:.1} dB at {} Hz", amp, aliasing, freq_hz);
+            }
+        }
+    }
+
+    #[test]
+    fn test_pedal_pushing_klar_stays_under_the_safety_clip_once_the_power_stage_has_given_way() {
+        // The pedal's Level at 8 is 12 dB into an amp that does not clip: without the power
+        // stage giving way, the output's safety clip took it, at the host's rate
+        let sample_rate = 44100.0;
+        let len = (0.75 * sample_rate) as usize;
+        for (gain, drive, tone, level) in [(0.5, 0.3, 0.5, 0.8), (0.3, 1.0, 1.0, 1.0)] {
+            let settings = with_drive(Amp::Klar, gain, drive, tone, level);
+            for freq_hz in [220.0, ALIAS_TONES_HZ[1]] {
+                let output = run(&settings, &sine(freq_hz, 0.178, sample_rate, len), sample_rate);
+                let top = peak(&output[len / 3..]);
+                assert!(top < OUTPUT_CLIP_KNEE, "Gain {}, {} Hz: peak {:.1} dBFS", gain * 10.0, freq_hz, to_db(top));
+            }
+            let aliasing = aliasing_db_at(&settings, ALIAS_TONES_HZ[1], sample_rate);
+            assert!(aliasing < -72.0, "Gain {}: {:.1} dB", gain * 10.0, aliasing);
         }
     }
 
@@ -4192,6 +4219,9 @@ mod tests {
         }
 
         println!();
+        print_drive_aliasing();
+
+        println!();
         println!("The same sound at every sample rate: chords put together from sines (RMS in dBFS and octave");
         println!("bands in dB relative to the whole signal) and the 220 Hz sine (THD in dB). `off` is the");
         println!("largest difference from the 48 kHz row in the levels and in the THD");
@@ -4241,6 +4271,64 @@ mod tests {
 
         println!();
         print_stage_times();
+    }
+
+    /// The drive pedal's settings the aliasing is measured at: one that pushes an amp, one
+    /// that clips by itself, and everything flat out
+    const ALIAS_DRIVES: [(f32, f32, f32); 3] = [(0.3, 0.5, 0.8), (1.0, 0.5, 0.5), (1.0, 1.0, 1.0)];
+
+    /// The part of `amp_report` on aliasing with the drive pedal in front, by itself:
+    ///   cargo test -p amp --release drive_alias_report -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn drive_alias_report() {
+        print_drive_aliasing();
+    }
+
+    fn print_drive_aliasing() {
+        println!("Aliasing with the drive pedal in front (Drive / Tone / Level), every amp at Gain 5 and 10:");
+        println!("the 1245 Hz and the 4186 Hz tone, energy not at harmonics up to half the rate, dB below the total");
+        let rates = [44100.0, 48000.0, 96000.0, 192000.0];
+        print!("{:<26}", "");
+        for sample_rate in rates {
+            print!("{:>18}", sample_rate);
+        }
+        println!();
+        for amp in Amp::ALL {
+            for gain in [0.5, 1.0] {
+                for (drive, tone, level) in ALIAS_DRIVES {
+                    let settings = with_drive(amp, gain, drive, tone, level);
+                    print!(
+                        "{:<26}",
+                        format!("{} {:.1} {:.0}/{:.0}/{:.0}", amp.model().name, gain * 10.0, drive * 10.0, tone * 10.0, level * 10.0)
+                    );
+                    for sample_rate in rates {
+                        let levels = ALIAS_TONES_HZ.map(|freq_hz| aliasing_db_at(&settings, freq_hz, sample_rate));
+                        print!("{:>18}", format!("{:.1} / {:.1}", levels[0], levels[1]));
+                    }
+                    println!();
+                }
+            }
+        }
+
+        println!();
+        println!("Time per {}-sample block at Gain 10, chords: the amp alone and with the drive at 10 / 10 / 10", BLOCK);
+        println!("in front (the fastest of five medians), and what the pedal adds as a share of real time");
+        for amp in Amp::ALL {
+            print!("{:<8}", amp.model().name);
+            for sample_rate in [48000.0, 96000.0, 192000.0] {
+                let block_us = BLOCK as f64 / sample_rate as f64 * 1e6;
+                let chords = power_chords(sample_rate, 2.0);
+                let time = |settings: &AmpSettings| {
+                    let mut chain = new_chain(sample_rate);
+                    run_blocks(&mut chain, settings, &chords, BLOCK);
+                    (0..5).map(|_| block_time_us(&mut chain, settings, &chords)).fold(f64::MAX, f64::min)
+                };
+                let (plain, driven) = (time(&with_amp(amp, 1.0)), time(&with_drive(amp, 1.0, 1.0, 1.0, 1.0)));
+                print!("{:>9} Hz{:>6.1} /{:>5.1} us{:>5.2} %", sample_rate, plain, driven, (driven - plain) / block_us * 100.0);
+            }
+            println!();
+        }
     }
 
     /// Median time to process one stereo block, in microseconds

@@ -6,6 +6,9 @@ use crate::dsp::{curve, db_to_gain, smoothing_coeff, Ramp};
 const RESONANCE_Q: f32 = 1.2;
 const PRESENCE_Q: f32 = 0.6;
 
+// The least headroom the stage is left with, whatever the load
+const MIN_HEADROOM: f32 = 0.25;
+
 /// The power stage: Master drives a symmetric clipper whose headroom sags under sustained
 /// load. Presence and the low resonance sit in front of the clipper, as they do in a stage
 /// with feedback: they shape the sound while it is clean and flatten out as it clips
@@ -17,6 +20,11 @@ pub struct PowerAmp {
     volume: Ramp,
     clipper: PowerClipper,
     sag: f32,
+    // What the drive pedal adds to the sag (see `PowerModel.driven_sag`), and the share of
+    // it that is in force: 1.0 with the pedal on, 0.0 with it off
+    driven_sag: f32,
+    driven_sag_from: f32,
+    driven_share: Ramp,
     // Follows the output level, 0.0 to 1.0
     load: f32,
     attack: f32,
@@ -33,6 +41,9 @@ impl PowerAmp {
             volume: Ramp::new(1.0),
             clipper: PowerClipper::new(),
             sag: 0.0,
+            driven_sag: 0.0,
+            driven_sag_from: 0.0,
+            driven_share: Ramp::new(0.0),
             load: 0.0,
             attack: 1.0,
             release: 1.0,
@@ -49,6 +60,8 @@ impl PowerAmp {
             sample_rate,
         ));
         self.sag = model.sag;
+        self.driven_sag = model.driven_sag;
+        self.driven_sag_from = model.driven_sag_from;
         self.attack = smoothing_coeff(model.sag_attack_ms, sample_rate);
         self.release = smoothing_coeff(model.sag_release_ms, sample_rate);
     }
@@ -74,18 +87,34 @@ impl PowerAmp {
         self.presence.set(coeffs, steps);
     }
 
-    /// Ends the move started by `set_master` at once
+    /// Tells the stage whether the drive pedal is on in front of the amp. It gets there
+    /// over `steps` samples, as the pedal fades in, or at once from `snap`
+    pub fn set_driven(&mut self, driven: bool, steps: u32) {
+        let target = if driven { 1.0 } else { 0.0 };
+        if target != self.driven_share.target() {
+            self.driven_share.set_target(target, steps);
+        }
+    }
+
+    /// Ends the moves started by `set_master` and `set_driven` at once
     pub fn snap(&mut self) {
         self.drive.snap();
         self.volume.snap();
+        self.driven_share.snap();
     }
 
     pub fn process(&mut self, block: &mut [f32]) {
+        // Off, and faded out: the stage as it is without the pedal, to the bit
+        let pushed = self.driven_sag > 0.0 && (self.driven_share.value() != 0.0 || self.driven_share.target() != 0.0);
         for sample in block.iter_mut() {
             let input = self.dc.process(*sample) as f64;
             let shaped = self.presence.process(self.resonance.process(input)) as f32 * self.drive.next();
 
-            let headroom = 1.0 - self.sag * self.load;
+            let mut headroom = 1.0 - self.sag * self.load;
+            if pushed {
+                let over = (self.load - self.driven_sag_from).max(0.0);
+                headroom = (headroom - self.driven_share.next() * self.driven_sag * over).max(MIN_HEADROOM);
+            }
             let output = headroom * self.clipper.process(shaped / headroom);
 
             let level = output.abs();
@@ -180,6 +209,55 @@ mod tests {
             let mut pause = vec![0.0; LEN];
             power.process(&mut pause);
             assert!(power.load < 0.01, "{:?} load after a pause: {}", amp, power.load);
+        }
+    }
+
+    #[test]
+    fn test_drive_pedal_makes_a_clean_power_stage_give_way_only_under_a_heavy_load() {
+        let model = &Amp::Klar.model().power;
+        assert!(model.driven_sag > 0.0);
+        let run_driven = |changes: &[(usize, bool)], input: &[f32]| {
+            let mut power = PowerAmp::new();
+            power.configure(model, SAMPLE_RATE);
+            power.set_master(model, 0.5, 0.0, 0);
+            power.set_presence(model, 0.5, SAMPLE_RATE, 0);
+            let mut output = input.to_vec();
+            let mut start = 0;
+            for &(until, driven) in changes {
+                power.set_driven(driven, 1920);
+                if start == 0 {
+                    power.snap();
+                }
+                power.process(&mut output[start..until]);
+                start = until;
+            }
+            output
+        };
+
+        // Played as loud as chords are without a pedal, the stage is what it is without one
+        let played = sine(440.0, 0.4 / db_to_gain(model.drive_db[1]), SAMPLE_RATE, LEN);
+        assert_eq!(run_driven(&[(LEN, true)], &played), run_driven(&[(LEN, false)], &played));
+
+        // Pushed 12 dB over that it comes down, in the time the sag takes, and stays there
+        let pushed: Vec<f32> = played.iter().map(|sample| sample * 4.0).collect();
+        let (plain, driven) = (run_driven(&[(LEN, false)], &pushed), run_driven(&[(LEN, true)], &pushed));
+        let volume = db_to_gain(model.volume_db[1]);
+        let (plain_peak, driven_peak) = (peak(&plain[LEN / 2..]) / volume, peak(&driven[LEN / 2..]) / volume);
+        assert!(plain_peak > 0.85, "Without the pedal: {plain_peak}");
+        assert!((MIN_HEADROOM..0.65).contains(&driven_peak), "With the pedal: {driven_peak}");
+        assert_eq!(driven[..96], plain[..96]);
+
+        // Switched while it is pushed, the level moves without a step, and comes back
+        let switched = run_driven(&[(LEN / 4, false), (LEN / 2, true), (LEN, false)], &pushed);
+        let steps = |signal: &[f32]| signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
+        assert!(steps(&switched) <= 1.01 * steps(&plain));
+        assert_eq!(switched[..LEN / 4], plain[..LEN / 4]);
+        let back = peak(&switched[LEN - 9600..]) / peak(&plain[LEN - 9600..]);
+        assert!((back - 1.0).abs() < 0.01, "Back at {back} of the level");
+
+        // The amps that clip before their power stage are left alone
+        for amp in [Amp::Brol, Amp::Torden] {
+            assert_eq!(amp.model().power.driven_sag, 0.0);
         }
     }
 
