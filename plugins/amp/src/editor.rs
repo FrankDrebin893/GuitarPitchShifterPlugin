@@ -2,9 +2,9 @@ use nih_plug::prelude::*;
 use nih_plug_egui::egui::{vec2, Rect};
 use nih_plug_egui::{create_egui_editor, EguiState};
 use std::sync::Arc;
-use suite_common::ui::{self, led, param_knob, small_footswitch, Ornament, PedalStyle, BENCH_MARGIN};
+use suite_common::ui::{self, led, param_knob, silk_label, small_footswitch, Ornament, PedalStyle, BENCH_MARGIN};
 
-use crate::GuitarAmpParams;
+use crate::{Amp, GuitarAmpParams};
 
 const WINDOW_WIDTH: u32 = 960;
 const WINDOW_HEIGHT: u32 = 340;
@@ -28,11 +28,15 @@ const DIAL_X: f32 = 150.0;
 const DIAL_SPACING: f32 = 100.0;
 const OUTPUT_X: f32 = 790.0;
 
-// Small switches below the band, each with its LED to the left. The bypass sits under the
-// output knob; the space under the dials is kept free for the amp selector
+// Small switches below the band. Left of each, its LED above its caption. The amp selector
+// sits under the dials, the bypass under the output knob
 const SWITCH_Y: f32 = 286.0;
+const AMP_SWITCHES: [(Amp, &str, f32); 3] = [(Amp::Klar, "Klar", 295.0), (Amp::Brol, "Brøl", 425.0), (Amp::Torden, "Torden", 555.0)];
 const BYPASS_X: f32 = 790.0;
-const LED_OFFSET: f32 = -42.0;
+const CAPTION_OFFSET: f32 = -58.0;
+const LED_Y: f32 = 275.0;
+const CAPTION_Y: f32 = 301.0;
+const CAPTION_SIZE: f32 = 17.0;
 
 pub fn default_state() -> Arc<EguiState> {
     EguiState::from_size(WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -65,9 +69,20 @@ pub fn create(params: Arc<GuitarAmpParams>, editor_state: Arc<EguiState>) -> Opt
                 }
                 param_knob(ui, setter, &params.out_level, origin + vec2(OUTPUT_X, KNOB_Y), KNOB_RADIUS, "Output", None);
 
+                for (amp, label, x) in AMP_SWITCHES {
+                    led(ui.painter(), origin + vec2(x + CAPTION_OFFSET, LED_Y), params.amp.value() == amp);
+                    silk_label(ui.painter(), origin + vec2(x + CAPTION_OFFSET, CAPTION_Y), label, CAPTION_SIZE);
+                    if small_footswitch(ui, origin + vec2(x, SWITCH_Y), label).clicked() {
+                        setter.begin_set_parameter(&params.amp);
+                        setter.set_parameter(&params.amp, amp);
+                        setter.end_set_parameter(&params.amp);
+                    }
+                }
+
                 // Bypass switch, lit while the amp is on
                 let bypassed = params.bypass.value();
-                led(ui.painter(), origin + vec2(BYPASS_X + LED_OFFSET, SWITCH_Y), !bypassed);
+                led(ui.painter(), origin + vec2(BYPASS_X + CAPTION_OFFSET, LED_Y), !bypassed);
+                silk_label(ui.painter(), origin + vec2(BYPASS_X + CAPTION_OFFSET, CAPTION_Y), "On", CAPTION_SIZE);
                 if small_footswitch(ui, origin + vec2(BYPASS_X, SWITCH_Y), "bypass").clicked() {
                     setter.begin_set_parameter(&params.bypass);
                     setter.set_parameter(&params.bypass, !bypassed);
