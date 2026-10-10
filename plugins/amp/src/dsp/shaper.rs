@@ -20,10 +20,38 @@ fn asym_curve(x: f64, positive: f64, negative: f64) -> f64 {
 }
 
 /// Integral of `asym_curve` from zero
+#[cfg(test)]
 fn asym_integral(x: f64, positive: f64, negative: f64) -> f64 {
-    let limit = if x >= 0.0 { positive } else { negative };
-    let ratio = x / limit;
-    limit * limit * ((1.0 + ratio * ratio).sqrt() - 1.0)
+    AsymLimits::new(positive, negative).integral(x)
+}
+
+/// The two limits of `asym_curve` with what the integral needs of them worked out once: a
+/// division per sample saved in every gain stage
+#[derive(Clone, Copy)]
+struct AsymLimits {
+    positive: f64,
+    negative: f64,
+    // 1 / limit and limit squared, for the positive and the negative side
+    inverse: [f64; 2],
+    square: [f64; 2],
+}
+
+impl AsymLimits {
+    fn new(positive: f64, negative: f64) -> Self {
+        Self {
+            positive,
+            negative,
+            inverse: [1.0 / positive, 1.0 / negative],
+            square: [positive * positive, negative * negative],
+        }
+    }
+
+    /// Integral of `asym_curve` from zero
+    fn integral(&self, x: f64) -> f64 {
+        let side = (x < 0.0) as usize;
+        let ratio = x * self.inverse[side];
+        self.square[side] * ((1.0 + ratio * ratio).sqrt() - 1.0)
+    }
 }
 
 /// Power stage curve: symmetric, nearly straight at low levels, then a firm ceiling at 1.0
@@ -96,38 +124,35 @@ impl Averager {
 /// `asym_clip`, antialiased
 #[derive(Clone, Copy)]
 pub struct AsymClipper {
-    positive: f64,
-    negative: f64,
+    limits: AsymLimits,
     averager: Averager,
 }
 
 impl AsymClipper {
     pub fn new() -> Self {
         Self {
-            positive: 1.0,
-            negative: 1.0,
+            limits: AsymLimits::new(1.0, 1.0),
             averager: Averager::new(),
         }
     }
 
     pub fn set_limits(&mut self, positive: f32, negative: f32) {
-        self.positive = positive as f64;
-        self.negative = negative as f64;
+        self.limits = AsymLimits::new(positive as f64, negative as f64);
     }
 
     /// `rest` is the input the clipper sits at in silence (the stage's operating point)
     pub fn reset(&mut self, rest: f32) {
         self.averager = Averager {
             last_input: rest as f64,
-            last_integral: asym_integral(rest as f64, self.positive, self.negative),
+            last_integral: self.limits.integral(rest as f64),
         };
     }
 
     pub fn process(&mut self, input: f32) -> f32 {
-        let (positive, negative) = (self.positive, self.negative);
+        let limits = self.limits;
         let input = input as f64;
         self.averager
-            .process(input, asym_integral(input, positive, negative), |x| asym_curve(x, positive, negative))
+            .process(input, limits.integral(input), |x| asym_curve(x, limits.positive, limits.negative))
             as f32
     }
 }

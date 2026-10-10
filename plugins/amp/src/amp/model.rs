@@ -22,8 +22,9 @@ impl Amp {
 
     pub fn model(self) -> &'static AmpModel {
         match self {
-            // Stub: Klar and Torden get their own models in milestone 2
-            Amp::Klar | Amp::Brol | Amp::Torden => &BROL,
+            Amp::Klar => &KLAR,
+            Amp::Brol => &BROL,
+            Amp::Torden => &TORDEN,
         }
     }
 
@@ -97,8 +98,11 @@ pub struct CabModel {
     pub dip: [f32; 3],
     /// Upper-mid bite: frequency, Q, dB
     pub bite: [f32; 3],
-    /// The cone stops radiating above this, 24 dB per octave and then some
+    /// The cone stops radiating above this, 24 dB per octave
     pub rolloff_hz: f32,
+    /// A last, gentler slope starts this many times higher: close to 1.0 makes the
+    /// roll-off steeper
+    pub air_ratio: f32,
     /// Cone breakup: narrow peaks and notches between these frequencies
     pub breakup_hz: [f32; 2],
     pub breakup_count: usize,
@@ -113,13 +117,25 @@ pub struct AmpModel {
     // Only the report prints it until the editor names the amps
     #[allow(dead_code)]
     pub name: &'static str,
+    /// The model number printed on the amp
+    #[allow(dead_code)]
+    pub model_number: &'static str,
     /// High-pass at the input: keeps the low end tight when the gain is up
     pub tight_hz: f32,
+    /// Bell in front of the first stage, so the clipping works on this band most:
+    /// frequency, Q, dB
+    pub focus: [f32; 3],
     /// Treble that bypasses the gain dial, strongest at low gain: corner and dB at Gain 0
     pub bright_hz: f32,
     pub bright_db: f32,
     pub stage_count: usize,
     pub stages: [StageModel; MAX_STAGES],
+    /// Low-pass after the last stage, 12 dB per octave, that takes the fizz off a lot of
+    /// gain. `None` leaves the top to the stages' own low-passes
+    pub fizz_hz: Option<f32>,
+    /// High-pass after the last stage, 12 dB per octave: takes away the lows that the
+    /// clipping itself makes out of a chord. `None` leaves them in
+    pub lowcut_hz: Option<f32>,
     /// Level after the preamp in dB across the Gain dial (0, 2.5, 5, 7.5, 10), set so the
     /// loudness stays about the same while the distortion changes
     pub level_db: [f32; 5],
@@ -137,11 +153,85 @@ const UNUSED_STAGE: StageModel = StageModel {
     lowpass_hz: 20000.0,
 };
 
+/// Clean: glassy, with headroom to spare. Two stages with high ceilings that only bend at
+/// the top of the Gain dial, a bright lift that is strongest at low gain, scooped mids
+static KLAR: AmpModel = AmpModel {
+    name: "Klar",
+    model_number: "KL-30",
+    tight_hz: 60.0,
+    focus: [800.0, 0.7, 0.0],
+    bright_hz: 1500.0,
+    bright_db: 7.0,
+    stage_count: 2,
+    stages: [
+        StageModel {
+            coupling_hz: 20.0,
+            gain_db: [-4.0, 11.0],
+            headroom: [4.0, 5.0],
+            bias: 0.0,
+            bias_shift: 0.3,
+            lowpass_hz: 16000.0,
+        },
+        StageModel {
+            coupling_hz: 40.0,
+            gain_db: [-6.0, 17.0],
+            headroom: [3.0, 3.8],
+            bias: 0.05,
+            bias_shift: 0.3,
+            lowpass_hz: 12000.0,
+        },
+        UNUSED_STAGE,
+        UNUSED_STAGE,
+    ],
+    fizz_hz: None,
+    lowcut_hz: None,
+    level_db: [24.0, 17.0, 8.0, 0.0, -5.5],
+    tone: ToneModel {
+        bass_hz: 120.0,
+        bass_db: 10.0,
+        mid_hz: 500.0,
+        mid_q: 0.7,
+        mid_db: 8.0,
+        mid_centre_db: -3.5,
+        scoop_db: 4.0,
+        mid_shift_octaves: 0.4,
+        treble_hz: 3200.0,
+        treble_db: 10.0,
+        mid_level_db: 2.0,
+    },
+    power: PowerModel {
+        drive_db: [-30.0, -10.0, 10.0],
+        volume_db: [-2.5, -2.5, -5.0],
+        sag: 0.12,
+        sag_attack_ms: 20.0,
+        sag_release_ms: 100.0,
+        resonance_hz: 85.0,
+        resonance_db: 2.0,
+        presence_hz: 5000.0,
+        presence_db: 8.0,
+    },
+    cab: CabModel {
+        resonance_hz: 78.0,
+        resonance_q: 1.2,
+        body: [130.0, 0.8, 1.5],
+        dip: [400.0, 0.9, -2.5],
+        bite: [3200.0, 0.6, 5.0],
+        rolloff_hz: 6600.0,
+        air_ratio: 1.5,
+        breakup_hz: [1200.0, 7000.0],
+        breakup_count: 24,
+        breakup_db: 1.8,
+        breakup_seed: 30,
+    },
+};
+
 /// Crunch: a mid-forward stack. Little low end goes into the clipping, so chords stay
 /// defined; the first stage has headroom to spare, so picking softly cleans it up
 static BROL: AmpModel = AmpModel {
     name: "Brøl",
+    model_number: "BR-50",
     tight_hz: 110.0,
+    focus: [800.0, 0.7, 0.0],
     bright_hz: 1800.0,
     bright_db: 6.0,
     stage_count: 3,
@@ -172,6 +262,8 @@ static BROL: AmpModel = AmpModel {
         },
         UNUSED_STAGE,
     ],
+    fizz_hz: None,
+    lowcut_hz: None,
     level_db: [13.0, 6.5, 0.0, -1.5, -2.5],
     tone: ToneModel {
         bass_hz: 140.0,
@@ -204,10 +296,98 @@ static BROL: AmpModel = AmpModel {
         dip: [450.0, 1.0, -4.0],
         bite: [3000.0, 1.0, 7.0],
         rolloff_hz: 5200.0,
+        air_ratio: 1.7,
         breakup_hz: [1000.0, 6000.0],
         breakup_count: 28,
         breakup_db: 3.5,
         breakup_seed: 50,
+    },
+};
+
+/// High gain: tight and modern. The low end is cut before the clipping and put back after
+/// it, four stages clip a signal with its upper mids pushed forward, and the fizz is
+/// filtered off after every stage. A stiff power stage with a strong resonance and presence
+static TORDEN: AmpModel = AmpModel {
+    name: "Torden",
+    model_number: "TD-100",
+    tight_hz: 160.0,
+    focus: [1000.0, 0.5, 4.0],
+    bright_hz: 2000.0,
+    bright_db: 3.0,
+    stage_count: 4,
+    stages: [
+        StageModel {
+            coupling_hz: 30.0,
+            gain_db: [10.0, 18.0],
+            headroom: [2.5, 3.0],
+            bias: 0.0,
+            bias_shift: 0.2,
+            lowpass_hz: 12000.0,
+        },
+        StageModel {
+            coupling_hz: 250.0,
+            gain_db: [8.0, 20.0],
+            headroom: [1.0, 1.4],
+            bias: 0.1,
+            bias_shift: 0.2,
+            lowpass_hz: 8000.0,
+        },
+        StageModel {
+            coupling_hz: 150.0,
+            gain_db: [6.0, 18.0],
+            headroom: [1.2, 0.9],
+            bias: -0.1,
+            bias_shift: 0.15,
+            lowpass_hz: 7000.0,
+        },
+        StageModel {
+            coupling_hz: 140.0,
+            gain_db: [6.0, 14.0],
+            headroom: [1.0, 1.3],
+            bias: 0.05,
+            bias_shift: 0.1,
+            lowpass_hz: 6000.0,
+        },
+    ],
+    fizz_hz: Some(7500.0),
+    lowcut_hz: Some(100.0),
+    level_db: [2.0, 0.5, 0.0, 0.0, 0.0],
+    tone: ToneModel {
+        bass_hz: 110.0,
+        bass_db: 10.0,
+        mid_hz: 700.0,
+        mid_q: 0.6,
+        mid_db: 12.0,
+        mid_centre_db: -2.0,
+        scoop_db: 3.0,
+        mid_shift_octaves: 0.3,
+        treble_hz: 3000.0,
+        treble_db: 10.0,
+        mid_level_db: 2.0,
+    },
+    power: PowerModel {
+        drive_db: [-26.0, -8.0, 10.0],
+        volume_db: [-8.0, -7.0, -7.5],
+        sag: 0.04,
+        sag_attack_ms: 10.0,
+        sag_release_ms: 60.0,
+        resonance_hz: 125.0,
+        resonance_db: 7.0,
+        presence_hz: 3800.0,
+        presence_db: 10.0,
+    },
+    cab: CabModel {
+        resonance_hz: 125.0,
+        resonance_q: 1.15,
+        body: [220.0, 0.7, 4.0],
+        dip: [550.0, 1.2, -4.0],
+        bite: [2800.0, 0.9, 6.5],
+        rolloff_hz: 4700.0,
+        air_ratio: 1.2,
+        breakup_hz: [1000.0, 5500.0],
+        breakup_count: 26,
+        breakup_db: 3.0,
+        breakup_seed: 100,
     },
 };
 
@@ -220,7 +400,9 @@ mod tests {
         for (index, amp) in Amp::ALL.iter().enumerate() {
             let model = amp.model();
             assert_eq!(amp.index(), index);
-            assert!(!model.name.is_empty());
+            assert!(!model.name.is_empty() && !model.model_number.is_empty());
+            assert!(model.focus[0] > 0.0 && model.focus[1] > 0.0);
+            assert!(model.cab.air_ratio >= 1.0);
             assert!((1..=MAX_STAGES).contains(&model.stage_count));
             for stage in &model.stages[..model.stage_count] {
                 assert!(stage.headroom[0] > 0.0 && stage.headroom[1] > 0.0);
