@@ -25,23 +25,30 @@ for something destructive or something that truly needs Rasmus.
 | Milestone | State |
 |---|---|
 | M1 One playable amp (Brøl) | done 2026-10-10 |
-| M2 Three amps | not started |
+| M2 Three amps | done 2026-10-10 |
 | M3 Gate, drive, pedalboard | not started |
 | M4 Delay and reverb | not started |
 | M5 Tuning and cost | not started |
 
 ## Next
 
-M2: `amp` parameter (`EnumParam<Amp>`, variant ids `klar`, `brol`, `torden`; `Amp` already
-derives `Enum`), `amp: Amp` in `AmpSettings`, Klar and Torden models and cabinets in
-`amp/model.rs`, click-free switching (fade the amp out over about 5 ms, reconfigure and reset,
-fade in, with `Cabinet::swap_ir` alongside), levels matched between amps at default settings.
-Editor: three `small_footswitch` at y 286, x 295 / 425 / 555, each with an LED at (x - 58, 275)
-above a `silk_label` size 17 at (x - 58, 301).
+M3: input gain, gate, drive pedal, cabinet on/off with Mic and Res. The editor for it is
+finished and waiting on branch `worktree-agent-a1df7e0f9270db3ea`: commit `64872b9` (Gate,
+Drive, Cab pedals, window 960 x 660, parameters added to `lib.rs`) and `1898a48` (Delay and
+Reverb pedals with their parameters, for M4). Merge the first when the M3 DSP is in, the second
+with M4. If the branch is gone, the layout is: pedals 180 x 310 at x = 10 + 190 i, y 340 to
+650; offsets from a pedal's top centre: LED (0, 71), switch (0, 273), two knobs radius 24 at
+(-45, 144) and (45, 144), three knobs radius 17 at (-45, 71), (45, 71), (0, 169).
 
-Layout notes for M3: window 960 x 660, five `mini_pedal`s of 180 x 300 at x = 10 + 190 i,
-y 350 to 650, LED at pedal top + 198, `small_footswitch` at + 242. Two radius 19 knobs fit in
-a row; three touch at the ticks, so Drive and Delay need a triangle layout or smaller knobs.
+What the chain needs for M3 (from the M2 DSP work):
+- Input gain and gate at base rate in `process_chunk` before `upsample`. The gate's detector
+  reads the input before the input gain
+- Drive pedal in the oversampled region before `preamp.process`, reusing `AsymClipper`. Reset
+  with the amp stages, not reconfigured on an amp switch; its on/off gets its own short fade
+- New dials go in `read_dials` next to `out_level`, so an amp switch does not snap them
+- Cab off is a dry path parallel to `cabinet.process` with a crossfade; the cabinet keeps running
+- Mic and Res are level-neutral filters between `cabinet.process` and the DC blocker
+- `Cabinet` has two IR slots, guarded by `cabinet_busy`
 
 ## What was decided with Rasmus
 
@@ -123,6 +130,17 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
   beside them. A full-size footswitch with an LED above does not fit under the band
 - 2026-10-10 M1: the band on a head tilts -1.5 degrees (pedals keep -4): over 940 px the
   pedal's tilt would rise more than the band is tall
+- 2026-10-10 M2: amp switching fades the amp out over 5 ms in front of the cabinet, switches at
+  the silent sample, fades in; the cabinet crossfades its IR over 10 ms from that point. Two
+  amps never run side by side (it would double the oversampled cost)
+- 2026-10-10 M2: `AmpModel` got `focus` (a bell in front of the clipping), `fizz_hz` and
+  `lowcut_hz` (after the last stage) for Torden. Unused ones are exact pass-throughs
+- 2026-10-10 M2: a preamp stage takes its operating point from the previous sample, which
+  breaks the chain of divisions and saved about a quarter of the preamp's time
+- 2026-10-10 M2: amp levels are matched by RMS at dials 5 (within 0.5 dB). Klar will be heard
+  as quieter because it is not compressed
+- 2026-10-10 M2: the selector and the On switch on the head have their LED above their caption,
+  to the left of the switch
 - 2026-10-10 Worktrees for subagents start from `main`, not from `amp-sim`. Tell each agent to
   run `git merge --ff-only amp-sim` first
 
@@ -136,7 +154,15 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
   at 96 kHz and above is the obvious saving (M5)
 - Tone and presence filters are redesigned once per 32 samples while a dial moves; a fast
   automated sweep could zipper faintly
-- `AmpChain::set_amp` crossfades the cabinet only; the amp itself switches at once (M2)
+- Klar: chord peaks reach -3.0 dBFS at Gain 0, just under the output clip's knee; its low end
+  is the fullest of the three and may boom with a neck pickup; its sparkle is EQ only
+- Torden: aliasing at Gain 10 is -74 dB, 4 dB inside the -70 dB target; the drive pedal in
+  front will eat into that. Next step is a second-order antiderivative in `AsymClipper`
+  (about +0.4 % CPU), then 8x
+- Torden: Gain 5 to 10 changes little (already fully squeezed at 5); the upper half of the
+  dial could change character more
+- Torden is only 2.5 dB tighter than Brøl below 100 Hz relative to the mids on palm mutes
+- Amp switching leaves a dip of about 10 ms; not listened to (`amp_switching.wav`)
 - An unlit LED on oxblood reads as an empty chrome ring: `LED_OFF` was tuned for orange and
   teal. Changing it changes the other two plugins, so it waits for a decision
 - The no-denormal-slowdown test is a timing assertion (silent under 2x playing); stable so far
@@ -145,17 +171,31 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
 
 ## Last report
 
-After M1 (2026-10-10), 48 kHz, dials at 5 except Gain:
+After M2 (2026-10-10), 48 kHz, dials at 5 except Gain. The full report has more tables
+(tightness, dynamics, cabinet responses, switching steps).
 
 ```
 amp      gain  chords RMS   chords pk  sine RMS   sine pk   THD dB  alias 1245  alias 4186
+Klar      0.0       -17.6        -3.0     -19.7     -16.7    -53.4      -125.2      -120.0
+Klar      5.0       -17.0        -3.6     -17.1     -14.1    -44.7      -125.6      -125.1
+Klar     10.0       -16.2        -4.5     -14.9     -12.3    -21.5      -124.8      -123.2
 Brøl      0.0       -19.5        -6.8     -20.5     -17.5    -37.4      -122.0      -123.9
-Brøl      5.0       -16.6        -6.5     -14.9     -12.0    -15.5      -122.1      -120.5
+Brøl      5.0       -16.6        -6.5     -14.9     -12.0    -15.5      -121.3      -121.7
 Brøl     10.0       -15.6        -6.2     -14.3      -9.0     -8.2       -98.4       -86.6
+Torden    0.0       -17.4        -6.9     -13.5     -10.1    -24.5      -123.2      -122.6
+Torden    5.0       -16.9        -6.5     -13.0      -8.2    -18.0      -116.6       -99.8
+Torden   10.0       -16.3        -5.6     -12.3      -6.1    -14.3       -76.8       -73.8
 
-Latency  48000 Hz    8 samples  0.167 ms
-Time per 64-sample block: 48 kHz 21 us (1.6 %), 96 kHz 23 us (3.5 %), 192 kHz 37 us (11.2 %)
-Silent tail costs the same as playing (no denormal slowdown)
+Tightness (palm mutes on 65 and 73 Hz roots), dB relative to the whole signal
+Hz                       to 100  100-400  400-1k6  1k6-6k4   6k4 up
+Brøl 5.0                  -21.6     -6.3     -2.7     -6.5    -28.8
+Torden 5.0                -25.1     -7.2     -3.7     -4.3    -27.4
+Torden 5.0 boosted        -26.3     -9.7     -3.0     -4.1    -26.5
+
+Dynamics at Gain 5, 24 dB between soft and hard playing: squeezed by Klar 0.8, Brøl 11.0, Torden 23.2 dB
+Latency at 48 kHz: Klar 7, Brøl 8, Torden 12 samples (0.15 / 0.17 / 0.25 ms)
+Time per 64-sample block at 48 kHz: Klar 19 us (1.4 %), Brøl 24 us (1.8 %), Torden 29 us (2.2 %)
+At 192 kHz: 8.7 % / 10.2 % / 11.8 %
 ```
 
 ## Backlog after M5 (top to bottom)

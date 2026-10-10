@@ -191,10 +191,12 @@ In progress on branch `amp-sim`. `docs/amp-progress.md` has the plan, the frozen
 the decisions and the state of the work; read it before touching the plugin.
 
 A guitar amp with our own amps and components: own names, no real makers' names, trademarks or
-circuit names anywhere. So far one amp, Brøl (crunch), with its cabinet.
+circuit names anywhere. Three amps, each with its own cabinet: Klar (clean, glassy), Brøl
+(mid-forward crunch) and Torden (modern tight high gain). They share the six dials.
 
 - `src/lib.rs` - Plugin entry point, parameters. Reads them once per block into `AmpSettings`
-- `src/chain.rs` - `AmpChain`: the whole signal chain, dial smoothing, bypass crossfade
+- `src/chain.rs` - `AmpChain`: the whole signal chain, dial smoothing, bypass crossfade, amp
+  switching (the amp fades out for 5 ms, is reconfigured at silence and fades back in)
 - `src/amp/` - `model.rs` (`Amp` and one `AmpModel` of constants per amp), `preamp.rs`,
   `tonestack.rs`, `poweramp.rs`
 - `src/cab.rs` - Cabinet: impulse response designed in code per sample rate, direct FIR
@@ -203,7 +205,8 @@ circuit names anywhere. So far one amp, Brøl (crunch), with its cabinet.
 - `src/editor.rs` - egui GUI: oxblood amp head
 
 Mono through amp and cabinet (a stereo input is averaged). The nonlinear stages run 4x
-oversampled with antialiased clippers. Latency is about 0.2 ms and nothing is reported to the host.
+oversampled with antialiased clippers. Latency is 0.15 to 0.25 ms and nothing is reported to the host.
+Amps differ only by the constants in `amp/model.rs`: tune there, never with `match amp` in the DSP.
 
 ```bash
 # Levels, distortion, aliasing, cabinet response, latency and CPU time per amp. Run before and after a DSP change.
