@@ -22,6 +22,5 @@ required-features = ["standalone"]
 nih_plug = { workspace = true }
 nih_plug_egui = { workspace = true }
 suite_common = { workspace = true }
-
-[dev-dependencies]
+# Reads the player's own cabinets (WAV files)
 hound = "3.5"

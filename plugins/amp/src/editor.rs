@@ -1,16 +1,18 @@
 use nih_plug::prelude::*;
 use nih_plug_egui::egui::{vec2, Rect, Vec2};
 use nih_plug_egui::{create_egui_editor, EguiState};
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, PoisonError};
 use suite_common::ui::{
     self, param_knob, param_switch, rig_led, silk_label, small_footswitch, stepper, tuner_display, Ornament,
     PedalStyle, Step, BENCH_MARGIN,
 };
 
+use crate::cab_stage::{CabLoader, CabStatus};
 use crate::presets::{self, PRESETS};
 use crate::tuner::{Note, TunerReading};
-use crate::{Amp, GuitarAmpParams};
+use crate::user_cab;
+use crate::{Amp, GuitarAmpParams, GuitarAmpPlugin, Task};
 
 const WINDOW_WIDTH: u32 = 960;
 const WINDOW_HEIGHT: u32 = 694;
@@ -72,8 +74,38 @@ const PAIR_KNOBS: [Vec2; 2] = [vec2(-45.0, 144.0), vec2(45.0, 144.0)];
 const TRIO_RADIUS: f32 = 17.0;
 const TRIO_KNOBS: [Vec2; 3] = [vec2(-45.0, 71.0), vec2(45.0, 71.0), vec2(0.0, 169.0)];
 
+// The Cab pedal has the display for picking the cabinet where a third knob would be: the
+// amp's own or one of the player's files. Its two knobs are the upper two of a trio. The
+// tape is as wide as fits between the buttons, and holds this many letters
+const CAB_SLOT: usize = 2;
+const CAB_CAPTION: Vec2 = vec2(0.0, 174.0);
+const CAB_STEPPER: Vec2 = vec2(0.0, 198.0);
+const CAB_STEPPER_WIDTH: f32 = 100.0;
+const CAB_NAME_CHARS: usize = 10;
+
 /// One pedal of the board: its title, its switch and up to three knobs with their captions
 type Pedal<'a> = (&'a str, &'a BoolParam, &'a [(&'a FloatParam, &'a str)]);
+
+/// Moves the choice of cabinet one on in the round of the amp's own and the files in the
+/// cabinets folder as they are now, and has what it arrives at read away from this thread
+/// and the audio. The folder is made here, the first time someone looks for cabinets in
+/// it, and not by opening the plugin
+fn step_cabinet(
+    params: &GuitarAmpParams,
+    cab_loader: &CabLoader,
+    async_executor: &AsyncExecutor<GuitarAmpPlugin>,
+    forward: bool,
+) {
+    let Some(dir) = user_cab::cabinets_dir() else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    let mut chosen = params.cabinet.lock().unwrap_or_else(PoisonError::into_inner);
+    *chosen = user_cab::neighbour(&user_cab::list(&dir), &chosen, forward);
+    drop(chosen);
+    cab_loader.chosen();
+    async_executor.execute_background(Task::LoadCabinet);
+}
 
 pub fn default_state() -> Arc<EguiState> {
     EguiState::from_size(WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -83,11 +115,21 @@ pub fn create(
     params: Arc<GuitarAmpParams>,
     editor_state: Arc<EguiState>,
     tuner: Arc<TunerReading>,
+    cab_loader: Arc<CabLoader>,
+    async_executor: AsyncExecutor<GuitarAmpPlugin>,
 ) -> Option<Box<dyn Editor>> {
+    let (opened_loader, opened_executor) = (cab_loader.clone(), async_executor.clone());
     create_egui_editor(
         editor_state,
         (),
-        |egui_ctx, _| ui::install(egui_ctx),
+        move |egui_ctx, _| {
+            ui::install(egui_ctx);
+            // A cabinet file that was missing or unusable may have been put right since:
+            // look again whenever the window opens
+            if opened_loader.status() != CabStatus::Fine {
+                opened_executor.execute_background(Task::LoadCabinet);
+            }
+        },
         move |egui_ctx, setter, _state| {
             ui::rig(egui_ctx, |ui, origin| {
                 let head = Rect::from_min_size(
@@ -191,7 +233,7 @@ pub fn create(
                     let rect = Rect::from_min_size(origin + vec2(left, PEDAL_TOP), vec2(PEDAL_WIDTH, PEDAL_HEIGHT));
                     let top = ui::mini_pedal(ui, rect, STYLE.paint, title).center_top();
 
-                    let (radius, places) = if knobs.len() > PAIR_KNOBS.len() {
+                    let (radius, places) = if knobs.len() > PAIR_KNOBS.len() || slot == CAB_SLOT {
                         (TRIO_RADIUS, &TRIO_KNOBS[..])
                     } else {
                         (PAIR_RADIUS, &PAIR_KNOBS[..])
@@ -200,6 +242,17 @@ pub fn create(
                         param_knob(ui, setter, param, top + offset, radius, caption, None);
                     }
                     param_switch(ui, setter, on, top + PEDAL_SWITCH, top + PEDAL_LED);
+
+                    if slot == CAB_SLOT {
+                        // The cabinet that plays: the amp's own, or a file from the cabinets
+                        // folder. The buttons step through them
+                        let chosen = params.cabinet.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                        let shown = cab_loader.display_name(&chosen, CAB_NAME_CHARS);
+                        silk_label(ui.painter(), top + CAB_CAPTION, "Speaker", 13.0);
+                        if let Some(step) = stepper(ui, top + CAB_STEPPER, CAB_STEPPER_WIDTH, &shown, "cabinet") {
+                            step_cabinet(&params, &cab_loader, &async_executor, step == Step::Next);
+                        }
+                    }
                 }
             });
         },

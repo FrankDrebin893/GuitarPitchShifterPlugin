@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 mod amp;
 mod cab;
+mod cab_stage;
 mod chain;
 mod delay;
 mod drive;
@@ -15,7 +16,9 @@ mod reverb;
 #[cfg(test)]
 mod test_util;
 mod tuner;
+mod user_cab;
 pub use amp::model::Amp;
+use cab_stage::CabLoader;
 use chain::{AmpChain, AmpSettings, GATE_RELEASE_MS, GATE_THRESHOLD_DB, IN_GAIN_DB};
 use delay::{DelaySettings, FEEDBACK_MAX, TIME_MAX_MS, TIME_MIN_MS};
 use reverb::{ReverbSettings, DECAY_MAX_S, DECAY_MIN_S};
@@ -29,6 +32,15 @@ const LEVEL_MAX_DB: f32 = 6.0;
 pub struct GuitarAmpPlugin {
     params: Arc<GuitarAmpParams>,
     chain: AmpChain,
+    // Reads the player's own cabinet from its file and leaves it for the chain to take
+    cab_loader: Arc<CabLoader>,
+}
+
+/// What is done away from the audio thread
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Task {
+    /// Read the chosen cabinet, for the sample rate the host runs at now
+    LoadCabinet,
 }
 
 // Frozen: the ids below are what DAW projects store. Add parameters, never rename an id.
@@ -42,6 +54,11 @@ pub struct GuitarAmpParams {
     /// sets the parameters themselves when a preset is loaded
     #[persist = "preset"]
     pub preset: std::sync::atomic::AtomicU32,
+
+    /// File name, in the cabinets folder, of the player's own cabinet. Empty for the amp's
+    /// own. Not a parameter: a file name cannot be one. The audio thread never reads it
+    #[persist = "cabinet"]
+    pub cabinet: std::sync::Mutex<String>,
 
     #[id = "bypass"]
     pub bypass: BoolParam,
@@ -138,9 +155,12 @@ pub struct GuitarAmpParams {
 
 impl Default for GuitarAmpPlugin {
     fn default() -> Self {
+        let chain = AmpChain::new();
+        let cab_loader = Arc::new(CabLoader::new(chain.cab_stage(), chain.sample_rate()));
         Self {
             params: Arc::new(GuitarAmpParams::default()),
-            chain: AmpChain::new(),
+            chain,
+            cab_loader,
         }
     }
 }
@@ -153,6 +173,7 @@ impl Default for GuitarAmpParams {
         Self {
             editor_state: editor::default_state(),
             preset: std::sync::atomic::AtomicU32::new(0),
+            cabinet: std::sync::Mutex::new(String::new()),
 
             bypass: BoolParam::new("Bypass", defaults.bypass).make_bypass(),
 
@@ -336,23 +357,42 @@ impl Plugin for GuitarAmpPlugin {
     const SAMPLE_ACCURATE_AUTOMATION: bool = false;
 
     type SysExMessage = ();
-    type BackgroundTask = ();
+    type BackgroundTask = Task;
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
     }
 
-    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        editor::create(self.params.clone(), self.params.editor_state.clone(), self.chain.tuner_reading())
+    fn task_executor(&mut self) -> TaskExecutor<Self> {
+        let params = self.params.clone();
+        let cab_loader = self.cab_loader.clone();
+        Box::new(move |task| match task {
+            Task::LoadCabinet => cab_loader.load(&params.cabinet),
+        })
+    }
+
+    fn editor(&mut self, async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        editor::create(
+            self.params.clone(),
+            self.params.editor_state.clone(),
+            self.chain.tuner_reading(),
+            self.cab_loader.clone(),
+            async_executor,
+        )
     }
 
     fn initialize(
         &mut self,
         _audio_io_layout: &AudioIOLayout,
         buffer_config: &BufferConfig,
-        _context: &mut impl InitContext<Self>,
+        context: &mut impl InitContext<Self>,
     ) -> bool {
         self.chain.set_sample_rate(buffer_config.sample_rate);
+        // The player's own cabinet is made for one sample rate, and a project that was
+        // just loaded may name another file: read it again. Done before this returns, so
+        // the first block already plays through it. With no file chosen no disk is read
+        self.cab_loader.set_sample_rate(buffer_config.sample_rate);
+        context.execute(Task::LoadCabinet);
         true
     }
 

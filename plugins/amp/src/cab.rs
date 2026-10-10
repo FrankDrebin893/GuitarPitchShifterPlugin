@@ -2,8 +2,14 @@ use crate::amp::model::CabModel;
 use crate::dsp::db_to_gain;
 use crate::dsp::filters::{Biquad, BiquadCoeffs, GlidingBiquad};
 
-/// The longest impulse response the cabinet can hold: 20 ms at 192 kHz
+/// The longest impulse response a cabinet designed here can have: 20 ms at 192 kHz
 pub const MAX_IR_LEN: usize = 3840;
+
+/// A player's own impulse response is cut to this length (`user_cab_report` prints what
+/// the lengths cost)
+pub const USER_IR_MS: f32 = 40.0;
+/// The longest impulse response the cabinet can hold: `USER_IR_MS` at 192 kHz
+pub const MAX_USER_IR_LEN: usize = 7680;
 
 // No impulse response is longer than this. The cabinets designed here are a quarter to
 // less than half of it (`CabModel.ir_ms`)
@@ -58,6 +64,23 @@ pub fn ir_len(sample_rate: f32) -> usize {
     ((IR_MS * 0.001 * sample_rate).round() as usize).clamp(16, MAX_IR_LEN)
 }
 
+/// The most samples a player's own impulse response has at a sample rate
+pub fn user_ir_len(sample_rate: f32) -> usize {
+    ((USER_IR_MS * 0.001 * sample_rate).round() as usize).clamp(16, MAX_USER_IR_LEN)
+}
+
+/// The gain that brings a response to 0 dB average power over the level band. `magnitude`
+/// is its gain at a frequency in Hz. Every cabinet, designed here or loaded from a file,
+/// is levelled with this, so one is as loud as another
+pub fn level_gain(magnitude: impl Fn(f32) -> f32) -> f32 {
+    let ratio = (LEVEL_BAND_HZ[1] / LEVEL_BAND_HZ[0]).powf(1.0 / (LEVEL_PROBES - 1) as f32);
+    let power: f32 = (0..LEVEL_PROBES)
+        .map(|probe| magnitude(LEVEL_BAND_HZ[0] * ratio.powi(probe as i32)).powi(2))
+        .sum::<f32>()
+        / LEVEL_PROBES as f32;
+    1.0 / power.sqrt().max(1e-9)
+}
+
 fn gain_to_db(gain: f32) -> f32 {
     20.0 * gain.max(1e-9).log10()
 }
@@ -98,12 +121,7 @@ pub fn design_ir(model: &CabModel, sample_rate: f32) -> CabIr {
     let lows = fit_lows(model, &long_response(model, sample_rate), &taps, sample_rate);
     let mut ir = CabIr { taps, lows };
 
-    let ratio = (LEVEL_BAND_HZ[1] / LEVEL_BAND_HZ[0]).powf(1.0 / (LEVEL_PROBES - 1) as f32);
-    let power: f32 = (0..LEVEL_PROBES)
-        .map(|probe| ir.magnitude(LEVEL_BAND_HZ[0] * ratio.powi(probe as i32), sample_rate).powi(2))
-        .sum::<f32>()
-        / LEVEL_PROBES as f32;
-    let gain = 1.0 / power.sqrt().max(1e-9);
+    let gain = level_gain(|freq_hz| ir.magnitude(freq_hz, sample_rate));
     for tap in &mut ir.taps {
         *tap *= gain;
     }
@@ -278,7 +296,7 @@ struct Slot {
 
 impl Slot {
     fn new() -> Self {
-        let mut taps = vec![0.0; MAX_IR_LEN];
+        let mut taps = vec![0.0; MAX_USER_IR_LEN];
         taps[0] = 1.0;
         Self {
             taps,
@@ -309,8 +327,8 @@ pub struct Cabinet {
 impl Cabinet {
     pub fn new() -> Self {
         Self {
-            ring: MAX_IR_LEN,
-            history: vec![0.0; 2 * MAX_IR_LEN],
+            ring: MAX_USER_IR_LEN,
+            history: vec![0.0; 2 * MAX_USER_IR_LEN],
             position: 0,
             slots: [Slot::new(), Slot::new()],
             active: 0,
@@ -321,7 +339,7 @@ impl Cabinet {
 
     /// Sets the most samples an impulse response has at this rate. Load one with `set_ir` after
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.ring = ir_len(sample_rate);
+        self.ring = user_ir_len(sample_rate);
         self.fade_step = 1.0 / (SWAP_MS * 0.001 * sample_rate);
         self.reset();
     }
@@ -338,7 +356,13 @@ impl Cabinet {
     /// Loads a cabinet and uses it at once. A longer impulse response is cut to the most
     /// the cabinet holds at this sample rate. Does not allocate
     pub fn set_ir(&mut self, ir: &CabIr) {
-        self.load(self.active, ir);
+        self.load(self.active, &ir.taps, ir.lows);
+        self.fade = 1.0;
+    }
+
+    /// The same for an impulse response by itself, as a player's own cabinet is
+    pub fn set_taps(&mut self, taps: &[f32]) {
+        self.load(self.active, taps, BiquadCoeffs::IDENTITY);
         self.fade = 1.0;
     }
 
@@ -346,7 +370,14 @@ impl Cabinet {
     /// two slots, and during a crossfade both are heard
     pub fn swap_ir(&mut self, ir: &CabIr) {
         self.active = 1 - self.active;
-        self.load(self.active, ir);
+        self.load(self.active, &ir.taps, ir.lows);
+        self.fade = 0.0;
+    }
+
+    /// The same for an impulse response by itself. Does not allocate either
+    pub fn swap_taps(&mut self, taps: &[f32]) {
+        self.active = 1 - self.active;
+        self.load(self.active, taps, BiquadCoeffs::IDENTITY);
         self.fade = 0.0;
     }
 
@@ -368,17 +399,17 @@ impl Cabinet {
     }
 
     /// The filter starts from rest: it is another one than the slot held before
-    fn load(&mut self, slot: usize, ir: &CabIr) {
+    fn load(&mut self, slot: usize, taps: &[f32], lows: BiquadCoeffs) {
         let slot = &mut self.slots[slot];
-        slot.len = ir.taps.len().clamp(1, self.ring);
-        let taps = &mut slot.taps[..slot.len];
-        taps.fill(0.0);
-        for (tap, &sample) in taps.iter_mut().rev().zip(&ir.taps) {
+        slot.len = taps.len().clamp(1, self.ring);
+        let reversed = &mut slot.taps[..slot.len];
+        reversed.fill(0.0);
+        for (tap, &sample) in reversed.iter_mut().rev().zip(taps) {
             *tap = sample;
         }
-        slot.lows.set(ir.lows);
+        slot.lows.set(lows);
         slot.lows.reset();
-        slot.filtered = ir.lows != BiquadCoeffs::IDENTITY;
+        slot.filtered = lows != BiquadCoeffs::IDENTITY;
     }
 
     /// One sample of one of the cabinets. The input has been written to the history
@@ -685,6 +716,9 @@ mod tests {
         assert_eq!(ir_len(48000.0), 960);
         assert_eq!(ir_len(192000.0), MAX_IR_LEN);
         assert_eq!(ir_len(384000.0), MAX_IR_LEN);
+        assert_eq!(user_ir_len(48000.0), 1920);
+        assert_eq!(user_ir_len(192000.0), MAX_USER_IR_LEN);
+        assert_eq!(user_ir_len(384000.0), MAX_USER_IR_LEN);
     }
 
     #[test]
@@ -810,10 +844,10 @@ mod tests {
         assert_eq!(block, [0.5, 0.0, 0.0]);
 
         cabinet.reset();
-        cabinet.set_ir(&CabIr::plain(&vec![0.1; MAX_IR_LEN * 2]));
-        let mut long = vec![1.0; 2000];
+        cabinet.set_ir(&CabIr::plain(&vec![0.1; MAX_USER_IR_LEN * 2]));
+        let mut long = vec![1.0; 4000];
         cabinet.process(&mut long);
-        assert!((long[1999] - 0.1 * 960.0).abs() < 1e-2);
+        assert!((long[3999] - 0.1 * user_ir_len(48000.0) as f32).abs() < 1e-2);
     }
 
     fn voiced(amp: Amp, mic: f32, resonance: f32, input: &[f32]) -> Vec<f32> {
