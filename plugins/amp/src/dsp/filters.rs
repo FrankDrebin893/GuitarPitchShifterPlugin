@@ -194,6 +194,11 @@ impl OnePoleLp {
         self.state += self.coeff * (input - self.state) + ANTI_DENORMAL;
         self.state
     }
+
+    /// What the filter puts out next if nothing more goes in
+    pub fn state(&self) -> f32 {
+        self.state
+    }
 }
 
 /// One-pole highpass (6 dB per octave): the input minus its lowpass
@@ -217,6 +222,12 @@ impl OnePoleHp {
 
     pub fn process(&mut self, input: f32) -> f32 {
         input - self.lowpass.process(input)
+    }
+
+    /// What the filter holds back of its input: it puts out the opposite if nothing more
+    /// goes in
+    pub fn state(&self) -> f32 {
+        self.lowpass.state()
     }
 }
 

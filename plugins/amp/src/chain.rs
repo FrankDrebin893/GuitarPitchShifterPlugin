@@ -358,7 +358,7 @@ impl AmpChain {
         self.cabinet.reset();
         self.cab_voicing.reset();
         self.dc.reset();
-        // An idle effect holds nothing but zeros already. Clearing its lines again would
+        // An idle effect has nothing left to be heard already. Clearing its lines would
         // only cost time, and this is also called on the audio thread, when Bypass has faded
         if !self.delay.is_idle() {
             self.delay.reset();
@@ -2160,11 +2160,13 @@ mod tests {
         assert!(left[after.clone()] != right[after.clone()]);
         assert!(!idle[playing / BLOCK - 1] && !idle[(playing + 4800) / BLOCK]);
 
-        // And it ends: idle within a second and a half, and silent from there on
-        let ended = idle.iter().rposition(|idle| !idle).map_or(0, |last| (last + 1) * BLOCK);
+        // And it ends: idle within a second and a half, and from the block after the one it
+        // ended in there is nothing but the amp, which is silent
+        let ended = idle.iter().rposition(|idle| !idle).map_or(0, |last| (last + 2) * BLOCK);
         assert!(ended < playing + 72_000, "Never idle");
         assert!(ended > playing && ended < playing + (1.5 * SAMPLE_RATE) as usize, "Idle after {} samples", ended - playing);
-        assert!(peak(&left[ended..]) < 1e-9 && peak(&right[ended..]) < 1e-9);
+        assert!(left[ended..] == dry[ended..] && right[ended..] == dry[ended..]);
+        assert!(peak(&dry[ended..]) < 1e-6);
     }
 
     #[test]
@@ -2178,18 +2180,21 @@ mod tests {
         let (_, _, idle) = run_watching(&mut new_chain(SAMPLE_RATE), &plain, &input[..2 * playing]);
         assert!(idle.iter().all(|&idle| idle));
 
-        // The delay holds its last repeats for as long as its lines are, a second, after
-        // they have fallen silent
+        // The delay is idle as soon as its last repeats have fallen silent and its read
+        // positions, 20 ms back, have nothing but silence ahead of them: within half a
+        // second here. From the block after that there is nothing but the amp
         let settings = AmpSettings {
             delay: delay_on(20.0, 0.3, 0.5),
             ..plain
         };
+        let dry = run(&plain, &input, SAMPLE_RATE);
         let (left, right, idle) = run_watching(&mut new_chain(SAMPLE_RATE), &settings, &input);
         assert!(idle[..(playing + 2400) / BLOCK].iter().all(|&idle| !idle));
-        let ended = idle.iter().rposition(|idle| !idle).map_or(0, |last| (last + 1) * BLOCK);
+        let ended = idle.iter().rposition(|idle| !idle).map_or(0, |last| (last + 2) * BLOCK);
         assert!(ended < playing + 84_000, "Never idle");
-        assert!(ended < playing + (1.6 * SAMPLE_RATE) as usize, "Idle after {} samples", ended - playing);
-        assert!(peak(&left[ended..]) < 1e-9 && peak(&right[ended..]) < 1e-9);
+        assert!(ended < playing + (0.5 * SAMPLE_RATE) as usize, "Idle after {} samples", ended - playing);
+        assert!(left[ended..] == dry[ended..] && right[ended..] == dry[ended..]);
+        assert!(peak(&dry[ended..]) < 1e-6);
     }
 
     #[test]
@@ -3079,7 +3084,8 @@ mod tests {
         }
 
         println!();
-        println!("Time from the last note until the chain is idle (Brøl, Gain 5, gate on), in seconds");
+        println!("Time from the last note until the chain is idle (Brøl, Gain 5, gate on), in seconds, and the");
+        println!("peak of the output in the last 10 ms before that, in dBFS");
         let last_note = power_chords(SAMPLE_RATE, 2.0);
         let idle_rows = [
             ("effects off", with_amp(Amp::Brol, 0.5)),
@@ -3093,12 +3099,16 @@ mod tests {
             let mut chain = new_chain(SAMPLE_RATE);
             run_stereo_blocks(&mut chain, &settings, &last_note, BLOCK);
             let mut blocks = 0;
+            let mut heard = Vec::new();
             while !chain.is_idle() && blocks < 200 * SAMPLE_RATE as usize / BLOCK {
                 let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
                 chain.process(&settings, &mut left, Some(&mut right));
+                heard.extend(left.iter().zip(&right).map(|(l, r)| l.abs().max(r.abs())));
                 blocks += 1;
             }
-            println!("{:<22}{:>8.2}", name, (blocks * BLOCK) as f32 / SAMPLE_RATE);
+            let last = &heard[heard.len().saturating_sub(480)..];
+            let level = if last.is_empty() { String::new() } else { format!("{:>9.1}", to_db(peak(last))) };
+            println!("{:<22}{:>8.2}{}", name, (blocks * BLOCK) as f32 / SAMPLE_RATE, level);
         }
 
         println!();

@@ -37,12 +37,16 @@ const GLIDE_MAX: f64 = 0.5;
 // In samples
 const TIME_SETTLED: f64 = 1e-3;
 
-/// -120 dBFS. Below this the lines are fed exact zeros: nothing is left to turn into
-/// denormal numbers, and once a whole line is zeros the delay is idle
-pub(crate) const SILENCE: f32 = 1e-6;
+/// -100 dBFS. Below this the lines are fed exact zeros: nothing is left to turn into
+/// denormal numbers, and once the read positions have only zeros ahead of them the delay is
+/// idle. What is cut off there is under the noise of a 16-bit recording
+pub(crate) const SILENCE: f32 = 1e-5;
 
 // Samples a line is longer than the longest delay, for the interpolation
 const LINE_MARGIN: usize = 8;
+
+// The interpolation reads this many samples further back than the whole part of the delay
+const READ_BEHIND: usize = 2;
 
 /// What the knobs say, read once per block. The delay smooths the values itself
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -119,7 +123,11 @@ pub struct Delay {
 
     // Samples in a row that only zeros went into the lines
     quiet_run: usize,
-    // The lines hold nothing but zeros and the filters are at rest
+    // Samples behind the write position that count. The delay falls idle as soon as the
+    // read positions have only zeros ahead of them, which leaves older repeats in the lines
+    // further back. They are never heard: what is further back than this reads as silence
+    valid: usize,
+    // Nothing is left to hear and the filters are at rest
     idle: bool,
 }
 
@@ -140,6 +148,7 @@ impl Delay {
             feed_step: 1.0,
             spread_max: 0.0,
             quiet_run: 0,
+            valid: 0,
             idle: true,
         };
         delay.set_sample_rate(44100.0);
@@ -175,10 +184,11 @@ impl Delay {
             line.fill(0.0);
         }
         self.write = 0;
+        self.valid = self.lines[0].len();
         self.rest();
     }
 
-    /// For when the lines hold nothing but zeros
+    /// For when nothing is left to hear
     fn rest(&mut self) {
         for (highpass, lowpass) in self.highpass.iter_mut().zip(self.lowpass.iter_mut()) {
             highpass.reset();
@@ -194,9 +204,17 @@ impl Delay {
         self.idle
     }
 
-    #[cfg(test)]
-    pub(crate) fn lines_len(&self) -> usize {
-        self.lines[0].len()
+    /// How far behind the write position the read positions get, now and on their way to
+    /// a delay of `time` samples
+    fn reach(&self, time: f64) -> usize {
+        let longest = self.time.max(time);
+        (longest + (longest * SPREAD).min(self.spread_max)) as usize + READ_BEHIND + 1
+    }
+
+    /// True when the filters would put out nothing more by themselves
+    fn filters_at_rest(&self) -> bool {
+        let quiet = |state: f32| state.abs() < SILENCE;
+        self.highpass.iter().all(|filter| quiet(filter.state())) && self.lowpass.iter().all(|filter| quiet(filter.state()))
     }
 
     /// Address and capacity of every buffer, for checking that nothing is allocated anew
@@ -265,7 +283,11 @@ impl Delay {
             let mut repeats = [0.0f32; 2];
             for (channel, delay) in [self.time - spread, self.time + spread].into_iter().enumerate() {
                 let whole = delay as usize;
-                let read = read_cubic(&self.lines[channel], self.write, whole, (delay - whole as f64) as f32);
+                let read = if whole + READ_BEHIND <= self.valid {
+                    read_cubic(&self.lines[channel], self.write, whole, (delay - whole as f64) as f32)
+                } else {
+                    0.0
+                };
                 repeats[channel] = self.lowpass[channel].process(self.highpass[channel].process(read));
             }
 
@@ -282,12 +304,20 @@ impl Delay {
                 };
             }
             self.write = if self.write + 1 == line_len { 0 } else { self.write + 1 };
+            self.valid = (self.valid + 1).min(line_len);
 
             left[index] += self.mix * repeats[0];
             right[index] += self.mix * repeats[1];
 
-            self.quiet_run = if quiet { self.quiet_run + 1 } else { 0 };
-            if self.quiet_run >= line_len {
+            if !quiet {
+                self.quiet_run = 0;
+                continue;
+            }
+            // Idle once everything the read positions can get to is zeros, also if the time
+            // dial is still on its way, and the filters have rung out
+            self.quiet_run += 1;
+            if self.quiet_run >= self.reach(time) && self.filters_at_rest() {
+                self.valid = self.quiet_run.min(line_len);
                 self.rest();
                 return index + 1;
             }
@@ -420,7 +450,6 @@ pub(crate) mod tests {
         assert!(peak(&trail) > 0.01);
         run_blocks(&mut delay, &off(), &vec![0.0; ms(2500.0)], BLOCK);
         assert!(delay.is_idle());
-        assert!(delay.lines.iter().flatten().all(|&sample| sample == 0.0));
 
         let (left, right) = run_blocks(&mut delay, &off(), &input, BLOCK);
         assert_eq!(left, input);
@@ -624,6 +653,78 @@ pub(crate) mod tests {
         let (left, right) = run_blocks(&mut delay, &setting, &vec![0.0; ms(1200.0)], BLOCK);
         assert!(delay.is_idle());
         assert!(left[ms(1100.0)..].iter().chain(&right[ms(1100.0)..]).all(|&sample| sample == 0.0));
-        assert!(delay.lines.iter().flatten().all(|&sample| sample == 0.0));
+    }
+
+    /// Samples from the start of `silence` until the delay is idle, and what it put out
+    fn ring_out(delay: &mut Delay, setting: &DelaySettings, silence: usize) -> (usize, Vec<f32>) {
+        let (mut left, mut right) = (vec![0.0; silence], vec![0.0; silence]);
+        for index in 0..silence {
+            delay.process(setting, &mut left[index..index + 1], &mut right[index..index + 1]);
+            if delay.is_idle() {
+                return (index + 1, left);
+            }
+        }
+        panic!("Not idle after {} samples", silence);
+    }
+
+    #[test]
+    fn test_idle_as_soon_as_the_last_repeat_is_over() {
+        // No feedback: one repeat. It is heard in full, and the delay is idle right after
+        // it, not a whole line later
+        for time_ms in [20.0, 250.0, 1000.0] {
+            let mut delay = new_delay(SAMPLE_RATE);
+            let setting = settings(time_ms, 0.0, 1.0);
+            let burst = noise(0.5, ms(15.0));
+            run_blocks(&mut delay, &setting, &burst, BLOCK);
+            assert!(!delay.is_idle());
+
+            let (idle_at, left) = ring_out(&mut delay, &setting, ms(2000.0));
+            let repeat = &left[ms(time_ms - 15.0) - 16..ms(time_ms) + 16];
+            assert!(rms(repeat) > 0.1, "{} ms: the repeat at {}", time_ms, rms(repeat));
+            assert!(idle_at >= ms(time_ms), "{} ms: idle after {} samples", time_ms, idle_at);
+            assert!(idle_at < ms(time_ms + 40.0), "{} ms: idle after {} samples", time_ms, idle_at);
+            // What was still coming out when it stopped is nothing
+            assert!(peak(&left[idle_at - 48..idle_at]) < 2.0 * SILENCE, "{} ms: cut at {}", time_ms, peak(&left[idle_at - 48..idle_at]));
+        }
+    }
+
+    #[test]
+    fn test_idle_waits_for_a_time_dial_that_is_on_its_way_up() {
+        // Idle only when the longer delay the dial is moving to has nothing left either
+        let mut delay = new_delay(SAMPLE_RATE);
+        let burst = noise(0.5, ms(15.0));
+        run_blocks(&mut delay, &settings(20.0, 0.0, 1.0), &burst, BLOCK);
+        let longer = settings(200.0, 0.0, 1.0);
+        let (idle_at, _) = ring_out(&mut delay, &longer, ms(2000.0));
+        assert!(idle_at >= ms(200.0), "Idle after {} samples", idle_at);
+    }
+
+    #[test]
+    fn test_what_is_left_in_the_lines_at_idle_is_never_heard() {
+        // A short delay falls idle with older repeats still far back in the lines. A long
+        // time setting afterwards reads back there: it must find silence, as a new delay does
+        let mut delay = new_delay(SAMPLE_RATE);
+        let short = settings(20.0, 0.6, 1.0);
+        run_blocks(&mut delay, &short, &noise(0.5, ms(600.0)), BLOCK);
+        ring_out(&mut delay, &short, ms(3000.0));
+        assert!(delay.lines.iter().flatten().any(|&sample| sample != 0.0));
+
+        let mut input = noise(0.3, ms(50.0));
+        input.resize(ms(2500.0), 0.0);
+        for time_ms in [1000.0, 300.0] {
+            let long = settings(time_ms, 0.5, 1.0);
+            let expected = run_blocks(&mut new_delay(SAMPLE_RATE), &long, &input, BLOCK);
+            assert!(run_blocks(&mut delay, &long, &input, BLOCK) == expected, "{} ms", time_ms);
+            ring_out(&mut delay, &long, ms(20_000.0));
+        }
+
+        // And a time dial that moves while the delay plays gets no further back than what
+        // was played since
+        let moving = run_blocks(&mut delay, &short, &input[..ms(100.0)], BLOCK);
+        let mut fresh = new_delay(SAMPLE_RATE);
+        assert!(moving == run_blocks(&mut fresh, &short, &input[..ms(100.0)], BLOCK));
+        let long = settings(1000.0, 0.5, 1.0);
+        let silence = vec![0.0; ms(3000.0)];
+        assert!(run_blocks(&mut delay, &long, &silence, BLOCK) == run_blocks(&mut fresh, &long, &silence, BLOCK));
     }
 }

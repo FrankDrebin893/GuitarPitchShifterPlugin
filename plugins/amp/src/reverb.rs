@@ -86,7 +86,7 @@ impl Default for ReverbSettings {
     }
 }
 
-/// Below -120 dBFS everything that is kept is kept as an exact zero: nothing is left to turn
+/// Below -100 dBFS everything that is kept is kept as an exact zero: nothing is left to turn
 /// into denormal numbers, and once every buffer is zeros the reverb is idle
 fn audible(sample: f32) -> f32 {
     if sample.abs() >= SILENCE {
@@ -729,7 +729,8 @@ mod tests {
         let mut reverb = new_reverb(SAMPLE_RATE);
         let setting = settings(DECAY_MIN_S, 1.0);
         let playing = block_time_us(&mut reverb, &setting, &noise(0.5, seconds(0.25, SAMPLE_RATE)));
-        let silence = vec![0.0; seconds(0.2, SAMPLE_RATE)];
+        // 100 dB at this decay is half a second: three of these end a little before
+        let silence = vec![0.0; seconds(0.13, SAMPLE_RATE)];
         let mut slowest: f64 = 0.0;
         for _ in 0..3 {
             slowest = slowest.max(block_time_us(&mut reverb, &setting, &silence));
@@ -1132,27 +1133,42 @@ mod tests {
         }
 
         println!("\n== TAILS AND COST ==");
-        println!("\nSeconds from the end of the input until idle (all state at exact zero)");
-        for (time_ms, feedback) in [(350.0, 0.35), (350.0, FEEDBACK_MAX), (TIME_MAX_MS, FEEDBACK_MAX)] {
+        println!("\nSeconds from the end of the input until idle, at mix 1.0, and the peak of what was still");
+        println!("coming out in the last 10 ms before that and in the 10 ms a second earlier, in dBFS");
+        // Runs `process` on silence until `is_idle`. Returns the seconds and the two peaks
+        fn ring_out(mut process: impl FnMut(&mut [f32], &mut [f32]) -> bool) -> (f32, f32, f32) {
+            let mut heard = Vec::new();
+            let mut idle = false;
+            while !idle && heard.len() < 200 * SAMPLE_RATE as usize {
+                let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
+                idle = process(&mut left, &mut right);
+                heard.extend(left.iter().zip(&right).map(|(l, r)| l.abs().max(r.abs())));
+            }
+            let window = (0.01 * SAMPLE_RATE) as usize;
+            let peak_before = |back: usize| {
+                let end = heard.len().saturating_sub(back);
+                to_db(peak(&heard[end.saturating_sub(window)..end]))
+            };
+            (heard.len() as f32 / SAMPLE_RATE, peak_before(0), peak_before(SAMPLE_RATE as usize))
+        }
+        for (time_ms, feedback) in [(TIME_MIN_MS, 0.35), (350.0, 0.35), (350.0, FEEDBACK_MAX), (TIME_MAX_MS, FEEDBACK_MAX)] {
             let mut delay = new_delay(SAMPLE_RATE);
             let setting = delay_tests::settings(time_ms, feedback, 1.0);
             delay_tests::run_blocks(&mut delay, &setting, &di[..seconds(2.0, SAMPLE_RATE)], BLOCK);
-            let mut blocks = 0;
-            while !delay.is_idle() && blocks < 200_000 {
-                delay.process(&setting, &mut [0.0; BLOCK], &mut [0.0; BLOCK]);
-                blocks += 1;
-            }
-            println!("  delay {:>6.0} ms, feedback {:.2}: {:.1} s (of which {:.1} s to see that the lines are empty)", time_ms, feedback, (blocks * BLOCK) as f32 / SAMPLE_RATE, delay.lines_len() as f32 / SAMPLE_RATE);
+            let (time_s, last, earlier) = ring_out(|left, right| {
+                delay.process(&setting, left, right);
+                delay.is_idle()
+            });
+            println!("  delay {:>6.0} ms, feedback {:.2}: {:>5.1} s {:>8.1} {:>8.1}", time_ms, feedback, time_s, last, earlier);
         }
         for decay_s in [DECAY_MIN_S, 1.8, DECAY_MAX_S] {
             let mut reverb = new_reverb(SAMPLE_RATE);
             run_blocks(&mut reverb, &settings(decay_s, 1.0), &di[..seconds(2.0, SAMPLE_RATE)], BLOCK);
-            let mut blocks = 0;
-            while !reverb.is_idle() && blocks < 200_000 {
-                reverb.process(&settings(decay_s, 1.0), &mut [0.0; BLOCK], &mut [0.0; BLOCK]);
-                blocks += 1;
-            }
-            println!("  reverb decay {:.1} s: {:.1} s", decay_s, (blocks * BLOCK) as f32 / SAMPLE_RATE);
+            let (time_s, last, earlier) = ring_out(|left, right| {
+                reverb.process(&settings(decay_s, 1.0), left, right);
+                reverb.is_idle()
+            });
+            println!("  reverb decay {:.1} s:               {:>5.1} s {:>8.1} {:>8.1}", decay_s, time_s, last, earlier);
         }
 
         println!("\nCost per block of {} samples (median, microseconds, and share of real time)", BLOCK);
