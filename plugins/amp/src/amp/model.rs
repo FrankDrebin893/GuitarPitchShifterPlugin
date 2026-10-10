@@ -6,17 +6,24 @@ pub const MAX_STAGES: usize = 4;
 // Frozen: the variant ids are what DAW projects store
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Amp {
+    #[id = "klar"]
+    #[name = "Klar"]
+    Klar,
     #[id = "brol"]
     #[name = "Brøl"]
     Brol,
+    #[id = "torden"]
+    #[name = "Torden"]
+    Torden,
 }
 
 impl Amp {
-    pub const ALL: [Amp; 1] = [Amp::Brol];
+    pub const ALL: [Amp; 3] = [Amp::Klar, Amp::Brol, Amp::Torden];
 
     pub fn model(self) -> &'static AmpModel {
         match self {
-            Amp::Brol => &BROL,
+            // Stub: Klar and Torden get their own models in milestone 2
+            Amp::Klar | Amp::Brol | Amp::Torden => &BROL,
         }
     }
 

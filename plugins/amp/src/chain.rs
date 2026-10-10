@@ -25,6 +25,7 @@ const BYPASS_FADE_MS: f32 = 10.0;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AmpSettings {
     pub bypass: bool,
+    pub amp: Amp,
     /// The amp dials, 0.0 to 1.0
     pub gain: f32,
     pub bass: f32,
@@ -40,6 +41,7 @@ impl Default for AmpSettings {
     fn default() -> Self {
         Self {
             bypass: false,
+            amp: Amp::Brol,
             gain: 0.5,
             bass: 0.5,
             mid: 0.5,
@@ -167,8 +169,6 @@ impl AmpChain {
 
     /// Changes to another amp. Does not allocate; the cabinet crossfades, the amp itself
     /// switches at once
-    // Not called by the plugin until it has a second amp
-    #[allow(dead_code)]
     pub fn set_amp(&mut self, amp: Amp) {
         if amp != self.amp {
             self.amp = amp;
@@ -204,6 +204,7 @@ impl AmpChain {
     /// Processes a block in place. With two channels the input is their average and the
     /// output goes to both
     pub fn process(&mut self, settings: &AmpSettings, left: &mut [f32], mut right: Option<&mut [f32]>) {
+        self.set_amp(settings.amp);
         let wet_target = if settings.bypass { 0.0 } else { 1.0 };
         if !self.primed {
             self.wet = wet_target;
@@ -343,6 +344,7 @@ mod tests {
     fn with_all_dials(value: f32, out_level: f32) -> AmpSettings {
         AmpSettings {
             bypass: false,
+            amp: Amp::Brol,
             gain: value,
             bass: value,
             mid: value,

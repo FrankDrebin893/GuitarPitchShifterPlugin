@@ -9,6 +9,7 @@ mod dsp;
 mod editor;
 #[cfg(test)]
 mod test_util;
+pub use amp::model::Amp;
 use chain::{AmpChain, AmpSettings};
 
 const LEVEL_MIN_DB: f32 = -30.0;
@@ -28,6 +29,9 @@ pub struct GuitarAmpParams {
 
     #[id = "bypass"]
     pub bypass: BoolParam,
+
+    #[id = "amp"]
+    pub amp: EnumParam<Amp>,
 
     #[id = "gain"]
     pub gain: FloatParam,
@@ -67,6 +71,8 @@ impl Default for GuitarAmpParams {
             editor_state: editor::default_state(),
 
             bypass: BoolParam::new("Bypass", false).make_bypass(),
+
+            amp: EnumParam::new("Amp", defaults.amp),
 
             gain: dial_param("Gain", defaults.gain),
             bass: dial_param("Bass", defaults.bass),
@@ -157,6 +163,7 @@ impl Plugin for GuitarAmpPlugin {
     ) -> ProcessStatus {
         let settings = AmpSettings {
             bypass: self.params.bypass.value(),
+            amp: self.params.amp.value(),
             gain: self.params.gain.value(),
             bass: self.params.bass.value(),
             mid: self.params.mid.value(),
