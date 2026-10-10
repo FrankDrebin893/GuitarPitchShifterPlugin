@@ -165,14 +165,22 @@ impl Preamp {
         self.bright_gain.snap();
     }
 
+    /// One stage after the other over the whole block, not one sample after the other
+    /// through all the stages: the square roots and divisions of a stage then do not have
+    /// to wait for the stage before, and several samples are worked on at once. The result
+    /// is the same to the bit
     pub fn process(&mut self, block: &mut [f32]) {
         for sample in block.iter_mut() {
             let tight = self.focus.process(self.tight.process(*sample) as f64) as f32;
-            let mut signal = tight + self.bright.process(tight) * self.bright_gain.next();
-            for stage in &mut self.stages[..self.stage_count] {
-                signal = stage.process(signal);
+            *sample = tight + self.bright.process(tight) * self.bright_gain.next();
+        }
+        for stage in &mut self.stages[..self.stage_count] {
+            for sample in block.iter_mut() {
+                *sample = stage.process(*sample);
             }
-            *sample = self.lowcut.process(self.fizz.process(signal as f64)) as f32 * self.level.next();
+        }
+        for sample in block.iter_mut() {
+            *sample = self.lowcut.process(self.fizz.process(*sample as f64)) as f32 * self.level.next();
         }
     }
 }

@@ -2907,20 +2907,6 @@ mod tests {
         println!("`most`: 350 ms, feedback 90 %, mix 100 % and 6 s, mix 100 %");
         println!();
         println!("Time per {}-sample block, stereo, everything on (Torden, Gain 10, gate, drive, cabinet dials)", BLOCK);
-        let block_time_stereo_us = |chain: &mut AmpChain, settings: &AmpSettings, input: &[f32]| {
-            let (mut left, mut right) = (input.to_vec(), input.to_vec());
-            let mut times: Vec<f64> = left
-                .chunks_mut(BLOCK)
-                .zip(right.chunks_mut(BLOCK))
-                .map(|(l, r)| {
-                    let start = Instant::now();
-                    chain.process(settings, l, Some(r));
-                    start.elapsed().as_secs_f64() * 1e6
-                })
-                .collect();
-            times.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            times[times.len() / 2]
-        };
         println!(
             "{:>11}{:>19}{:>19}{:>19}{:>19}{:>19}",
             "", "effects off", "delay", "reverb", "both", "both, tails only"
@@ -3191,6 +3177,34 @@ mod tests {
         }
 
         println!();
+        print_stage_times();
+    }
+
+    /// Median time to process one stereo block, in microseconds
+    fn block_time_stereo_us(chain: &mut AmpChain, settings: &AmpSettings, input: &[f32]) -> f64 {
+        let (mut left, mut right) = (input.to_vec(), input.to_vec());
+        let mut times: Vec<f64> = left
+            .chunks_mut(BLOCK)
+            .zip(right.chunks_mut(BLOCK))
+            .map(|(l, r)| {
+                let start = Instant::now();
+                chain.process(settings, l, Some(r));
+                start.elapsed().as_secs_f64() * 1e6
+            })
+            .collect();
+        times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        times[times.len() / 2]
+    }
+
+    /// The last table of `amp_report` by itself, for working on the cost:
+    ///   cargo test -p amp --release stage_report -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn stage_report() {
+        print_stage_times();
+    }
+
+    fn print_stage_times() {
         println!("Time per stage: Torden, Gain 10, everything on, default delay and reverb, stereo. Each stage");
         println!("is run by itself over two seconds of chords in pieces of {} samples; the fastest of seven", CHUNK);
         println!("runs, in ns per sample at the host's rate and as a share of real time. `whole` is the chain");
