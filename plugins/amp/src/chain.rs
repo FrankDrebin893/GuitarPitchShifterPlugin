@@ -11,6 +11,8 @@ use crate::dsp::shaper::output_clip;
 use crate::dsp::{curve, db_to_gain, smoothing_coeff, Ramp};
 use crate::gate::Gate;
 use crate::reverb::{Reverb, ReverbSettings};
+use crate::tuner::{Tuner, TunerReading};
+use std::sync::Arc;
 
 // The chain works in pieces of at most this many samples, and reads the dials once per piece
 const CHUNK: usize = 32;
@@ -34,6 +36,10 @@ const AMP_FADE_MS: f32 = 5.0;
 
 // Crossfade between the cabinet and the amp's own signal when the cabinet is switched
 const CAB_FADE_MS: f32 = 20.0;
+
+// While the tuner is on the amp is given silence and its output is turned down, both in this
+// time. The same when it is switched off again
+const TUNER_FADE_MS: f32 = 10.0;
 
 // Level of the amp's signal with the cabinet off, in dB: about as loud as with it on
 const CAB_OFF_DB: f32 = -1.4;
@@ -84,6 +90,10 @@ pub struct AmpSettings {
 
     /// Linear gain
     pub out_level: f32,
+
+    /// The tuner listens to the input and the amp is silent meanwhile. Bypass still passes
+    /// the input on
+    pub tuner_on: bool,
 }
 
 /// What the plugin starts with. The parameters in `lib.rs` take their defaults from here
@@ -112,6 +122,7 @@ impl Default for AmpSettings {
             delay: DelaySettings::default(),
             reverb: ReverbSettings::default(),
             out_level: 1.0,
+            tuner_on: false,
         }
     }
 }
@@ -232,6 +243,14 @@ pub struct AmpChain {
     amp_fade_len: u32,
     // Samples until the cabinet has finished its crossfade and can start another
     cabinet_busy: usize,
+
+    // Hears the input as it arrives, while `tuning`
+    tuner: Tuner,
+    tuning: bool,
+    // Share of the input the amp is given and of its output that is heard: 1.0 playing,
+    // 0.0 tuning
+    tuner_mute: Ramp,
+    tuner_fade_steps: u32,
 }
 
 impl AmpChain {
@@ -271,6 +290,10 @@ impl AmpChain {
             amp_fade: 1,
             amp_fade_len: 1,
             cabinet_busy: 0,
+            tuner: Tuner::new(),
+            tuning: false,
+            tuner_mute: Ramp::new(1.0),
+            tuner_fade_steps: 1,
         };
         chain.set_sample_rate(44100.0);
         chain
@@ -284,6 +307,8 @@ impl AmpChain {
         self.wet_step = 1.0 / (BYPASS_FADE_MS * 0.001 * sample_rate);
         self.amp_fade_len = ((AMP_FADE_MS * 0.001 * sample_rate).round() as u32).max(1);
         self.cab_fade_steps = ((CAB_FADE_MS * 0.001 * sample_rate).round() as u32).max(1);
+        self.tuner_fade_steps = ((TUNER_FADE_MS * 0.001 * sample_rate).round() as u32).max(1);
+        self.tuner.set_sample_rate(sample_rate);
 
         self.factor = factor_for(sample_rate);
         self.oversampler.set_factor(self.factor);
@@ -352,6 +377,14 @@ impl AmpChain {
         self.reset_stages();
         self.primed = false;
         self.until_tick = 0;
+        // Starts again with the first block if it is still switched on
+        self.tuning = false;
+        self.tuner.stop();
+    }
+
+    /// What the tuner hears, for the editor
+    pub fn tuner_reading(&self) -> Arc<TunerReading> {
+        self.tuner.reading()
     }
 
     fn reset_stages(&mut self) {
@@ -460,7 +493,21 @@ impl AmpChain {
         self.delay_settings = settings.delay;
         self.reverb_settings = settings.reverb;
 
+        if settings.tuner_on != self.tuning {
+            self.tuning = settings.tuner_on;
+            if self.tuning {
+                self.tuner.start();
+            } else {
+                self.tuner.stop();
+            }
+        }
+        let mute_target = if self.tuning { 0.0 } else { 1.0 };
+        if mute_target != self.tuner_mute.target() {
+            self.tuner_mute.set_target(mute_target, self.tuner_fade_steps);
+        }
+
         if jump {
+            self.tuner_mute.snap();
             self.in_gain.snap();
             self.out_level.snap();
             self.gate.snap();
@@ -550,7 +597,7 @@ impl AmpChain {
     /// At most `CHUNK` samples
     fn process_chunk(&mut self, wet_target: f32, left: &mut [f32], mut right: Option<&mut [f32]>) {
         let bypassed = |chain: &Self| chain.wet == 0.0 && wet_target == 0.0;
-        if bypassed(self) {
+        if bypassed(self) && !self.tuning {
             return;
         }
         let len = left.len();
@@ -565,10 +612,33 @@ impl AmpChain {
             None => signal[..len].copy_from_slice(left),
         }
 
+        // The tuner hears the input as it arrives, whatever the amp does with it
+        if self.tuning {
+            self.tuner.process(&signal[..len]);
+            if bypassed(self) {
+                return;
+            }
+        }
+
+        // While tuning the amp gets silence, so nothing of it is left in the repeats and
+        // the tail afterwards, and what still rings in them is turned down behind them
+        let muting = self.tuner_mute.value() != 1.0 || self.tuner_mute.target() != 1.0;
+        let mut heard_share = [1.0f32; CHUNK];
+        if muting {
+            for share in &mut heard_share[..len] {
+                *share = self.tuner_mute.next();
+            }
+        }
+
         // The gate listens to the input as it arrives and acts on it after the input gain
         let heard = signal;
         for sample in &mut signal[..len] {
             *sample *= self.in_gain.next();
+        }
+        if muting {
+            for (sample, share) in signal[..len].iter_mut().zip(&heard_share) {
+                *sample *= share;
+            }
         }
         self.gate.process(&heard[..len], &mut signal[..len]);
 
@@ -604,14 +674,20 @@ impl AmpChain {
                 self.wet = (self.wet + self.wet_step.copysign(wet_target - self.wet)).clamp(0.0, 1.0);
             }
 
-            let output = output_clip(wide_left[index] * level);
+            let mut output = output_clip(wide_left[index] * level);
+            if muting {
+                output *= heard_share[index];
+            }
             if self.wet >= 1.0 {
                 left[index] = output;
             } else {
                 left[index] += self.wet * (output - left[index]);
             }
             if let Some(right) = right.as_deref_mut() {
-                let output = output_clip(wide_right[index] * level);
+                let mut output = output_clip(wide_right[index] * level);
+                if muting {
+                    output *= heard_share[index];
+                }
                 if self.wet >= 1.0 {
                     right[index] = output;
                 } else {
@@ -635,6 +711,7 @@ mod tests {
     use crate::dsp::shaper::{asym_clip, AsymClipper, OUTPUT_CLIP_KNEE};
     use crate::gate::tests::{decaying_note, gain_trace, hiss, transitions as gate_changes};
     use crate::test_util::*;
+    use crate::tuner::tests::{note_hz as tuner_note_hz, string as tuner_string};
     use std::time::Instant;
 
     const SAMPLE_RATE: f32 = 48000.0;
@@ -2005,8 +2082,9 @@ mod tests {
 
     #[test]
     fn test_pedals_and_effects_do_not_allocate() {
-        // The pedals own no buffers at all: a chain is as large as its fields, and the only
-        // memory it points to is the cabinet's and the lines of the delay and the reverb
+        // The pedals and the tuner own no buffers at all: a chain is as large as its fields,
+        // and the only memory it points to is the cabinet's and the lines of the delay and
+        // the reverb (and what the tuner shows, which it shares with the editor)
         for sample_rate in [44100.0, 192000.0] {
             let mut chain = new_chain(sample_rate);
             let before = buffer_layout(&chain);
@@ -2023,6 +2101,7 @@ mod tests {
                     cab_mic: (turn % 3) as f32 * 0.5,
                     cab_res: (turn % 4) as f32 / 3.0,
                     bypass: turn % 7 == 6,
+                    tuner_on: turn % 4 == 3,
                     delay: DelaySettings {
                         on: turn % 2 == 1,
                         ..delay_on([20.0, 1000.0, 350.0][turn % 3], 0.9, 1.0)
@@ -2421,6 +2500,164 @@ mod tests {
         let silent = block_time_us(&mut chain, &settings, &vec![0.0; 12_000]);
         assert!(ringing < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us while the tail ends", playing, ringing);
         assert!(silent < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us silent", playing, silent);
+    }
+
+    fn tuning(base: AmpSettings) -> AmpSettings {
+        AmpSettings {
+            tuner_on: true,
+            ..base
+        }
+    }
+
+    /// A low E string, quieter than a guitar gives it
+    fn quiet_low_e(seconds: f32) -> Vec<f32> {
+        let mut note = tuner_string(tuner_note_hz(40), SAMPLE_RATE, seconds);
+        note.iter_mut().for_each(|sample| *sample *= 0.04);
+        note
+    }
+
+    fn cents_off(hz: f32, expected_hz: f32) -> f32 {
+        1200.0 * (hz / expected_hz).log2()
+    }
+
+    #[test]
+    fn test_tuner_mutes_without_a_click_and_gives_the_amp_back() {
+        let input = sine(220.0, 0.3, SAMPLE_RATE, 28_800);
+        for playing in [AmpSettings::default(), with_default_effects(with_amp(Amp::Torden, 0.8))] {
+            let mut chain = new_chain(SAMPLE_RATE);
+            let (mut left, mut right) = (input.clone(), input.clone());
+
+            // Playing, tuning, playing again
+            for (index, (l, r)) in left.chunks_mut(BLOCK).zip(right.chunks_mut(BLOCK)).enumerate() {
+                let settings = if (150..300).contains(&index) { tuning(playing) } else { playing };
+                chain.process(&settings, l, Some(r));
+            }
+
+            let (on, off) = (150 * BLOCK, 300 * BLOCK);
+            let fade = (TUNER_FADE_MS * 0.001 * SAMPLE_RATE) as usize + 1;
+            for channel in [&left, &right] {
+                // Not quiet: silent, whatever still rings in the delay and the reverb
+                assert!(channel[on + fade..off].iter().all(|sample| *sample == 0.0), "{:?} is heard while tuning", playing.amp);
+                assert!(rms(&channel[off + 4800..]) > 0.01);
+
+                let own_step = largest_step(&channel[4800..on]);
+                let step_on = largest_step(&channel[on - 1..on + fade + 1]);
+                let step_off = largest_step(&channel[off - 1..off + 2400]);
+                assert!(step_on < own_step * 1.2, "{:?}: step of {step_on} into tuning, {own_step} while playing", playing.amp);
+                assert!(step_off < own_step * 1.2, "{:?}: step of {step_off} out of tuning, {own_step} while playing", playing.amp);
+            }
+        }
+    }
+
+    #[test]
+    fn test_what_is_played_while_tuning_is_not_in_the_effects_afterwards() {
+        // The amp gets silence while the tuner is on: the strings that were tuned are not
+        // in the repeats and the tail when it is switched off
+        let settings = with_effects_at_most(AmpSettings::default());
+        let mut chain = new_chain(SAMPLE_RATE);
+        let mut input = power_chords(SAMPLE_RATE, 1.0);
+        input.resize(96_000, 0.0);
+        let mut output = input.clone();
+        let (tuned, after) = output.split_at_mut(48_000);
+        for block in tuned.chunks_mut(BLOCK) {
+            chain.process(&tuning(settings), block, None);
+        }
+        for block in after.chunks_mut(BLOCK) {
+            chain.process(&settings, block, None);
+        }
+        assert!(peak(&output) < 1e-9, "Peak of {}", peak(&output));
+        assert!(chain.is_idle());
+    }
+
+    #[test]
+    fn test_tuner_hears_the_input_whatever_the_amp_does() {
+        let note = quiet_low_e(0.5);
+        let expected = tuner_note_hz(40);
+        let far_down = AmpSettings {
+            in_gain_db: -24.0,
+            gate_thresh_db: -20.0,
+            out_level: 0.0,
+            ..AmpSettings::default()
+        };
+        let bypassed = AmpSettings {
+            bypass: true,
+            ..AmpSettings::default()
+        };
+        for settings in [AmpSettings::default(), far_down, with_amp(Amp::Torden, 1.0), bypassed] {
+            let mut chain = new_chain(SAMPLE_RATE);
+            let reading = chain.tuner_reading();
+            let (mut left, mut right) = (note.clone(), note.clone());
+            for (l, r) in left.chunks_mut(BLOCK).zip(right.chunks_mut(BLOCK)) {
+                chain.process(&tuning(settings), l, Some(r));
+            }
+            let heard = reading.hz();
+            assert!(heard.is_some_and(|hz| cents_off(hz, expected).abs() < 3.0), "{heard:?} with {settings:?}");
+
+            // Bypass passes the input on while the tuner listens. Anything else is silent
+            if settings.bypass {
+                assert_eq!(left, note);
+                assert_eq!(right, note);
+            } else {
+                assert_eq!(peak(&left).max(peak(&right)), 0.0);
+            }
+
+            // Switched off there is nothing to show, and nothing is listened to
+            let mut more = note.clone();
+            for block in more.chunks_mut(BLOCK) {
+                chain.process(&settings, block, None);
+            }
+            assert_eq!(reading.hz(), None);
+        }
+
+        // Never switched on: no reading
+        let mut chain = new_chain(SAMPLE_RATE);
+        run_blocks(&mut chain, &AmpSettings::default(), &note, BLOCK);
+        assert_eq!(chain.tuner_reading().hz(), None);
+    }
+
+    #[test]
+    fn test_tuner_starts_over_after_a_reset() {
+        let mut chain = new_chain(SAMPLE_RATE);
+        let reading = chain.tuner_reading();
+        let settings = tuning(AmpSettings::default());
+        run_blocks(&mut chain, &settings, &quiet_low_e(0.5), BLOCK);
+        assert!(reading.hz().is_some());
+        chain.reset();
+        assert_eq!(reading.hz(), None);
+        run_blocks(&mut chain, &settings, &vec![0.0; 4800], BLOCK);
+        assert_eq!(reading.hz(), None);
+        run_blocks(&mut chain, &settings, &quiet_low_e(0.5), BLOCK);
+        assert!(reading.hz().is_some_and(|hz| cents_off(hz, tuner_note_hz(40)).abs() < 3.0));
+    }
+
+    #[test]
+    fn test_tuning_does_not_depend_on_block_size() {
+        // The switch is read with the dials, and the tuner counts its work in samples: the
+        // same output and the same readings however the host cuts the stream
+        let input = quiet_low_e(0.6);
+        let playing = with_default_effects(with_amp(Amp::Klar, 0.5));
+        let (on, off) = (4800, 24_000);
+        let run = |block: usize| {
+            let mut chain = new_chain(SAMPLE_RATE);
+            let reading = chain.tuner_reading();
+            let mut output = input.clone();
+            let mut heard = Vec::new();
+            for (range, settings) in [(0..on, playing), (on..off, tuning(playing)), (off..input.len(), playing)] {
+                for piece in output[range].chunks_mut(block) {
+                    chain.process(&settings, piece, None);
+                }
+                heard.push(reading.hz().map(f32::to_bits));
+            }
+            (output, heard)
+        };
+
+        let (reference, heard) = run(input.len());
+        assert!(heard[1].is_some() && heard[0].is_none() && heard[2].is_none());
+        for block in [1, 7, 32, 64, 1000] {
+            let (output, heard_in_blocks) = run(block);
+            assert!(largest_difference(&reference, &output) < 1e-5, "Blocks of {block}");
+            assert_eq!(heard_in_blocks, heard, "Blocks of {block}");
+        }
     }
 
     /// Prints levels, distortion, aliasing, tightness, dynamics, latency and cost for every

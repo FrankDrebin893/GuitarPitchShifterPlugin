@@ -560,3 +560,47 @@ pub fn kurtosis(samples: &[f32]) -> f32 {
     let moment = |power: i32| samples.iter().map(|s| (*s as f64 - mean).powi(power)).sum::<f64>() / count;
     (moment(4) / (moment(2) * moment(2)).max(1e-300)) as f32
 }
+
+// The highest partial of `stiff_string`
+const STIFF_STRING_TOP_HZ: f64 = 6000.0;
+
+/// The frequency of a partial of a string with stiffness, where `freq_hz` is that of its
+/// first one: the stiffer the string, the sharper its upper partials
+pub fn stiff_partial_hz(freq_hz: f32, inharmonicity: f32, number: usize) -> f64 {
+    let (b, n) = (inharmonicity as f64, number as f64);
+    freq_hz as f64 * n * ((1.0 + b * n * n) / (1.0 + b)).sqrt()
+}
+
+/// A plucked string as a pickup hears it, put together from decaying sines, so that its
+/// partials are exactly where `stiff_partial_hz` says: the tone the tuner is tested against.
+/// (`pluck` is a delay line: its partials are in tune only as far as its filters let them be.)
+/// The partials an octave apart from the pick position are missing, the upper ones are
+/// weaker and die sooner. Peaks at 0.5
+pub fn stiff_string(freq_hz: f32, inharmonicity: f32, how: Pluck, sample_rate: f32, len: usize) -> Vec<f32> {
+    let mut recording = vec![0.0f64; len];
+    let top = STIFF_STRING_TOP_HZ.min(sample_rate as f64 * 0.45);
+    let mut number = 1;
+    loop {
+        let partial_hz = stiff_partial_hz(freq_hz, inharmonicity, number);
+        if partial_hz > top {
+            break;
+        }
+        let n = number as f64;
+        let picked = (std::f64::consts::PI * n * how.pick_position as f64).sin();
+        let pickup = 1.0 / (1.0 + (partial_hz / PICKUP_HZ as f64).powi(4)).sqrt();
+        let level = picked * pickup / n;
+        // 60 dB in `decay_s` for the first partial, faster for the ones above it
+        let fall_per_s = 6.908 / how.decay_s as f64 * (1.0 + how.damping as f64 * (n - 1.0));
+        let fall = (-fall_per_s / sample_rate as f64).exp();
+        let (step_sin, step_cos) = (TAU * partial_hz / sample_rate as f64).sin_cos();
+        let (mut sin, mut cos, mut gain) = (0.0, 1.0, level);
+        for sample in recording.iter_mut() {
+            *sample += gain * sin;
+            (sin, cos) = (sin * step_cos + cos * step_sin, cos * step_cos - sin * step_sin);
+            gain *= fall;
+        }
+        number += 1;
+    }
+    let top = recording.iter().fold(0.0f64, |max, sample| max.max(sample.abs())).max(1e-12);
+    recording.iter().map(|&sample| (0.5 * sample / top) as f32).collect()
+}

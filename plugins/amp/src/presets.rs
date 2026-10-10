@@ -1,9 +1,9 @@
 //! The built-in presets: plain data, loaded from the editor through the host like any other
 //! knob movement. The audio thread knows nothing about them.
 //!
-//! A preset holds every parameter except three: Bypass, and Input and Output, which are the
-//! player's gain staging for their guitar and their mix and stay where they are when a
-//! preset is loaded.
+//! A preset holds every parameter except four: Bypass, the Tuner switch, and Input and
+//! Output, which are the player's gain staging for their guitar and their mix. They stay
+//! where they are when a preset is loaded.
 //!
 //! Values are written as the knobs show them: dials 0.0 to 10.0, dB, ms, s and percent.
 //! `dial` and `percent` turn them into what the parameters store.
@@ -59,7 +59,7 @@ pub static PRESETS: [Preset; 12] = [
     Preset {
         name: "Glas",
         amp: Amp::Klar,
-        dials: [3.5, 4.5, 4.5, 6.0, 6.5, 4.7],
+        dials: [3.5, 4.5, 4.5, 6.0, 6.5, 5.0],
         gate: (ON, -66.0, 250.0),
         drive: (OFF, [3.0, 5.0, 5.0]),
         cab: (ON, [6.0, 5.0]),
@@ -71,7 +71,7 @@ pub static PRESETS: [Preset; 12] = [
     Preset {
         name: "Varm",
         amp: Amp::Klar,
-        dials: [4.0, 5.0, 6.5, 3.5, 3.0, 4.6],
+        dials: [4.0, 5.0, 6.5, 3.5, 3.0, 4.8],
         gate: (ON, -66.0, 250.0),
         drive: (OFF, [3.0, 5.0, 5.0]),
         cab: (ON, [3.5, 5.0]),
@@ -83,7 +83,7 @@ pub static PRESETS: [Preset; 12] = [
     Preset {
         name: "Tåge",
         amp: Amp::Klar,
-        dials: [3.0, 4.5, 5.0, 5.5, 5.5, 4.7],
+        dials: [3.0, 4.5, 5.0, 5.5, 5.5, 4.9],
         gate: (ON, -72.0, 500.0),
         drive: (OFF, [3.0, 5.0, 5.0]),
         cab: (ON, [4.5, 5.0]),
@@ -424,6 +424,17 @@ mod tests {
         for preset in &PRESETS[1..] {
             assert!(!preset.matches(&params), "{} equals the defaults", preset.name);
             assert_eq!(preset.display_name(&params), format!("{}*", preset.name));
+        }
+    }
+
+    #[test]
+    fn test_presets_leave_the_tuner_alone() {
+        // Like Bypass, Input and Output, the tuner switch is not part of a sound
+        let params = GuitarAmpParams::default();
+        for preset in &PRESETS {
+            let switches = preset.switches(&params);
+            assert!(switches.iter().all(|(param, _)| !std::ptr::eq(*param, &params.tuner_on)), "{}", preset.name);
+            assert!(!preset.settings().tuner_on);
         }
     }
 

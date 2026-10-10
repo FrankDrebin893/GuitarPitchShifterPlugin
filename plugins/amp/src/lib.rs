@@ -14,10 +14,14 @@ mod presets;
 mod reverb;
 #[cfg(test)]
 mod test_util;
+mod tuner;
 pub use amp::model::Amp;
 use chain::{AmpChain, AmpSettings, GATE_RELEASE_MS, GATE_THRESHOLD_DB, IN_GAIN_DB};
 use delay::{DelaySettings, FEEDBACK_MAX, TIME_MAX_MS, TIME_MIN_MS};
 use reverb::{ReverbSettings, DECAY_MAX_S, DECAY_MIN_S};
+
+// The id of the tuner switch, as in `GuitarAmpParams`
+const TUNER_ID: &str = "tuner";
 
 const LEVEL_MIN_DB: f32 = -30.0;
 const LEVEL_MAX_DB: f32 = 6.0;
@@ -126,6 +130,10 @@ pub struct GuitarAmpParams {
     // Output
     #[id = "out_level"]
     pub out_level: FloatParam,
+
+    // Tuner: a switch on the head, not part of the sound. Presets and saved projects leave it alone
+    #[id = "tuner"]
+    pub tuner_on: BoolParam,
 }
 
 impl Default for GuitarAmpPlugin {
@@ -240,6 +248,8 @@ impl Default for GuitarAmpParams {
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_gain_to_db(1))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
+
+            tuner_on: BoolParam::new("Tuner", defaults.tuner_on).non_automatable(),
         }
     }
 }
@@ -279,6 +289,7 @@ impl GuitarAmpParams {
                 mix: self.reverb_mix.value(),
             },
             out_level: self.out_level.value(),
+            tuner_on: self.tuner_on.value(),
         }
     }
 }
@@ -332,7 +343,7 @@ impl Plugin for GuitarAmpPlugin {
     }
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        editor::create(self.params.clone(), self.params.editor_state.clone())
+        editor::create(self.params.clone(), self.params.editor_state.clone(), self.chain.tuner_reading())
     }
 
     fn initialize(
@@ -347,6 +358,13 @@ impl Plugin for GuitarAmpPlugin {
 
     fn reset(&mut self) {
         self.chain.reset();
+    }
+
+    /// The tuner is a parameter, so hosts store it, but a project does not open muted
+    /// because it was saved while tuning: the switch stays as it is when a state is loaded,
+    /// which is off in a plugin that was just created
+    fn filter_state(state: &mut PluginState) {
+        state.params.remove(TUNER_ID);
     }
 
     fn process(
@@ -414,7 +432,7 @@ mod tests {
         // project sounds that never touched that knob
         let settings = params.settings();
         assert!(!settings.bypass && settings.gate_on && !settings.drive_on && settings.cab_on);
-        assert!(!settings.delay.on && !settings.reverb.on);
+        assert!(!settings.delay.on && !settings.reverb.on && !settings.tuner_on);
         assert_eq!(settings.amp, Amp::Brol);
         assert_eq!((settings.in_gain_db, settings.gate_thresh_db, settings.gate_release_ms), (0.0, -60.0, 100.0));
         assert_eq!((settings.drive_gain, settings.drive_tone, settings.drive_level), (0.3, 0.5, 0.5));

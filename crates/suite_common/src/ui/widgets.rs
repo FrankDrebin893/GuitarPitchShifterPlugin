@@ -29,6 +29,18 @@ const STEPPER_TAPE_HEIGHT: f32 = 22.0;
 const STEPPER_BUTTON_RADIUS: f32 = 11.0;
 const STEPPER_BUTTON_GAP: f32 = 9.0;
 
+// The tuner's display: the note in a cell at the left end of a strip of label tape, and
+// a row of lamps in the rest of it
+const TUNER_NOTE_WIDTH: f32 = 50.0;
+const METER_PADDING: f32 = 8.0;
+// Lamps on each side of the middle one, which is lit alone while the note is in tune
+const METER_SIDE_LAMPS: usize = 8;
+// How much of its way from one lamp to the next the lit spot spends on both of them
+const METER_SHARED: f32 = 0.4;
+const METER_IN_TUNE_CENTS: f32 = 2.0;
+// The outermost lamp
+const METER_RANGE_CENTS: f32 = 50.0;
+
 fn polar(center: Pos2, radius: f32, angle: f32) -> Pos2 {
     Pos2::new(center.x + angle.cos() * radius, center.y + angle.sin() * radius)
 }
@@ -194,6 +206,94 @@ pub fn stepper(ui: &mut Ui, center: Pos2, width: f32, text: &str, id_source: &st
     painter.galley(Pos2::new(center.x - text_width / 2.0, center.y - galley.size().y / 2.0), galley, TAPE_TEXT);
 
     step
+}
+
+/// Display of a tuner: a strip of label tape `width` wide, centred on `center`, with the
+/// note's name at its left end and a `cents_meter` in the rest of it. Without a note the
+/// name is two dashes and the lamps are dark. As high as the tape of a `stepper`.
+pub fn tuner_display(painter: &Painter, center: Pos2, width: f32, note: Option<&str>, cents: Option<f32>) {
+    let tape = Rect::from_center_size(center, vec2(width, STEPPER_TAPE_HEIGHT));
+    painter.rect_filled(tape.translate(vec2(0.0, 2.0)), 2.0, SHADOW);
+    painter.rect_filled(tape, 2.0, TAPE);
+
+    let divider = tape.left() + TUNER_NOTE_WIDTH;
+    let text = note.unwrap_or("--").to_uppercase();
+    let galley = layout(painter, &text, mono(STEPPER_TEXT_SIZE), TAPE_TEXT, 0.1);
+    // The letter spacing also follows the last letter: leave it out of the centring
+    let text_width = galley.size().x - STEPPER_TEXT_SIZE * 0.1;
+    let text_x = tape.left() + (TUNER_NOTE_WIDTH - text_width) / 2.0;
+    painter.galley(Pos2::new(text_x, center.y - galley.size().y / 2.0), galley, TAPE_TEXT);
+    painter.line_segment(
+        [Pos2::new(divider, tape.top() + 4.0), Pos2::new(divider, tape.bottom() - 4.0)],
+        Stroke::new(1.0, KNOB_CAP_EDGE),
+    );
+
+    let lamps = Rect::from_min_max(Pos2::new(divider, tape.top()), tape.max).shrink2(vec2(METER_PADDING, 0.0));
+    meter_lamps(painter, lamps, cents);
+}
+
+/// How far a note is from in tune, as a row of lamps on a strip of label tape `width` wide,
+/// centred on `center`: flat to the left, sharp to the right, up to 50 cents. The lit spot
+/// moves like a needle, two lamps sharing it between their places. Within 2 cents the
+/// larger lamp in the middle is lit, and only then. `None` leaves all of them dark.
+/// Give it about 13 px of width per lamp: there are 17.
+pub fn cents_meter(painter: &Painter, center: Pos2, width: f32, cents: Option<f32>) {
+    let tape = Rect::from_center_size(center, vec2(width, STEPPER_TAPE_HEIGHT));
+    painter.rect_filled(tape.translate(vec2(0.0, 2.0)), 2.0, SHADOW);
+    painter.rect_filled(tape, 2.0, TAPE);
+    meter_lamps(painter, tape.shrink2(vec2(METER_PADDING, 0.0)), cents);
+}
+
+/// The lamps of a `cents_meter`, spread over the width of `rect`
+fn meter_lamps(painter: &Painter, rect: Rect, cents: Option<f32>) {
+    let side = METER_SIDE_LAMPS as f32;
+    // Whole pixels from lamp to lamp and even sizes, so every lamp is as wide as the next
+    let pitch = (rect.width() / (2.0 * side + 1.0)).floor();
+    let even = |size: f32| (size / 2.0).round() * 2.0;
+    let middle_x = rect.center().x.round();
+    let middle_y = rect.center().y.round();
+
+    // Where the lit spot is, in lamps from the middle. Out of tune it starts at the first
+    // lamp beside the middle one, so the middle one says in tune and nothing else
+    let in_tune = cents.is_some_and(|cents| cents.abs() <= METER_IN_TUNE_CENTS);
+    let spot = cents.filter(|_| !in_tune).map(|cents| {
+        let off = (cents.abs().min(METER_RANGE_CENTS) - METER_IN_TUNE_CENTS) / (METER_RANGE_CENTS - METER_IN_TUNE_CENTS);
+        (1.0 + off * (side - 1.0)).copysign(cents)
+    });
+
+    for lamp in -(METER_SIDE_LAMPS as i32)..=METER_SIDE_LAMPS as i32 {
+        let middle = lamp == 0;
+        let brightness = if middle {
+            if in_tune { 1.0 } else { 0.0 }
+        } else {
+            // Fully lit until the spot is most of the way to the next lamp, then fading
+            // as that one comes up
+            spot.map_or(0.0, |spot| ((1.0 - (lamp as f32 - spot).abs()) / METER_SHARED).clamp(0.0, 1.0))
+        };
+        let size = if middle {
+            vec2(even(pitch * 0.8), even(rect.height() * 0.72))
+        } else {
+            vec2(even(pitch * 0.5), even(rect.height() * 0.5))
+        };
+        let lens = Rect::from_center_size(Pos2::new(middle_x + lamp as f32 * pitch, middle_y), size);
+        if brightness > 0.0 {
+            for (grow, alpha) in [(3.5, 0.16), (1.8, 0.3)] {
+                painter.rect_filled(lens.expand(grow), 1.5 + grow, LED_ON.gamma_multiply(alpha * brightness));
+            }
+        }
+        painter.rect_filled(lens, 1.5, blend(LED_OFF, LED_ON, brightness));
+        if brightness >= 1.0 {
+            // The same highlight as on a round lamp
+            let shine = Rect::from_min_size(lens.min + vec2(1.0, 1.0), vec2((size.x - 2.0).max(1.0), 2.0));
+            painter.rect_filled(shine, 1.0, Color32::from_rgb(255, 208, 196));
+        }
+    }
+}
+
+/// A colour between two others, `share` of the way from the first to the second
+fn blend(from: Color32, to: Color32, share: f32) -> Color32 {
+    let channel = |from: u8, to: u8| (from as f32 + (to as f32 - from as f32) * share.clamp(0.0, 1.0)).round() as u8;
+    Color32::from_rgb(channel(from.r(), to.r()), channel(from.g(), to.g()), channel(from.b(), to.b()))
 }
 
 /// Small chrome push button with an arrow head engraved in its cap. `side` is -1 for the

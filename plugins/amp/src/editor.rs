@@ -4,11 +4,12 @@ use nih_plug_egui::{create_egui_editor, EguiState};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use suite_common::ui::{
-    self, param_knob, param_switch, rig_led, silk_label, small_footswitch, stepper, Ornament, PedalStyle, Step,
-    BENCH_MARGIN,
+    self, param_knob, param_switch, rig_led, silk_label, small_footswitch, stepper, tuner_display, Ornament,
+    PedalStyle, Step, BENCH_MARGIN,
 };
 
 use crate::presets::{self, PRESETS};
+use crate::tuner::{Note, TunerReading};
 use crate::{Amp, GuitarAmpParams};
 
 const WINDOW_WIDTH: u32 = 960;
@@ -27,11 +28,14 @@ const STYLE: PedalStyle = PedalStyle {
 };
 
 // The preset display, top centre between the jack captions: its caption, and under it the
-// tape with a button at each end. Wide enough for the longest name and the edited mark
+// tape with a button at each end. Wide enough for the longest name and the edited mark.
+// While the tuner is on, its display is there instead, under its own caption
 const PRESET_X: f32 = WINDOW_WIDTH as f32 / 2.0;
 const PRESET_CAPTION_Y: f32 = 25.0;
 const PRESET_Y: f32 = 47.0;
 const PRESET_WIDTH: f32 = 156.0;
+// Room for the note and seventeen lamps
+const TUNER_WIDTH: f32 = 286.0;
 
 // The amp's own six dials in an even row, and the output level set apart from them
 const KNOB_Y: f32 = 114.0;
@@ -41,10 +45,12 @@ const DIAL_SPACING: f32 = 100.0;
 const OUTPUT_X: f32 = 790.0;
 
 // Small switches below the band. Left of each, its LED above its caption. The amp selector
-// sits under the dials, the bypass under the output knob
+// sits under the dials, the bypass under the output knob, and the tuner beside the bypass,
+// further from the amps than they are from each other: it is not a fourth amp
 const SWITCH_Y: f32 = 320.0;
-const AMP_SWITCHES: [(Amp, &str, f32); 3] = [(Amp::Klar, "Klar", 295.0), (Amp::Brol, "Brøl", 425.0), (Amp::Torden, "Torden", 555.0)];
+const AMP_SWITCHES: [(Amp, &str, f32); 3] = [(Amp::Klar, "Klar", 255.0), (Amp::Brol, "Brøl", 385.0), (Amp::Torden, "Torden", 515.0)];
 const BYPASS_X: f32 = 790.0;
+const TUNER_X: f32 = 680.0;
 const CAPTION_OFFSET: f32 = -58.0;
 const LED_Y: f32 = 309.0;
 const CAPTION_Y: f32 = 335.0;
@@ -73,7 +79,11 @@ pub fn default_state() -> Arc<EguiState> {
     EguiState::from_size(WINDOW_WIDTH, WINDOW_HEIGHT)
 }
 
-pub fn create(params: Arc<GuitarAmpParams>, editor_state: Arc<EguiState>) -> Option<Box<dyn Editor>> {
+pub fn create(
+    params: Arc<GuitarAmpParams>,
+    editor_state: Arc<EguiState>,
+    tuner: Arc<TunerReading>,
+) -> Option<Box<dyn Editor>> {
     create_egui_editor(
         editor_state,
         (),
@@ -86,15 +96,32 @@ pub fn create(params: Arc<GuitarAmpParams>, editor_state: Arc<EguiState>) -> Opt
                 );
                 ui::head(ui, head, &STYLE);
 
-                // The preset loaded last, marked once a knob was moved away from it. The
-                // buttons step through the list and load what they arrive at
-                let loaded = presets::index_or_first(params.preset.load(Ordering::Relaxed));
-                silk_label(ui.painter(), origin + vec2(PRESET_X, PRESET_CAPTION_Y), "Preset", 13.0);
-                let shown = PRESETS[loaded].display_name(&params);
-                if let Some(step) = stepper(ui, origin + vec2(PRESET_X, PRESET_Y), PRESET_WIDTH, &shown, "preset") {
-                    let next = presets::neighbour(loaded, step == Step::Next);
-                    PRESETS[next].load(&params, setter);
-                    params.preset.store(next as u32, Ordering::Relaxed);
+                let tuning = params.tuner_on.value();
+                if tuning {
+                    // The note the tuner hears and how far off it is, where the preset was
+                    let note = tuner.hz().map(Note::nearest);
+                    let name = note.map(|note| format!("{}{}", note.name, note.octave));
+                    silk_label(ui.painter(), origin + vec2(PRESET_X, PRESET_CAPTION_Y), "Tuner", 13.0);
+                    tuner_display(
+                        ui.painter(),
+                        origin + vec2(PRESET_X, PRESET_Y),
+                        TUNER_WIDTH,
+                        name.as_deref(),
+                        note.map(|note| note.cents),
+                    );
+                    // What it hears changes without anyone touching the window
+                    ui.ctx().request_repaint();
+                } else {
+                    // The preset loaded last, marked once a knob was moved away from it. The
+                    // buttons step through the list and load what they arrive at
+                    let loaded = presets::index_or_first(params.preset.load(Ordering::Relaxed));
+                    silk_label(ui.painter(), origin + vec2(PRESET_X, PRESET_CAPTION_Y), "Preset", 13.0);
+                    let shown = PRESETS[loaded].display_name(&params);
+                    if let Some(step) = stepper(ui, origin + vec2(PRESET_X, PRESET_Y), PRESET_WIDTH, &shown, "preset") {
+                        let next = presets::neighbour(loaded, step == Step::Next);
+                        PRESETS[next].load(&params, setter);
+                        params.preset.store(next as u32, Ordering::Relaxed);
+                    }
                 }
 
                 let dials = [
@@ -119,6 +146,15 @@ pub fn create(params: Arc<GuitarAmpParams>, editor_state: Arc<EguiState>) -> Opt
                         setter.set_parameter(&params.amp, amp);
                         setter.end_set_parameter(&params.amp);
                     }
+                }
+
+                // Tuner switch, lit while tuning: the amp is silent then
+                rig_led(ui.painter(), origin + vec2(TUNER_X + CAPTION_OFFSET, LED_Y), tuning);
+                silk_label(ui.painter(), origin + vec2(TUNER_X + CAPTION_OFFSET, CAPTION_Y), "Tuner", CAPTION_SIZE);
+                if small_footswitch(ui, origin + vec2(TUNER_X, SWITCH_Y), "tuner").clicked() {
+                    setter.begin_set_parameter(&params.tuner_on);
+                    setter.set_parameter(&params.tuner_on, !tuning);
+                    setter.end_set_parameter(&params.tuner_on);
                 }
 
                 // Bypass switch, lit while the amp is on
