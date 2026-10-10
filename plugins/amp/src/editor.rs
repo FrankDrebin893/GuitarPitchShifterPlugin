@@ -2,17 +2,20 @@ use nih_plug::prelude::*;
 use nih_plug_egui::egui::{vec2, Rect, Vec2};
 use nih_plug_egui::{create_egui_editor, EguiState};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use suite_common::ui::{
-    self, param_knob, param_switch, rig_led, silk_label, small_footswitch, Ornament, PedalStyle, BENCH_MARGIN,
+    self, param_knob, param_switch, rig_led, silk_label, small_footswitch, stepper, Ornament, PedalStyle, Step,
+    BENCH_MARGIN,
 };
 
+use crate::presets::{self, PRESETS};
 use crate::{Amp, GuitarAmpParams};
 
 const WINDOW_WIDTH: u32 = 960;
-const WINDOW_HEIGHT: u32 = 660;
+const WINDOW_HEIGHT: u32 = 694;
 
 // The head across the top, the pedalboard in the rest of the window below it
-const HEAD_HEIGHT: f32 = 320.0;
+const HEAD_HEIGHT: f32 = 354.0;
 
 const STYLE: PedalStyle = PedalStyle {
     name: "Guitar Amp",
@@ -20,11 +23,18 @@ const STYLE: PedalStyle = PedalStyle {
     paint: ui::theme::PAINT_OXBLOOD,
     ornament: Ornament::Bolts,
     jacks: ["Stereo Out", "In"],
-    band_y: 202.0,
+    band_y: 236.0,
 };
 
+// The preset display, top centre between the jack captions: its caption, and under it the
+// tape with a button at each end. Wide enough for the longest name and the edited mark
+const PRESET_X: f32 = WINDOW_WIDTH as f32 / 2.0;
+const PRESET_CAPTION_Y: f32 = 25.0;
+const PRESET_Y: f32 = 47.0;
+const PRESET_WIDTH: f32 = 156.0;
+
 // The amp's own six dials in an even row, and the output level set apart from them
-const KNOB_Y: f32 = 80.0;
+const KNOB_Y: f32 = 114.0;
 const KNOB_RADIUS: f32 = 30.0;
 const DIAL_X: f32 = 150.0;
 const DIAL_SPACING: f32 = 100.0;
@@ -32,12 +42,12 @@ const OUTPUT_X: f32 = 790.0;
 
 // Small switches below the band. Left of each, its LED above its caption. The amp selector
 // sits under the dials, the bypass under the output knob
-const SWITCH_Y: f32 = 286.0;
+const SWITCH_Y: f32 = 320.0;
 const AMP_SWITCHES: [(Amp, &str, f32); 3] = [(Amp::Klar, "Klar", 295.0), (Amp::Brol, "Brøl", 425.0), (Amp::Torden, "Torden", 555.0)];
 const BYPASS_X: f32 = 790.0;
 const CAPTION_OFFSET: f32 = -58.0;
-const LED_Y: f32 = 275.0;
-const CAPTION_Y: f32 = 301.0;
+const LED_Y: f32 = 309.0;
+const CAPTION_Y: f32 = 335.0;
 const CAPTION_SIZE: f32 = 17.0;
 
 // The pedalboard: five slots in signal order, left to right
@@ -75,6 +85,17 @@ pub fn create(params: Arc<GuitarAmpParams>, editor_state: Arc<EguiState>) -> Opt
                     vec2(WINDOW_WIDTH as f32 - 2.0 * BENCH_MARGIN, HEAD_HEIGHT),
                 );
                 ui::head(ui, head, &STYLE);
+
+                // The preset loaded last, marked once a knob was moved away from it. The
+                // buttons step through the list and load what they arrive at
+                let loaded = presets::index_or_first(params.preset.load(Ordering::Relaxed));
+                silk_label(ui.painter(), origin + vec2(PRESET_X, PRESET_CAPTION_Y), "Preset", 13.0);
+                let shown = PRESETS[loaded].display_name(&params);
+                if let Some(step) = stepper(ui, origin + vec2(PRESET_X, PRESET_Y), PRESET_WIDTH, &shown, "preset") {
+                    let next = presets::neighbour(loaded, step == Step::Next);
+                    PRESETS[next].load(&params, setter);
+                    params.preset.store(next as u32, Ordering::Relaxed);
+                }
 
                 let dials = [
                     (&params.gain, "Gain"),

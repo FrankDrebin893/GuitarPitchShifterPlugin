@@ -10,6 +10,7 @@ mod drive;
 mod dsp;
 mod editor;
 mod gate;
+mod presets;
 mod reverb;
 #[cfg(test)]
 mod test_util;
@@ -30,8 +31,13 @@ pub struct GuitarAmpPlugin {
 // The full table of ids, including the ones not added yet, is in docs/amp-progress.md
 #[derive(Params)]
 pub struct GuitarAmpParams {
-    #[persist = "editor-state-rig"]
+    #[persist = "editor-state-rig2"]
     pub editor_state: Arc<EguiState>,
+
+    /// Index into `presets::PRESETS` of the preset loaded last. Not a parameter: the editor
+    /// sets the parameters themselves when a preset is loaded
+    #[persist = "preset"]
+    pub preset: std::sync::atomic::AtomicU32,
 
     #[id = "bypass"]
     pub bypass: BoolParam,
@@ -138,6 +144,7 @@ impl Default for GuitarAmpParams {
         let defaults = AmpSettings::default();
         Self {
             editor_state: editor::default_state(),
+            preset: std::sync::atomic::AtomicU32::new(0),
 
             bypass: BoolParam::new("Bypass", defaults.bypass).make_bypass(),
 
