@@ -449,6 +449,8 @@ impl Cabinet {
         for slot in &mut self.slots {
             slot.lows.reset();
         }
+        // A crossfade that was on its way is over
+        self.unload_tail(1 - self.active);
         self.tail.reset();
     }
 
@@ -1341,6 +1343,19 @@ pub mod tests {
         let off = output[settled..18_000].iter().zip(&other_alone[settled..]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
         assert!(off < 1e-5, "After the second swap: off by {off}");
         assert!(own_step(&output[11_000..18_000]) < 1.05 * own_step(&long_alone[11_000..]).max(own_step(&other_alone[11_000..])));
+
+        // Started from rest in the middle of a swap, the cabinet swapped to plays alone
+        // and at once, and nothing is worked out for the other any more
+        let mut restarted = cabinet_with(&long, sample_rate, true);
+        restarted.swap_taps(&other, &spectra_of(&other));
+        restarted.process(&mut input[..10].to_vec());
+        restarted.reset();
+        assert!(!restarted.is_swapping() && restarted.slots[restarted.active].tailed);
+        assert!(!restarted.slots[1 - restarted.active].tailed && !restarted.tail.has(1 - restarted.active));
+        let mut from_rest = input[..4800].to_vec();
+        restarted.process(&mut from_rest);
+        let off = from_rest.iter().zip(&other_alone).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        assert!(off < 1e-5, "From rest: off by {off}");
 
         // And back to a short one: at once, as between short ones, and the tail stops
         cabinet.swap_ir(&short);
