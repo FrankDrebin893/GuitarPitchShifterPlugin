@@ -13,6 +13,9 @@ mod dsp;
 mod editor;
 mod gate;
 mod lamps;
+// The chain follows it from the next step on
+#[allow(dead_code)]
+mod order;
 mod presets;
 mod reverb;
 #[cfg(test)]
