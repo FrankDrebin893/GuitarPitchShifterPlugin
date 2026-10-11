@@ -13,6 +13,9 @@ mod dsp;
 mod editor;
 mod gate;
 mod lamps;
+// Wired into the chain in a later step
+#[allow(dead_code)]
+mod mods;
 mod presets;
 mod reverb;
 #[cfg(test)]
