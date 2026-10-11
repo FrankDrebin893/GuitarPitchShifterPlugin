@@ -1212,6 +1212,7 @@ pub(crate) mod tests {
     #[test]
     #[ignore]
     fn tuner_report() {
+        crate::test_util::pin_thread();
         let off_of = |heard: Option<f32>, freq: f32| heard.map_or("     none".to_owned(), |hz| format!("{:>+9.2}", cents(hz, freq)));
         let delay_line = |freq: f32, sample_rate: f32, seconds: f32| {
             (freq < 700.0).then(|| pluck(freq, Pluck::OPEN, 3, sample_rate, (seconds * sample_rate) as usize))

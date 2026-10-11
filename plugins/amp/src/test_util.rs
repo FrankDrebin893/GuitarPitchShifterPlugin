@@ -638,3 +638,215 @@ pub fn stiff_string(freq_hz: f32, inharmonicity: f32, how: Pluck, sample_rate: f
     let top = recording.iter().fold(0.0f64, |max, sample| max.max(sample.abs())).max(1e-12);
     recording.iter().map(|&sample| (0.5 * sample / top) as f32).collect()
 }
+
+/// The same recording at another level
+pub fn at_rms_db(recording: &[f32], level_db: f32) -> Vec<f32> {
+    let mut recording = recording.to_vec();
+    set_rms_db(&mut recording, level_db);
+    recording
+}
+
+/// A direct recording of clean playing, made up: open chords strummed softly and then hard,
+/// a picked arpeggio that rings, and single hard accents. At -18 dBFS RMS, or lower if
+/// its peaks would not fit. What a clean amp is played with: far more peak over its
+/// average than `guitar_di`
+pub fn clean_di(sample_rate: f32) -> Vec<f32> {
+    let mut recording = vec![0.0; (12.0 * sample_rate) as usize];
+    let mut time = 0.2;
+
+    // Strummed: down strokes over all six strings, every fourth one hard
+    for stroke in 0..8 {
+        let level = if stroke % 4 == 3 { 1.0 } else { 0.45 };
+        for (string, &freq) in OPEN_CHORD_HZ.iter().enumerate() {
+            add_note(&mut recording, sample_rate, time + string as f32 * 0.012, 0.48, freq, Pluck::OPEN, level);
+        }
+        time += 0.5;
+    }
+
+    // Picked: one string after another, each left to ring under the next ones
+    time += 0.2;
+    for round in 0..2 {
+        for (step, &freq) in OPEN_CHORD_HZ.iter().enumerate() {
+            let level = if round == 0 { 0.5 } else { 0.7 };
+            add_note(&mut recording, sample_rate, time + step as f32 * 0.25, 1.2, freq * 2.0, Pluck::OPEN, level);
+        }
+        time += 1.5;
+    }
+
+    // Accents: single notes hit hard with silence between them
+    time += 1.0;
+    for freq in [196.0, 246.94, 329.63, 392.0] {
+        add_note(&mut recording, sample_rate, time, 0.6, freq, Pluck::OPEN, 1.0);
+        time += 0.75;
+    }
+
+    set_rms_db(&mut recording, -18.0);
+    fit_peak(&mut recording);
+    recording
+}
+
+/// One section of the weighting filter of the loudness measure
+struct Weighting {
+    coeffs: [f64; 5],
+    state: [f64; 2],
+}
+
+impl Weighting {
+    /// The shelf that stands for the head: +4 dB above about 1.7 kHz
+    fn shelf(sample_rate: f64) -> Self {
+        let k = (std::f64::consts::PI * 1681.974450955533 / sample_rate).tan();
+        let q = 0.7071752369554196;
+        let high = 10.0f64.powf(3.999843853973347 / 20.0);
+        let band = high.powf(0.4996667741545416);
+        let a0 = 1.0 + k / q + k * k;
+        Self {
+            coeffs: [
+                (high + band * k / q + k * k) / a0,
+                2.0 * (k * k - high) / a0,
+                (high - band * k / q + k * k) / a0,
+                2.0 * (k * k - 1.0) / a0,
+                (1.0 - k / q + k * k) / a0,
+            ],
+            state: [0.0; 2],
+        }
+    }
+
+    /// The high-pass at 38 Hz
+    fn highpass(sample_rate: f64) -> Self {
+        let k = (std::f64::consts::PI * 38.13547087602444 / sample_rate).tan();
+        let q = 0.5003270373238773;
+        let a0 = 1.0 + k / q + k * k;
+        Self {
+            coeffs: [1.0, -2.0, 1.0, 2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0],
+            state: [0.0; 2],
+        }
+    }
+
+    fn process(&mut self, input: f64) -> f64 {
+        let [b0, b1, b2, a1, a2] = self.coeffs;
+        let output = b0 * input + self.state[0];
+        self.state[0] = b1 * input - a1 * output + self.state[1];
+        self.state[1] = b2 * input - a2 * output;
+        output
+    }
+}
+
+/// Power of every `block_s` seconds of the weighted channels together, a new one every 100 ms
+fn weighted_block_powers(channels: &[&[f32]], sample_rate: f32, block_s: f32) -> Vec<f64> {
+    let len = channels.iter().map(|channel| channel.len()).min().unwrap_or(0);
+    let mut energy_before = vec![0.0f64; len + 1];
+    for channel in channels {
+        let rate = sample_rate as f64;
+        let (mut shelf, mut highpass) = (Weighting::shelf(rate), Weighting::highpass(rate));
+        let mut sum = 0.0;
+        for (index, &sample) in channel[..len].iter().enumerate() {
+            let weighted = highpass.process(shelf.process(sample as f64));
+            sum += weighted * weighted;
+            energy_before[index + 1] += sum;
+        }
+    }
+    let block = (block_s * sample_rate) as usize;
+    let hop = (0.1 * sample_rate) as usize;
+    (0..)
+        .map(|index| index * hop)
+        .take_while(|start| start + block <= len)
+        .map(|start| (energy_before[start + block] - energy_before[start]) / block as f64)
+        .collect()
+}
+
+fn loudness_of(power: f64) -> f64 {
+    -0.691 + 10.0 * power.max(1e-20).log10()
+}
+
+/// How loud a recording is heard as a whole, in LUFS: the gated loudness of ITU-R
+/// BS.1770. The ear's weighting, and only the parts that are played count: silence
+/// between phrases does not make a recording quieter. One slice per channel; the same
+/// signal on two channels reads 3 LU higher than on one. -200.0 for silence
+pub fn loudness_lufs(channels: &[&[f32]], sample_rate: f32) -> f32 {
+    let powers = weighted_block_powers(channels, sample_rate, 0.4);
+    let mean = |powers: &[f64]| powers.iter().sum::<f64>() / powers.len() as f64;
+    let heard: Vec<f64> = powers.into_iter().filter(|&power| loudness_of(power) > -70.0).collect();
+    if heard.is_empty() {
+        return -200.0;
+    }
+    let floor = loudness_of(mean(&heard)) - 10.0;
+    let counted: Vec<f64> = heard.into_iter().filter(|&power| loudness_of(power) > floor).collect();
+    loudness_of(mean(&counted)) as f32
+}
+
+/// The loudest three seconds of a recording, in LUFS: what its loudest phrase is heard as
+pub fn loudest_phrase_lufs(channels: &[&[f32]], sample_rate: f32) -> f32 {
+    let powers = weighted_block_powers(channels, sample_rate, 3.0);
+    powers.into_iter().map(loudness_of).fold(-200.0, f64::max) as f32
+}
+
+/// Keeps this thread on the first core from here on, for the tests that print timings: the
+/// cores of a machine are not equally fast (1.33 times apart on the development machine),
+/// and a thread that moves between them gives two answers. Does nothing where it cannot
+pub fn pin_thread() {
+    #[cfg(windows)]
+    {
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetCurrentThread() -> *mut std::ffi::c_void;
+            fn SetThreadAffinityMask(thread: *mut std::ffi::c_void, mask: usize) -> usize;
+        }
+        // SAFETY: both calls take plain values, and the handle is the pseudo handle of the
+        // calling thread, which is always valid
+        unsafe {
+            SetThreadAffinityMask(GetCurrentThread(), 1);
+        }
+    }
+}
+
+#[cfg(test)]
+mod loudness_tests {
+    use super::*;
+
+    #[test]
+    fn test_loudness_of_a_sine_at_one_kilohertz_is_its_level() {
+        // The measure is defined so that a full-scale 997 Hz sine on one channel reads
+        // -3.01 LUFS, at any sample rate
+        for sample_rate in [44100.0, 48000.0, 96000.0] {
+            let tone = sine(997.0, 1.0, sample_rate, 4 * sample_rate as usize);
+            let loudness = loudness_lufs(&[&tone], sample_rate);
+            assert!((loudness + 3.01).abs() < 0.05, "{loudness:.2} LUFS at {sample_rate} Hz");
+            let quiet = sine(997.0, 0.1, sample_rate, 4 * sample_rate as usize);
+            let fall = loudness - loudness_lufs(&[&quiet], sample_rate);
+            assert!((fall - 20.0).abs() < 0.01, "{fall:.2} LU for 20 dB");
+        }
+    }
+
+    #[test]
+    fn test_loudness_follows_the_ear_and_skips_silence() {
+        let rate = 48000.0;
+        let len = 4 * rate as usize;
+        // Lows count for less than the same level in the upper mids
+        let low = loudness_lufs(&[&sine(60.0, 0.5, rate, len)], rate);
+        let high = loudness_lufs(&[&sine(3000.0, 0.5, rate, len)], rate);
+        assert!(high - low > 4.0, "{low:.1} at 60 Hz, {high:.1} at 3 kHz");
+
+        // Silence behind a phrase leaves it about as loud as it was: only the blocks that
+        // reach over the end of the phrase still count, at less than their share
+        let tone = sine(997.0, 0.5, rate, len);
+        let mut with_rest = tone.clone();
+        with_rest.extend(vec![0.0; len]);
+        let difference = loudness_lufs(&[&tone], rate) - loudness_lufs(&[&with_rest], rate);
+        assert!(difference.abs() < 0.3, "{difference:.2} LU from a rest");
+
+        assert_eq!(loudness_lufs(&[&vec![0.0; len]], rate), -200.0);
+        // Two channels of the same are 3 LU more
+        let both = loudness_lufs(&[&tone, &tone], rate) - loudness_lufs(&[&tone], rate);
+        assert!((both - 3.01).abs() < 0.01, "{both:.2} LU for a second channel");
+        let phrase = loudest_phrase_lufs(&[&with_rest], rate);
+        assert!((phrase - loudness_lufs(&[&tone], rate)).abs() < 0.1, "{phrase:.1}");
+    }
+
+    #[test]
+    fn test_clean_playing_has_more_peak_over_its_average_than_the_riffs() {
+        let crest = |recording: &[f32]| to_db(peak(recording) / rms(recording));
+        let (clean, riffs) = (clean_di(48000.0), guitar_di(48000.0));
+        assert!(peak(&clean) <= DI_PEAK + 1e-6);
+        assert!(crest(&clean) > crest(&riffs) + 2.0, "{:.1} against {:.1} dB", crest(&clean), crest(&riffs));
+    }
+}

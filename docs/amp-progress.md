@@ -8,7 +8,51 @@ Merged to `main` on 2026-10-11 at Rasmus's request, after he had listened ("it s
 fantastic"). The rule below about never merging held until then; new work can go on `main`
 or a new branch as he says.
 
-## How to resume
+## Round 2 (branch `amp-round2`, started 2026-10-11)
+
+Clean level, compressor, four mods, a pedal order the player sets. Never merged to `main` by
+the agent. Same way of working as below; worktrees for subagents start from `main`, so each
+runs `git merge --ff-only amp-round2` first. To resume: `git checkout amp-round2`,
+`cargo test --workspace`, then the first milestone below that is not done.
+
+Decided with Rasmus on 2026-10-11:
+
+| Question | Answer |
+|---|---|
+| Mods | Chorus, Tremolo, Phaser, Flanger: Rate and Depth each |
+| Compressor | A pedal (Sustain, Level), off by default |
+| Order | Two zones, in front of the amp and behind the cabinet, free order inside each. Gate first, amp and cabinet one fixed block. Drive only in front; Delay and Reverb only behind; Comp and the mods in either |
+| Board | One wide row (about 1560 x 694): the five pedals as they are, new ones slim (about 110 px) |
+| Moving a pedal | Dragged by its title |
+| Presets | Hold the order and the new pedals |
+| Level reference | No DI file from Rasmus: DI levels from -36 to -12 dBFS RMS are swept |
+
+| Milestone | State |
+|---|---|
+| M0 Loudness measure, `loudness_report`, pinned reports | done 2026-10-11 |
+| M1 Clean level | next |
+| M2 Board mock in the standalone (feature `board_mock`); needs Rasmus's yes before M3's editor | |
+| M3 Compressor (`order.rs` with a constant order, `comp.rs`, first slim pedal) | |
+| M4 Mods (`mods/`, four slim pedals, `mods_report`) | |
+| M5 Order (`chain-order` persisted, re-route with a fade, dragging, order in presets) | |
+| M6 New presets, docs | |
+
+Planned parameter ids: `comp_on`, `comp_sustain`, `comp_level`, `chorus_on`, `chorus_rate`,
+`chorus_depth`, `phaser_on`, `phaser_rate`, `phaser_depth`, `flanger_on`, `flanger_rate`,
+`flanger_depth`, `trem_on`, `trem_rate`, `trem_depth`. The order is not a parameter: persisted
+as `chain-order`.
+
+### What M0 found
+
+Every test signal is at -18 dBFS RMS, a hot guitar, and there the amps are level (Klar is 1 to
+2 LU louder than Torden). A clean amp follows the guitar dB for dB and one that clips hardly
+does: 12 dB less guitar is 11 LU less from Klar, 4.5 from Brøl at Gain 5, 0.6 from Torden at
+Gain 5. So with a guitar recorded at -30 dBFS RMS the clean presets are 9 to 11 LU under the
+Torden ones (Glas -24.0, Stram -15.1 LUFS), at -24 still 3 to 5, and at -36 about 15. That is
+what Rasmus heard. Brøl below Gain 3 (Kobber) behaves like Klar. Klar's peaks are already in
+the output's safety clip at -18 (-0.2 dBFS), so more gain alone is no answer.
+
+## How to resume (round 1)
 
 ```bash
 git checkout amp-sim

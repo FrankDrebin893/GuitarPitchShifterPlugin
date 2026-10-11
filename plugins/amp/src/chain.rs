@@ -3433,6 +3433,7 @@ mod tests {
     #[test]
     #[ignore]
     fn user_cab_report_cost() {
+        crate::test_util::pin_thread();
         println!("Time per {}-sample block, stereo, everything on (Torden, Gain 10), both effects, and its", BLOCK);
         println!("share of real time: through the amp's own cabinet, and through one of the player's own");
         println!("of each length. The longest a file is cut to is {} ms", USER_IR_MS);
@@ -3520,6 +3521,48 @@ mod tests {
         }
     }
 
+    /// How loud each amp is heard across its Gain dial, for guitars recorded quietly and
+    /// hot. A clean amp follows the level it is given; one that clips hardly does, so the
+    /// level the amps are matched at decides which of them sounds quiet with a real guitar.
+    /// Loudness in LUFS (see `loudness_lufs`), of one channel. Run before and after changing
+    /// a level in a model:
+    ///   cargo test -p amp --release loudness_report -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn loudness_report() {
+        const DI_LEVELS_DB: [f32; 5] = [-36.0, -30.0, -24.0, -18.0, -12.0];
+        let gains = [0.0, 0.25, 0.5, 0.75, 1.0];
+        let crest = |recording: &[f32]| to_db(peak(recording) / rms(recording));
+
+        for (name, recording) in [("Riffs (`guitar_di`)", guitar_di(SAMPLE_RATE)), ("Clean playing (`clean_di`)", clean_di(SAMPLE_RATE))] {
+            println!("\n{name}, crest {:.1} dB. Dials at 5 except Gain, 48 kHz, every pedal at its default", crest(&recording));
+            println!("Per level of the recording in dBFS RMS: loudness in LUFS / peak in dBFS / crest in dB");
+            print!("{:<8}{:>5}", "amp", "gain");
+            for level in DI_LEVELS_DB {
+                print!("{:>22}", format!("DI {level:.0}"));
+            }
+            println!("{:>12}", "-30 to -18");
+            for amp in Amp::ALL {
+                for gain in gains {
+                    print!("{:<8}{:>5.1}", amp.model().name, gain * 10.0);
+                    let mut loudness = [0.0; DI_LEVELS_DB.len()];
+                    for (level, heard) in DI_LEVELS_DB.iter().zip(&mut loudness) {
+                        // The peaks of a hot recording may be over full scale here: what a
+                        // recording that loud would be if the converter had the room
+                        let output = run(&with_amp(amp, gain), &at_rms_db(&recording, *level), SAMPLE_RATE);
+                        *heard = loudness_lufs(&[&output], SAMPLE_RATE);
+                        print!(
+                            "{:>22}",
+                            format!("{:.1} / {:.1} / {:.1}", heard, to_db(peak(&output)), crest(&output))
+                        );
+                    }
+                    // How much of 12 dB more guitar is heard: 12 from a clean amp
+                    println!("{:>9.1} LU", loudness[3] - loudness[1]);
+                }
+            }
+        }
+    }
+
     /// Prints levels, distortion, aliasing, tightness, dynamics, latency and cost for every
     /// amp, and what the gate, the drive pedal, the cabinet's dials, the delay, the reverb and
     /// the safety clip do. Use it to compare
@@ -3528,6 +3571,7 @@ mod tests {
     #[test]
     #[ignore]
     fn amp_report() {
+        crate::test_util::pin_thread();
         let chords = power_chords(SAMPLE_RATE, 4.0);
         let tone = sine(220.0, 0.178, SAMPLE_RATE, 48_000);
         let gains = [0.0, 0.5, 1.0];
@@ -4352,6 +4396,7 @@ mod tests {
     #[test]
     #[ignore]
     fn cab_rate_report() {
+        crate::test_util::pin_thread();
         print_cabinet_rates();
     }
 
@@ -4473,6 +4518,7 @@ mod tests {
     #[test]
     #[ignore]
     fn stage_report() {
+        crate::test_util::pin_thread();
         print_stage_times();
     }
 

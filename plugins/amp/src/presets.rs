@@ -375,6 +375,17 @@ mod tests {
         (left, right)
     }
 
+    // The levels of a direct recording the presets are measured at: a guitar recorded
+    // quietly, one in the middle, and a hot one
+    const REPORT_DI_LEVELS_DB: [f32; 3] = [-30.0, -24.0, -18.0];
+
+    /// How loud a preset is heard with `recording` played into it at `level_db` dBFS RMS,
+    /// in LUFS of the left channel
+    fn loudness_at(preset: &Preset, recording: &[f32], level_db: f32) -> f32 {
+        let (left, _) = run(&preset.settings(), &at_rms_db(recording, level_db));
+        loudness_lufs(&[&left], SAMPLE_RATE)
+    }
+
     #[test]
     fn test_names_are_unique_and_fit_the_display() {
         for (index, preset) in PRESETS.iter().enumerate() {
@@ -631,10 +642,12 @@ mod tests {
     fn preset_report() {
         let chords = power_chords(SAMPLE_RATE, 4.0);
         let mutes = palm_mutes(SAMPLE_RATE, 2.4);
-        println!("\nChords: level in dBFS. Palm mutes: dB relative to the whole signal");
+        let recordings = [guitar_di(SAMPLE_RATE), clean_di(SAMPLE_RATE)];
+        println!("\nChords: level in dBFS. Palm mutes: dB relative to the whole signal. Loudness: LUFS of the");
+        println!("left channel, for riffs and for clean playing recorded at -30, -24 and -18 dBFS RMS");
         println!(
-            "{:<8} {:<8} {:>7} {:>7} {:>8} {:>8} {:>8} {:>8} {:>8}",
-            "preset", "amp", "RMS", "peak", "to 100", "100-400", "400-1k6", "1k6-6k4", "6k4 up"
+            "{:<8} {:<8} {:>7} {:>7} {:>8} {:>8} {:>8} {:>8} {:>8} {:>20} {:>20}",
+            "preset", "amp", "RMS", "peak", "to 100", "100-400", "400-1k6", "1k6-6k4", "6k4 up", "riffs", "clean"
         );
         for preset in &PRESETS {
             let settings = preset.settings();
@@ -650,6 +663,10 @@ mod tests {
             );
             for band in bands {
                 print!(" {band:>8.1}");
+            }
+            for recording in &recordings {
+                let heard = REPORT_DI_LEVELS_DB.map(|level| format!("{:.1}", loudness_at(preset, recording, level)));
+                print!(" {:>20}", heard.join(" / "));
             }
             println!();
         }

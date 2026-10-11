@@ -898,6 +898,7 @@ mod tests {
     #[test]
     #[ignore]
     fn effects_report() {
+        crate::test_util::pin_thread();
         let at = |time_ms: f32| seconds(time_ms * 0.001, SAMPLE_RATE);
         let di = guitar_di(SAMPLE_RATE);
 

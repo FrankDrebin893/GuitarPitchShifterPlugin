@@ -791,6 +791,7 @@ pub mod tests {
     #[test]
     #[ignore]
     fn cab_report() {
+        crate::test_util::pin_thread();
         println!("Time of the convolution per sample, filter included, and per tap");
         for amp in Amp::ALL {
             print!("{:<8}", amp.model().name);
@@ -884,6 +885,7 @@ pub mod tests {
     #[test]
     #[ignore]
     fn convolver_report() {
+        crate::test_util::pin_thread();
         const BLOCK: usize = 64;
         println!("The cabinet alone, a response of the player's own: tap by tap all the way (`direct`), and");
         println!("with its late part in the tail (`tail`). Time per {}-sample block in us, median and worst,", BLOCK);
