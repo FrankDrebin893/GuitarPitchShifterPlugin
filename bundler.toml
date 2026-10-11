@@ -1,5 +1,8 @@
 [pitch_shifter]
 name = "HojtPitchShifter"
 
+[amp]
+name = "HojtGuitarAmp"
+
 [drums]
 name = "HojtDrumSynth"

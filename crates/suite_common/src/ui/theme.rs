@@ -19,6 +19,7 @@ pub const BRAND_ORANGE: Color32 = Color32::from_rgb(226, 88, 30);
 /// Enclosure paint, one per plugin
 pub const PAINT_ORANGE: Color32 = Color32::from_rgb(222, 86, 30);
 pub const PAINT_TEAL: Color32 = Color32::from_rgb(29, 130, 130);
+pub const PAINT_OXBLOOD: Color32 = Color32::from_rgb(124, 28, 32);
 
 pub const KNOB_SKIRT: Color32 = Color32::from_rgb(21, 19, 17);
 pub const KNOB_CAP: Color32 = Color32::from_rgb(38, 34, 30);
@@ -35,6 +36,8 @@ pub const CHROME_SHINE: Color32 = Color32::from_rgb(246, 245, 241);
 
 pub const LED_ON: Color32 = Color32::from_rgb(255, 59, 36);
 pub const LED_OFF: Color32 = Color32::from_rgb(90, 26, 18);
+// Unlit lens on the dark paint of a rig
+pub const LED_OFF_DARK: Color32 = Color32::from_rgb(58, 12, 10);
 
 pub const SHADOW: Color32 = Color32::from_black_alpha(80);
 
