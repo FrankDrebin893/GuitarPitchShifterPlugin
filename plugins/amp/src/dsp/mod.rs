@@ -1,6 +1,11 @@
+// Not used by the cabinet yet
+#[allow(dead_code)]
+pub mod fft;
 pub mod filters;
 pub mod oversample;
 pub mod pair;
+#[allow(dead_code)]
+pub mod partitioned;
 pub mod resample;
 pub mod shaper;
 
