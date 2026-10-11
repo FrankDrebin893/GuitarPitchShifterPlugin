@@ -58,11 +58,13 @@ impl RealFft {
     }
 
     /// The number of samples
+    #[cfg(test)]
     pub fn size(&self) -> usize {
         2 * self.half
     }
 
     /// The number of frequencies: the length of each of the two rows
+    #[cfg(test)]
     pub fn bins(&self) -> usize {
         self.half + 1
     }

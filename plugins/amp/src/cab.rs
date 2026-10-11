@@ -1,6 +1,7 @@
 use crate::amp::model::CabModel;
 use crate::dsp::db_to_gain;
 use crate::dsp::filters::{Biquad, BiquadCoeffs, GlidingBiquad};
+use crate::dsp::partitioned::{self, Tail};
 use crate::dsp::resample::resample;
 use std::sync::Mutex;
 
@@ -344,11 +345,19 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
     sums.iter().sum::<f32>() + rest
 }
 
+/// The length of the blocks a long impulse response's late part is convolved in at a
+/// sample rate: see `dsp::partitioned`
+pub fn tail_block(sample_rate: f32) -> usize {
+    partitioned::block_len(user_ir_len(sample_rate))
+}
+
 /// One cabinet, loaded
 struct Slot {
-    // The impulse response stored backwards, so it lines up with the history oldest first
+    // The impulse response stored backwards, so it lines up with the history oldest first.
+    // All of it, or its first samples if the rest is in the `Tail`
     taps: Vec<f32>,
     len: usize,
+    tailed: bool,
     lows: Biquad,
     // False leaves the filter out: the impulse response by itself, to the bit
     filtered: bool,
@@ -361,6 +370,7 @@ impl Slot {
         Self {
             taps,
             len: 1,
+            tailed: false,
             lows: Biquad::new(),
             filtered: false,
         }
@@ -369,9 +379,16 @@ impl Slot {
 
 /// The cabinet: convolution with an impulse response, computed directly so it adds no
 /// latency, and the speaker's resonance as a filter behind it. Holds two cabinets so one
-/// can be swapped for another without a click
+/// can be swapped for another without a click.
+///
+/// A long response of the player's own is computed directly only for its first samples.
+/// The rest goes through the `Tail`, which is given its part of the response already
+/// transformed (`tail_spectra`), adds no latency either and costs a fraction. The
+/// cabinets designed here are short and never take that way
 pub struct Cabinet {
     // The most samples an impulse response has at this sample rate
+    longest: usize,
+    // The length of the history: that, or what the tail reads if that is more
     ring: usize,
     // The last `ring` input samples as a ring, each written twice, `ring` apart: the latest
     // ones are then always one straight run, whatever the length of the impulse response
@@ -382,11 +399,20 @@ pub struct Cabinet {
     // 1.0 when only the active cabinet plays, less while the previous one fades out
     fade: f32,
     fade_step: f32,
+    // The late part of the long responses, and whether either slot has one
+    tail: Tail,
+    tailed: bool,
+    // True from a swap to a cabinet with a tail until the tail is there: the cabinet
+    // before plays on alone, and the crossfade starts after
+    warming: bool,
+    // Samples after which the last swap is sure to be over
+    swap_len: usize,
 }
 
 impl Cabinet {
     pub fn new() -> Self {
         Self {
+            longest: MAX_USER_IR_LEN,
             ring: MAX_USER_IR_LEN,
             history: vec![0.0; 2 * MAX_USER_IR_LEN],
             position: 0,
@@ -394,13 +420,24 @@ impl Cabinet {
             active: 0,
             fade: 1.0,
             fade_step: 0.0,
+            tail: Tail::new(),
+            tailed: false,
+            warming: false,
+            swap_len: 1,
         }
     }
 
     /// Sets the most samples an impulse response has at this rate. Load one with `set_ir` after
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.ring = user_ir_len(sample_rate);
+        self.longest = user_ir_len(sample_rate);
+        self.tail.set_block(tail_block(sample_rate));
+        self.ring = self.longest.max(2 * self.tail.block());
         self.fade_step = 1.0 / (SWAP_MS * 0.001 * sample_rate);
+        self.swap_len = self.fade_len();
+        for slot in &mut self.slots {
+            slot.tailed = false;
+        }
+        self.tailed = false;
         self.reset();
     }
 
@@ -408,60 +445,94 @@ impl Cabinet {
         self.history.fill(0.0);
         self.position = 0;
         self.fade = 1.0;
+        self.warming = false;
         for slot in &mut self.slots {
             slot.lows.reset();
         }
+        self.tail.reset();
+    }
+
+    /// Samples a crossfade takes, and one to be sure
+    fn fade_len(&self) -> usize {
+        (1.0 / self.fade_step).ceil() as usize + 1
     }
 
     /// Loads a cabinet and uses it at once. A longer impulse response is cut to the most
     /// the cabinet holds at this sample rate. Does not allocate
     pub fn set_ir(&mut self, ir: &CabIr) {
-        self.load(self.active, &ir.taps, ir.lows);
-        self.fade = 1.0;
+        self.load(self.active, &ir.taps, ir.lows, &[]);
+        self.stop_swap();
     }
 
-    /// The same for an impulse response by itself, as a player's own cabinet is
-    pub fn set_taps(&mut self, taps: &[f32]) {
-        self.load(self.active, taps, BiquadCoeffs::IDENTITY);
+    /// The same for an impulse response by itself, as a player's own cabinet is.
+    /// `spectra` is what `tail_spectra` made of it: with any, the cabinet starts from
+    /// silence
+    pub fn set_taps(&mut self, taps: &[f32], spectra: &[f32]) {
+        self.load(self.active, taps, BiquadCoeffs::IDENTITY, spectra);
+        self.stop_swap();
+        if self.slots[self.active].tailed {
+            self.reset();
+        }
+    }
+
+    /// Only the active cabinet is heard from here on
+    fn stop_swap(&mut self) {
         self.fade = 1.0;
+        self.warming = false;
+        self.unload_tail(1 - self.active);
     }
 
     /// Loads a cabinet and crossfades to it. Only while `is_swapping` is false: there are
     /// two slots, and during a crossfade both are heard
     pub fn swap_ir(&mut self, ir: &CabIr) {
         self.active = 1 - self.active;
-        self.load(self.active, &ir.taps, ir.lows);
+        self.load(self.active, &ir.taps, ir.lows, &[]);
         self.fade = 0.0;
+        self.warming = false;
+        self.swap_len = self.fade_len();
     }
 
-    /// The same for an impulse response by itself. Does not allocate either
-    pub fn swap_taps(&mut self, taps: &[f32]) {
+    /// The same for an impulse response by itself, with what `tail_spectra` made of it.
+    /// Does not allocate either. With a tail the crossfade starts once the tail is
+    /// there: after two of its blocks at most if the cabinet before has a tail too,
+    /// else after about as long as the response is. The cabinet before plays meanwhile
+    pub fn swap_taps(&mut self, taps: &[f32], spectra: &[f32]) {
         self.active = 1 - self.active;
-        self.load(self.active, taps, BiquadCoeffs::IDENTITY);
+        self.load(self.active, taps, BiquadCoeffs::IDENTITY, spectra);
         self.fade = 0.0;
+        self.warming = self.slots[self.active].tailed;
+        self.swap_len = self.fade_len() + self.tail.wait_len(self.active);
     }
 
-    /// True while the crossfade started by `swap_ir` is running
+    /// True from `swap_ir` or `swap_taps` until the crossfade is over
     pub fn is_swapping(&self) -> bool {
         self.fade < 1.0
     }
 
-    /// Samples after which a crossfade is sure to be over
+    /// Samples after which the crossfade of the last swap is sure to be over
     pub fn swap_len(&self) -> usize {
-        (1.0 / self.fade_step).ceil() as usize + 1
+        self.swap_len
     }
 
     /// Address and capacity of every buffer, for checking that nothing is allocated anew
     #[cfg(test)]
-    pub fn buffers(&self) -> [(usize, usize); 3] {
+    pub fn buffers(&self) -> Vec<(usize, usize)> {
         let describe = |buffer: &Vec<f32>| (buffer.as_ptr() as usize, buffer.capacity());
-        [describe(&self.history), describe(&self.slots[0].taps), describe(&self.slots[1].taps)]
+        let mut buffers = vec![describe(&self.history), describe(&self.slots[0].taps), describe(&self.slots[1].taps)];
+        buffers.extend(self.tail.buffers());
+        buffers
     }
 
-    /// The filter starts from rest: it is another one than the slot held before
-    fn load(&mut self, slot: usize, taps: &[f32], lows: BiquadCoeffs) {
+    /// The filter starts from rest: it is another one than the slot held before. With
+    /// `spectra` only the head of the response is kept here, and the tail takes the rest
+    fn load(&mut self, slot: usize, taps: &[f32], lows: BiquadCoeffs, spectra: &[f32]) {
+        if !spectra.is_empty() || self.slots[slot].tailed {
+            self.tail.load(slot, spectra);
+        }
+        let tailed = self.tail.has(slot);
         let slot = &mut self.slots[slot];
-        slot.len = taps.len().clamp(1, self.ring);
+        slot.tailed = tailed;
+        slot.len = if tailed { partitioned::head_len(self.tail.block()) } else { taps.len().clamp(1, self.longest) };
         let reversed = &mut slot.taps[..slot.len];
         reversed.fill(0.0);
         for (tap, &sample) in reversed.iter_mut().rev().zip(taps) {
@@ -470,14 +541,27 @@ impl Cabinet {
         slot.lows.set(lows);
         slot.lows.reset();
         slot.filtered = lows != BiquadCoeffs::IDENTITY;
+        self.tailed = self.slots[0].tailed || self.slots[1].tailed;
+    }
+
+    /// A slot that is not heard any more needs no tail worked out for it
+    fn unload_tail(&mut self, slot: usize) {
+        if self.slots[slot].tailed {
+            self.tail.unload(slot);
+            self.slots[slot].tailed = false;
+            self.tailed = self.slots[1 - slot].tailed;
+        }
     }
 
     /// One sample of one of the cabinets. The input has been written to the history
-    fn run(&mut self, slot: usize) -> f32 {
-        let slot = &mut self.slots[slot];
+    fn run(&mut self, index: usize) -> f32 {
+        let slot = &mut self.slots[index];
         // The second copy of the newest sample ends the run of the latest ones
         let end = self.position + self.ring + 1;
-        let output = dot(&self.history[end - slot.len..end], &slot.taps[..slot.len]);
+        let mut output = dot(&self.history[end - slot.len..end], &slot.taps[..slot.len]);
+        if slot.tailed {
+            output += self.tail.output(index);
+        }
         if slot.filtered {
             slot.lows.process(output as f64) as f32
         } else {
@@ -490,13 +574,21 @@ impl Cabinet {
             self.history[self.position] = *sample;
             self.history[self.position + self.ring] = *sample;
 
-            let mut output = self.run(self.active);
-            if self.fade < 1.0 {
+            let mut output = self.run(if self.warming { 1 - self.active } else { self.active });
+            if self.fade < 1.0 && !self.warming {
                 output = self.fade * output + (1.0 - self.fade) * self.run(1 - self.active);
                 self.fade = (self.fade + self.fade_step).min(1.0);
+                if self.fade >= 1.0 {
+                    self.unload_tail(1 - self.active);
+                }
             }
             *sample = output;
 
+            if self.tailed {
+                let end = self.position + self.ring + 1;
+                self.tail.advance(&self.history[end - 2 * self.tail.block()..end]);
+                self.warming = self.warming && !self.tail.is_playing(self.active);
+            }
             self.position += 1;
             if self.position == self.ring {
                 self.position = 0;
@@ -504,6 +596,19 @@ impl Cabinet {
         }
     }
 }
+
+/// What the cabinet needs of a player's impulse response besides its taps, for the
+/// sample rate it was made for: the transforms of its late part, into `spectra`, which
+/// holds `MAX_TAIL_SPECTRA_LEN` numbers. Returns how many of them are used: none for a
+/// response short enough to be convolved tap by tap. Allocates and takes a moment: not
+/// for the audio thread
+pub fn tail_spectra(taps: &[f32], sample_rate: f32, spectra: &mut [f32]) -> usize {
+    let taps = &taps[..taps.len().min(user_ir_len(sample_rate))];
+    partitioned::partition(taps, tail_block(sample_rate), spectra)
+}
+
+/// The most numbers `tail_spectra` gives
+pub const MAX_TAIL_SPECTRA_LEN: usize = partitioned::MAX_SPECTRA_LEN;
 
 /// The Mic and Resonance dials: filters after the convolution. With a dial at its centre
 /// its filters are skipped, and the cabinet is the impulse response as designed
@@ -715,6 +820,181 @@ pub mod tests {
                     freq_hz
                 );
             }
+        }
+    }
+
+    /// A response like a file's: noise that dies away, with its peak at the start
+    fn long_response_taps(ms: f32, sample_rate: f32, seed: u32) -> Vec<f32> {
+        let len = (ms * 0.001 * sample_rate) as usize;
+        let mut noise = Noise::new(seed);
+        (0..len)
+            .map(|index| if index == 0 { 1.0 } else { 0.2 * noise.next() * (-6.0 * index as f32 / len as f32).exp() })
+            .collect()
+    }
+
+    /// A cabinet with a response of the player's own: tap by tap all the way, or with
+    /// its late part in the tail if it is long enough for one
+    fn cabinet_with(taps: &[f32], sample_rate: f32, with_tail: bool) -> Cabinet {
+        let mut spectra = vec![0.0; MAX_TAIL_SPECTRA_LEN];
+        let len = if with_tail { tail_spectra(taps, sample_rate, &mut spectra) } else { 0 };
+        let mut cabinet = Cabinet::new();
+        cabinet.set_sample_rate(sample_rate);
+        cabinet.set_taps(taps, &spectra[..len]);
+        cabinet
+    }
+
+    /// Median and worst time of a block of `block` samples, in microseconds. The worst
+    /// is the time 99 of 100 blocks stay under, the least of seven runs: what the work
+    /// itself takes, not what the machine did meanwhile
+    fn block_times_us(cabinet: &mut Cabinet, input: &[f32], block: usize) -> (f64, f64) {
+        let (mut median, mut worst) = (f64::MAX, f64::MAX);
+        for _ in 0..7 {
+            let mut signal = input.to_vec();
+            let mut times: Vec<f64> = signal
+                .chunks_mut(block)
+                .map(|piece| {
+                    let start = std::time::Instant::now();
+                    piece.chunks_mut(32).for_each(|chunk| cabinet.process(chunk));
+                    start.elapsed().as_secs_f64() * 1e6
+                })
+                .collect();
+            std::hint::black_box(&signal);
+            times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            median = median.min(times[times.len() / 2]);
+            worst = worst.min(times[times.len() * 99 / 100]);
+        }
+        (median, worst)
+    }
+
+    /// Largest difference in dB between two responses from 60 Hz to 10 kHz
+    fn largest_gap_db(a: &[f32], b: &[f32], sample_rate: f32) -> f32 {
+        (0..200)
+            .map(|probe| {
+                let freq_hz = 60.0 * (10_000.0f32 / 60.0).powf(probe as f32 / 199.0);
+                to_db(ir_magnitude(a, freq_hz, sample_rate) / ir_magnitude(b, freq_hz, sample_rate)).abs()
+            })
+            .fold(0.0, f32::max)
+    }
+
+    /// Prints what the tail saves on long responses and what it changes:
+    ///   cargo test -p amp --release convolver_report -- --ignored --nocapture
+    /// Run it on one core (the cores of a machine are not all as fast)
+    #[test]
+    #[ignore]
+    fn convolver_report() {
+        const BLOCK: usize = 64;
+        println!("The cabinet alone, a response of the player's own: tap by tap all the way (`direct`), and");
+        println!("with its late part in the tail (`tail`). Time per {}-sample block in us, median and worst,", BLOCK);
+        println!("and the median as a share of real time. Then what the tail changes: the largest difference");
+        println!("of the responses from 60 Hz to 10 kHz in dB, the largest difference of the outputs on noise");
+        println!("against their RMS in dB, and the first sample that differs by more than a millionth");
+        println!(
+            "{:>9}{:>7}{:>7}{:>7}{:>23}{:>23}{:>9}{:>9}{:>8}",
+            "rate", "ms", "taps", "block", "direct med/worst", "tail med/worst", "resp dB", "out dB", "first"
+        );
+        for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0] {
+            let block_us = BLOCK as f64 / sample_rate as f64 * 1e6;
+            let mut noise = Noise::new(11);
+            let input: Vec<f32> = (0..(sample_rate as usize / BLOCK) * BLOCK).map(|_| 0.1 * noise.next()).collect();
+            for ms in [3.0, 5.0, 10.0, 20.0, 40.0] {
+                let taps = long_response_taps(ms, sample_rate, 5);
+                let mut direct = cabinet_with(&taps, sample_rate, false);
+                let mut tailed = cabinet_with(&taps, sample_rate, true);
+                let has_tail = tailed.tailed;
+                let (direct_median, direct_worst) = block_times_us(&mut direct, &input, BLOCK);
+                let (tail_median, tail_worst) = block_times_us(&mut tailed, &input, BLOCK);
+
+                let respond = |with_tail: bool| {
+                    let mut response = vec![0.0; 2 * taps.len()];
+                    response[0] = 1.0;
+                    cabinet_with(&taps, sample_rate, with_tail).process(&mut response);
+                    response
+                };
+                let play = |with_tail: bool| {
+                    let mut output = input[..input.len() / 4].to_vec();
+                    cabinet_with(&taps, sample_rate, with_tail).process(&mut output);
+                    output
+                };
+                let (direct_response, tail_response) = (respond(false), respond(true));
+                let (direct_output, tail_output) = (play(false), play(true));
+                let gap = direct_output.iter().zip(&tail_output).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+                let first = direct_response.iter().zip(&tail_response).position(|(a, b)| (a - b).abs() > 1e-6);
+                println!(
+                    "{:>9}{:>7}{:>7}{:>7}{:>9.2} /{:>6.2}{:>5.2} %{:>9.2} /{:>6.2}{:>5.2} %{:>9.4}{:>9.1}{:>8}",
+                    sample_rate,
+                    ms,
+                    taps.len(),
+                    if has_tail { tail_block(sample_rate).to_string() } else { "-".to_owned() },
+                    direct_median,
+                    direct_worst,
+                    direct_median / block_us * 100.0,
+                    tail_median,
+                    tail_worst,
+                    tail_median / block_us * 100.0,
+                    largest_gap_db(&direct_response, &tail_response, sample_rate),
+                    to_db(gap / rms(&direct_output)),
+                    first.map_or("none".to_owned(), |index| index.to_string()),
+                );
+            }
+        }
+
+        println!();
+        println!("How evenly the work is spread: the 40 ms response in host blocks of 16 to 512 samples,");
+        println!("time per block in us, median and worst, and the worst against the median");
+        for sample_rate in [48000.0, 96000.0, 192000.0] {
+            let taps = long_response_taps(40.0, sample_rate, 5);
+            let mut noise = Noise::new(13);
+            let input: Vec<f32> = (0..sample_rate as usize / 512 * 512).map(|_| 0.1 * noise.next()).collect();
+            print!("{:>9}", sample_rate);
+            for block in [16, 32, 64, 128, 512] {
+                let (median, worst) = block_times_us(&mut cabinet_with(&taps, sample_rate, true), &input, block);
+                print!("{:>7}:{:>6.2} /{:>6.2} x{:>4.2}", block, median, worst, worst / median);
+            }
+            println!();
+        }
+
+        println!();
+        println!("While one long cabinet is swapped for another both are worked out. Time per {}-sample", BLOCK);
+        println!("block in us of the 40 ms response by itself, and the worst while it is swapped for another");
+        for sample_rate in [48000.0, 96000.0, 192000.0] {
+            let (taps, other) = (long_response_taps(40.0, sample_rate, 5), long_response_taps(40.0, sample_rate, 7));
+            let mut spectra = vec![0.0; MAX_TAIL_SPECTRA_LEN];
+            let len = tail_spectra(&other, sample_rate, &mut spectra);
+            let mut noise = Noise::new(17);
+            let input: Vec<f32> = (0..sample_rate as usize / 4 / BLOCK * BLOCK).map(|_| 0.1 * noise.next()).collect();
+            let mut cabinet = cabinet_with(&taps, sample_rate, true);
+            let (median, _) = block_times_us(&mut cabinet, &input, BLOCK);
+            let mut swapping = f64::MAX;
+            for _ in 0..7 {
+                cabinet.swap_taps(&other, &spectra[..len]);
+                let mut signal = input.clone();
+                let worst = signal
+                    .chunks_mut(BLOCK)
+                    .map(|piece| {
+                        let start = std::time::Instant::now();
+                        piece.chunks_mut(32).for_each(|chunk| cabinet.process(chunk));
+                        start.elapsed().as_secs_f64() * 1e6
+                    })
+                    .fold(0.0, f64::max);
+                assert!(!cabinet.is_swapping());
+                swapping = swapping.min(worst);
+            }
+            println!("{:>9}{:>8.2} us alone{:>8.2} us while swapping, x{:.2}", sample_rate, median, swapping, swapping / median);
+        }
+
+        println!();
+        println!("Making a response ready for the tail, off the audio thread (`tail_spectra`), in ms");
+        for sample_rate in [48000.0, 96000.0, 192000.0] {
+            let taps = long_response_taps(40.0, sample_rate, 5);
+            let mut spectra = vec![0.0; MAX_TAIL_SPECTRA_LEN];
+            let time = (0..5)
+                .map(|_| {
+                    let start = std::time::Instant::now();
+                    std::hint::black_box(tail_spectra(&taps, sample_rate, &mut spectra));
+                    start.elapsed().as_secs_f64() * 1e3
+                })
+                .fold(f64::MAX, f64::min);
+            println!("{:>9}{:>8.3} ms", sample_rate, time);
         }
     }
 
@@ -941,6 +1221,138 @@ pub mod tests {
         let largest_step = block[2400..].windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
         let own_step = block[2400..4800].windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
         assert!(largest_step < own_step * 1.05, "Step of {} against {}", largest_step, own_step);
+    }
+
+    #[test]
+    fn test_long_response_through_the_tail_is_the_response_tap_by_tap() {
+        for (sample_rate, ms) in [(44100.0, 40.0), (48000.0, 15.0), (96000.0, 40.0), (192000.0, 40.0)] {
+            let taps = long_response_taps(ms, sample_rate, 3);
+            let mut tailed = cabinet_with(&taps, sample_rate, true);
+            assert!(tailed.tailed);
+
+            // An impulse comes back as the response, from its first sample on: no later
+            let mut response = vec![0.0; taps.len() + 500];
+            response[0] = 1.0;
+            response.chunks_mut(37).for_each(|piece| tailed.process(piece));
+            assert_eq!(response[0], taps[0]);
+            let off = response.iter().zip(taps.iter().chain(&[0.0; 500])).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+            assert!(off < 2e-6, "{sample_rate} Hz, {ms} ms: response off by {off}");
+            let gap = largest_gap_db(&response, &taps, sample_rate);
+            assert!(gap < 0.001, "{sample_rate} Hz, {ms} ms: {gap} dB");
+
+            // And noise as it does tap by tap, 100 dB under it or less
+            let mut direct = cabinet_with(&taps, sample_rate, false);
+            assert!(!direct.tailed);
+            let mut noise = Noise::new(9);
+            let mut output: Vec<f32> = (0..taps.len() + 600).map(|_| noise.next()).collect();
+            let mut expected = output.clone();
+            tailed.process(&mut output);
+            direct.process(&mut expected);
+            // What is left of the impulse in the one is not in the other
+            let compared = taps.len()..output.len();
+            let (output, expected) = (&output[compared.clone()], &expected[compared]);
+            let off = output.iter().zip(expected).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+            assert!(off < 1e-5 * rms(expected), "{sample_rate} Hz, {ms} ms: off by {off} at {}", rms(expected));
+        }
+    }
+
+    #[test]
+    fn test_output_through_the_tail_does_not_depend_on_block_size() {
+        // To the bit: the work is counted in samples, not in calls
+        let sample_rate = 48000.0;
+        let (taps, other) = (long_response_taps(40.0, sample_rate, 3), long_response_taps(25.0, sample_rate, 5));
+        let mut spectra = vec![0.0; MAX_TAIL_SPECTRA_LEN];
+        let len = tail_spectra(&other, sample_rate, &mut spectra);
+        let mut noise = Noise::new(9);
+        let input: Vec<f32> = (0..9600).map(|_| noise.next()).collect();
+        let run = |block: usize| {
+            let mut cabinet = cabinet_with(&taps, sample_rate, true);
+            let mut output = input.clone();
+            let (before, after) = output.split_at_mut(4000);
+            before.chunks_mut(block).for_each(|piece| cabinet.process(piece));
+            cabinet.swap_taps(&other, &spectra[..len]);
+            after.chunks_mut(block).for_each(|piece| cabinet.process(piece));
+            output
+        };
+        let reference = run(9600);
+        for block in [1, 7, 32, 64, 500] {
+            assert!(run(block) == reference, "Blocks of {block}");
+        }
+    }
+
+    #[test]
+    fn test_swap_to_and_from_a_long_response_waits_for_its_tail_and_does_not_click() {
+        let sample_rate = 48000.0;
+        let short = design(Amp::Klar, sample_rate);
+        let long = long_response_taps(40.0, sample_rate, 3);
+        let other = long_response_taps(30.0, sample_rate, 5);
+        let spectra_of = |taps: &[f32]| {
+            let mut spectra = vec![0.0; MAX_TAIL_SPECTRA_LEN];
+            let len = tail_spectra(taps, sample_rate, &mut spectra);
+            spectra.truncate(len);
+            spectra
+        };
+        let input = sine(500.0, 0.5, sample_rate, 24_000);
+        let own_step = |signal: &[f32]| signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
+        // What each plays by itself: the same tap by tap, which holds all of the past
+        let alone = |taps: &[f32]| {
+            let mut output = input.clone();
+            cabinet_with(taps, sample_rate, false).process(&mut output);
+            output
+        };
+
+        let mut cabinet = Cabinet::new();
+        cabinet.set_sample_rate(sample_rate);
+        cabinet.set_ir(&short);
+        let buffers = cabinet.buffers();
+        let mut output = input.clone();
+        cabinet.process(&mut output[..6000]);
+
+        // From a short one: the long one's tail has to hear as much of the past as it is
+        // long before it is right, and the short one plays on until then
+        cabinet.swap_taps(&long, &spectra_of(&long));
+        let wait = cabinet.swap_len() - cabinet.fade_len();
+        let block = tail_block(sample_rate);
+        assert!(cabinet.is_swapping() && wait > long.len() - 2 * block && wait <= long.len() + 2 * block, "{wait}");
+        let mut short_alone = input.clone();
+        let mut reference = Cabinet::new();
+        reference.set_sample_rate(sample_rate);
+        reference.set_ir(&short);
+        reference.process(&mut short_alone);
+        cabinet.process(&mut output[6000..6000 + wait]);
+        assert!(output[..6000 + wait] == short_alone[..6000 + wait] && cabinet.is_swapping());
+        cabinet.process(&mut output[6000 + wait..12_000]);
+        assert!(!cabinet.is_swapping());
+        let settled = 6000 + cabinet.swap_len();
+        assert!(settled < 12_000);
+        let long_alone = alone(&long);
+        let off = output[settled..12_000].iter().zip(&long_alone[settled..]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        assert!(off < 1e-5, "After the swap: off by {off}");
+        assert!(own_step(&output[5000..12_000]) < 1.05 * own_step(&long_alone[5000..]).max(own_step(&short_alone[5000..])));
+
+        // From one long response to another: two blocks, then the crossfade
+        cabinet.swap_taps(&other, &spectra_of(&other));
+        let wait = cabinet.swap_len() - cabinet.fade_len();
+        assert!(wait > block && wait <= 2 * block, "{wait}");
+        cabinet.process(&mut output[12_000..18_000]);
+        assert!(!cabinet.is_swapping());
+        let other_alone = alone(&other);
+        let settled = 12_000 + cabinet.swap_len();
+        let off = output[settled..18_000].iter().zip(&other_alone[settled..]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        assert!(off < 1e-5, "After the second swap: off by {off}");
+        assert!(own_step(&output[11_000..18_000]) < 1.05 * own_step(&long_alone[11_000..]).max(own_step(&other_alone[11_000..])));
+
+        // And back to a short one: at once, as between short ones, and the tail stops
+        cabinet.swap_ir(&short);
+        assert_eq!(cabinet.swap_len(), cabinet.fade_len());
+        cabinet.process(&mut output[18_000..]);
+        assert!(!cabinet.is_swapping() && !cabinet.tailed);
+        // Its filter starts from rest, and takes a while to forget that
+        let settled = 18_000 + cabinet.swap_len() + 4800;
+        let off = output[settled..].iter().zip(&short_alone[settled..]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        assert!(off < 1e-4, "Back on the short one: off by {off}");
+        assert!(own_step(&output[17_000..]) < 1.05 * own_step(&other_alone[17_000..]).max(own_step(&short_alone[17_000..])));
+        assert_eq!(cabinet.buffers(), buffers);
     }
 
     #[test]

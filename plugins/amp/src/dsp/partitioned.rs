@@ -24,9 +24,12 @@ use super::fft::RealFft;
 const MIN_BLOCK: usize = 64;
 
 /// The most partitions a tail has. With a block of `MIN_BLOCK` that covers the longest
-/// response at 96 kHz, and above that the block is doubled. Measured in
-/// `convolver_report`: half as many, in blocks twice as long, cost more at every rate,
-/// because the head, which is two blocks, grows with them
+/// response up to 96 kHz, and above that the block is doubled. Measured with
+/// `convolver_report`, 40 ms, time per 64 samples at 48, 96 and 192 kHz: 2.1, 2.8 and
+/// 3.0 us. Half as many partitions in blocks twice as long: 2.1, 2.3 and 2.9 us, but the
+/// transforms, which are each done in one piece, are twice the size, and at 192 kHz the
+/// worst 64 samples then take 1.55 times the median, against 1.07. Twice as many in
+/// blocks half as long: 2.8, 4.6 and 4.1 us
 pub const MAX_PARTITIONS: usize = 60;
 
 /// The largest block: what the longest response the cabinet holds needs
@@ -41,9 +44,14 @@ const fn spectrum_len(block: usize) -> usize {
 /// Room for the transforms of all partitions of the longest response
 pub const MAX_SPECTRA_LEN: usize = MAX_PARTITIONS * spectrum_len(MAX_BLOCK);
 
-/// What a transform costs, counted in multiplications of one partition: the share of the
-/// work a sample does is counted in these, so the transforms weigh what they take
-const TRANSFORM_COST: usize = 6;
+/// What a transform costs, counted in multiplications of one partition (measured: 18
+/// with a block of 64, 13 with one of 128). The share of the work a sample does is counted
+/// in these, so the transforms weigh what they take
+const TRANSFORM_COST: usize = 16;
+
+/// A response is given a tail from this many samples on. Below it the transforms cost
+/// more than the taps they save (`convolver_report`: about even at 550 to 600 taps)
+const SHORTEST_WITH_TAIL: usize = 641;
 
 /// The length of a block for responses of up to `longest` samples: the shortest that
 /// covers them in `MAX_PARTITIONS` partitions behind the head
@@ -60,17 +68,11 @@ pub fn head_len(block: usize) -> usize {
     2 * block
 }
 
-/// A response is given a tail from this many samples on. Below it the transforms cost
-/// more than the taps they save
-pub fn shortest_with_tail(block: usize) -> usize {
-    4 * block + 1
-}
-
 /// The transforms of the partitions of a response's tail, one after the other in
 /// `spectra`, for a `Tail` with this block length. Returns how many numbers that is:
 /// none if the response is too short for a tail. Allocates: not for the audio thread
 pub fn partition(taps: &[f32], block: usize, spectra: &mut [f32]) -> usize {
-    if taps.len() < shortest_with_tail(block) {
+    if taps.len() < SHORTEST_WITH_TAIL.max(head_len(block) + 1) {
         return 0;
     }
     let tail = &taps[head_len(block)..];
@@ -146,6 +148,8 @@ pub struct Tail {
     // The two blocks the work under way started from, and the sum of the products
     samples: Vec<f32>,
     sum: Vec<f32>,
+    // False while every buffer is known to hold nothing but zeros
+    used: bool,
     // The work under way: the step that comes next, and what the samples so far have
     // paid towards it. A step is done once it is paid for in full, so the last sample
     // of the block pays for the last step
@@ -167,6 +171,7 @@ impl Tail {
             position: 0,
             samples: vec![0.0; 2 * MAX_BLOCK],
             sum: vec![0.0; spectrum_len(MAX_BLOCK)],
+            used: false,
             step: 0,
             steps: 0,
             cost: 0,
@@ -194,13 +199,19 @@ impl Tail {
 
     /// As if nothing had ever been played. A tail that is loaded plays from here on
     pub fn reset(&mut self) {
-        self.inputs.fill(0.0);
+        // Also called on the audio thread, mostly with no tail in use: nothing to clear
+        if self.used {
+            self.inputs.fill(0.0);
+            for line in &mut self.lines {
+                line.now.fill(0.0);
+                line.next.fill(0.0);
+            }
+        }
+        self.used = self.is_running();
         self.known = MAX_PARTITIONS;
         self.position = 0;
         self.stop_work();
         for line in &mut self.lines {
-            line.now.fill(0.0);
-            line.next.fill(0.0);
             if line.progress != Progress::Off {
                 line.progress = Progress::Playing;
             }
@@ -227,6 +238,7 @@ impl Tail {
     /// It is heard once `is_playing`. Does not allocate
     pub fn load(&mut self, slot: usize, spectra: &[f32]) {
         let was_running = self.is_running();
+        self.used = true;
         let line = &mut self.lines[slot];
         // What is being worked out for the cabinet that was here is of no use any more
         line.stale = true;
@@ -409,7 +421,11 @@ impl Tail {
         let describe = |buffer: &Vec<f32>| (buffer.as_ptr() as usize, buffer.capacity());
         let mut buffers = vec![describe(&self.inputs), describe(&self.samples), describe(&self.sum)];
         for line in &self.lines {
-            buffers.extend([describe(&line.spectra), describe(&line.now), describe(&line.next)]);
+            // The two change places at the end of every block
+            let mut shares = [describe(&line.now), describe(&line.next)];
+            shares.sort();
+            buffers.push(describe(&line.spectra));
+            buffers.extend(shares);
         }
         buffers
     }
@@ -470,8 +486,10 @@ mod tests {
     #[test]
     fn test_short_responses_get_no_tail() {
         let mut spectra = vec![0.0; MAX_SPECTRA_LEN];
-        assert_eq!(partition(&response(256, 1), 64, &mut spectra), 0);
-        assert_eq!(partition(&response(257, 1), 64, &mut spectra), 3 * spectrum_len(64));
+        assert_eq!(partition(&response(SHORTEST_WITH_TAIL - 1, 1), 64, &mut spectra), 0);
+        assert_eq!(partition(&response(SHORTEST_WITH_TAIL - 1, 1), 128, &mut spectra), 0);
+        assert_eq!(partition(&response(SHORTEST_WITH_TAIL, 1), 64, &mut spectra), 9 * spectrum_len(64));
+        assert_eq!(partition(&response(SHORTEST_WITH_TAIL, 1), 128, &mut spectra), 4 * spectrum_len(128));
         assert_eq!(partition(&response(1920, 1), 64, &mut spectra), 28 * spectrum_len(64));
         assert_eq!(partition(&response(7680, 1), 128, &mut spectra), 58 * spectrum_len(128));
         // Longer than the cabinet holds: what fits
@@ -480,7 +498,7 @@ mod tests {
 
     #[test]
     fn test_tail_is_the_plain_sum_of_the_late_taps() {
-        for (block, len) in [(64, 1920), (64, 300), (128, 7680), (64, 3840)] {
+        for (block, len) in [(64, 1920), (64, 700), (128, 7680), (64, 3840)] {
             let taps = response(len, 3);
             let input = noise(4 * len, 5);
             let mut tail = Tail::new();

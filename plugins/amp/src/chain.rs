@@ -421,7 +421,7 @@ impl AmpChain {
             sample_rate,
             ..
         } = self;
-        cab_stage.take(|taps, made_for| {
+        cab_stage.take(|taps, spectra, made_for| {
             // One made for another sample rate is of no use: its successor is on its way.
             // And the amp's own cabinet is not swapped for itself
             if made_for != *sample_rate || (taps.is_empty() && !*user_cab) {
@@ -430,9 +430,9 @@ impl AmpChain {
             *user_cab = !taps.is_empty();
             let own = &cab_irs[amp.index()];
             match (unheard, *user_cab) {
-                (true, true) => cabinet.set_taps(taps),
+                (true, true) => cabinet.set_taps(taps, spectra),
                 (true, false) => cabinet.set_ir(own),
-                (false, true) => cabinet.swap_taps(taps),
+                (false, true) => cabinet.swap_taps(taps, spectra),
                 (false, false) => cabinet.swap_ir(own),
             }
             if !unheard {
@@ -1014,7 +1014,7 @@ mod tests {
         let mut layout = vec![(chain.cab_irs.as_ptr() as usize, chain.cab_irs.capacity())];
         layout.extend(chain.cab_irs.iter().map(|ir| (ir.taps.as_ptr() as usize, ir.taps.capacity())));
         layout.extend(chain.cabinet.buffers());
-        layout.push(chain.cab_stage.buffer());
+        layout.extend(chain.cab_stage.buffer());
         layout.extend(chain.delay.buffers());
         layout.extend(chain.reverb.buffers());
         layout
@@ -3320,6 +3320,34 @@ mod tests {
     }
 
     #[test]
+    fn test_output_through_a_long_cabinet_does_not_depend_on_block_size() {
+        // To the bit, also while one long cabinet is swapped for another: their late
+        // parts are worked out in blocks of their own, counted in samples
+        let input = power_chords(SAMPLE_RATE, 0.5);
+        let settings = with_effects(with_amp(Amp::Brol, 0.6));
+        let (first, second) = (file_taps(Amp::Klar, SAMPLE_RATE), file_taps(Amp::Torden, SAMPLE_RATE));
+        assert!(first.len() > 1000 && second.len() > 800);
+        // Where every block size below has a block start
+        let at = 8000;
+        let run = |block: usize| {
+            let mut chain = chain_with_cab(&first, SAMPLE_RATE);
+            let mut output = input.clone();
+            let (before, after) = output.split_at_mut(at);
+            before.chunks_mut(block).for_each(|piece| chain.process(&settings, piece, None));
+            chain.cab_stage().offer(&second, SAMPLE_RATE);
+            after.chunks_mut(block).for_each(|piece| chain.process(&settings, piece, None));
+            output
+        };
+        let reference = run(at);
+        for block in [1, 5, 32, 64, 1000] {
+            assert!(run(block) == reference, "Blocks of {block}");
+        }
+        // And it is that cabinet: not the amp's own
+        let own = run_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, BLOCK);
+        assert!(largest_difference(&reference, &own) > 0.05 * peak(&own));
+    }
+
+    #[test]
     fn test_another_sample_rate_needs_the_cabinet_again() {
         let settings = with_amp(Amp::Brol, 0.5);
         let mut chain = chain_with_cab(&file_taps(Amp::Klar, 48000.0), 48000.0);
@@ -3426,6 +3454,43 @@ mod tests {
                 assert_eq!(chain.user_cab, len > 0);
                 let time = (0..5).map(|_| block_time_stereo_us(&mut chain, &settings, &chords)).fold(f64::MAX, f64::min);
                 print!("{:>6} {:>5.1} us{:>4.1}%", taps.len(), time, time / block_us * 100.0);
+            }
+            println!();
+        }
+
+        println!();
+        println!("How evenly the 40 ms cabinet's work is spread: time per {}-sample block, median and the", BLOCK);
+        println!("time 99 of 100 blocks stay under (the least of five runs), through the amp's own cabinet");
+        println!("and through the 40 ms one");
+        for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0] {
+            let settings = with_default_effects(everything_on(Amp::Torden, 1.0));
+            let chords = power_chords(sample_rate, 2.0);
+            print!("{:>8} Hz", sample_rate);
+            for ms in [0.0, USER_IR_MS] {
+                let mut noise = Noise::new(5);
+                let len = (ms * 0.001 * sample_rate) as usize;
+                let response: Vec<f32> =
+                    (0..len).map(|index| if index == 0 { 1.0 } else { noise.next() * (-6.0 * index as f32 / len as f32).exp() }).collect();
+                let taps = if len == 0 { Vec::new() } else { user_cab::trim_and_level(&response, sample_rate).unwrap() };
+                let mut chain = chain_with_cab(&taps, sample_rate);
+                run_stereo_blocks(&mut chain, &settings, &chords, BLOCK);
+                let (mut median, mut most) = (f64::MAX, f64::MAX);
+                for _ in 0..5 {
+                    let (mut left, mut right) = (chords.clone(), chords.clone());
+                    let mut times: Vec<f64> = left
+                        .chunks_mut(BLOCK)
+                        .zip(right.chunks_mut(BLOCK))
+                        .map(|(l, r)| {
+                            let start = Instant::now();
+                            chain.process(&settings, l, Some(r));
+                            start.elapsed().as_secs_f64() * 1e6
+                        })
+                        .collect();
+                    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    median = median.min(times[times.len() / 2]);
+                    most = most.min(times[times.len() * 99 / 100]);
+                }
+                print!("{:>8} taps{:>6.1} /{:>5.1} us  x{:.2}", taps.len(), median, most, most / median);
             }
             println!();
         }

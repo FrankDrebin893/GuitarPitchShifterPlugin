@@ -11,7 +11,7 @@
 //! `CabLoader` is everything around that which is not for the audio thread: which file
 //! is chosen, reading it, and what the display says about it.
 
-use crate::cab::MAX_USER_IR_LEN;
+use crate::cab::{tail_spectra, MAX_TAIL_SPECTRA_LEN, MAX_USER_IR_LEN};
 use crate::user_cab::{self, LoadError};
 use std::cell::UnsafeCell;
 use std::path::PathBuf;
@@ -27,6 +27,9 @@ struct Held {
     taps: Box<[f32]>,
     // No taps stands for the amp's own cabinet
     len: usize,
+    // What the cabinet needs of a long response besides the taps: `cab::tail_spectra`
+    spectra: Box<[f32]>,
+    spectra_len: usize,
     // The rate the taps were made for
     sample_rate: f32,
 }
@@ -51,6 +54,8 @@ impl CabStage {
             held: UnsafeCell::new(Held {
                 taps: vec![0.0; MAX_USER_IR_LEN].into_boxed_slice(),
                 len: 0,
+                spectra: vec![0.0; MAX_TAIL_SPECTRA_LEN].into_boxed_slice(),
+                spectra_len: 0,
                 sample_rate: 0.0,
             }),
             loaders: Mutex::new(()),
@@ -71,6 +76,8 @@ impl CabStage {
         let held = unsafe { &mut *self.held.get() };
         held.len = taps.len().min(held.taps.len());
         held.taps[..held.len].copy_from_slice(&taps[..held.len]);
+        // Worked out here, so the audio thread only has to copy it
+        held.spectra_len = tail_spectra(&taps[..held.len], sample_rate, &mut held.spectra);
         held.sample_rate = sample_rate;
         self.state.store(READY, Ordering::Release);
     }
@@ -81,25 +88,25 @@ impl CabStage {
     }
 
     /// Gives the cabinet that waits, if one does, to `receive`: its taps (none for the
-    /// amp's own cabinet) and the sample rate they are for. For the audio thread: it does
-    /// not wait, allocate or free
-    pub fn take(&self, receive: impl FnOnce(&[f32], f32)) -> bool {
+    /// amp's own cabinet), what `cab::tail_spectra` made of them, and the sample rate
+    /// both are for. For the audio thread: it does not wait, allocate or free
+    pub fn take(&self, receive: impl FnOnce(&[f32], &[f32], f32)) -> bool {
         if self.state.compare_exchange(READY, TAKING, Ordering::AcqRel, Ordering::Acquire).is_err() {
             return false;
         }
         // SAFETY: the state is `TAKING` and this thread made it so
         let held = unsafe { &*self.held.get() };
-        receive(&held.taps[..held.len], held.sample_rate);
+        receive(&held.taps[..held.len], &held.spectra[..held.spectra_len], held.sample_rate);
         self.state.store(EMPTY, Ordering::Release);
         true
     }
 
-    /// Address and capacity of the buffer, for checking that nothing is allocated anew
+    /// Address and capacity of the buffers, for checking that nothing is allocated anew
     #[cfg(test)]
-    pub fn buffer(&self) -> (usize, usize) {
-        // SAFETY: only the address and the length are read, and neither ever changes
+    pub fn buffer(&self) -> [(usize, usize); 2] {
+        // SAFETY: only the addresses and the lengths are read, and none of them ever changes
         let held = unsafe { &*self.held.get() };
-        (held.taps.as_ptr() as usize, held.taps.len())
+        [(held.taps.as_ptr() as usize, held.taps.len()), (held.spectra.as_ptr() as usize, held.spectra.len())]
     }
 }
 
@@ -213,7 +220,7 @@ mod tests {
 
     fn taken(stage: &CabStage) -> Option<(Vec<f32>, f32)> {
         let mut received = None;
-        stage.take(|taps, sample_rate| received = Some((taps.to_vec(), sample_rate)));
+        stage.take(|taps, _, sample_rate| received = Some((taps.to_vec(), sample_rate)));
         received
     }
 
@@ -263,7 +270,7 @@ mod tests {
         let mut last = 0.0;
         let mut takes = 0;
         while last < OFFERS as f32 {
-            stage.take(|taps, sample_rate| {
+            stage.take(|taps, _, sample_rate| {
                 assert_eq!(taps.len() as f32, sample_rate);
                 assert!(taps.iter().all(|&tap| tap == taps[0]), "Taps of two offers");
                 assert!(taps[0] > last, "Offer {} after {}", taps[0], last);
