@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, PoisonError};
 use suite_common::ui::{
     self, param_knob, param_switch, rig_led, signal_lamp, silk_label, small_footswitch, stepper, tuner_display,
-    Ornament, PedalStyle, Step, BENCH_MARGIN,
+    Ornament, PedalStyle, Step, BENCH_MARGIN, SLIM_KNOBS, SLIM_KNOB_RADIUS, SLIM_LED, SLIM_SWITCH,
 };
 
 use crate::cab_stage::{CabLoader, CabStatus};
@@ -16,12 +16,9 @@ use crate::tuner::{Note, TunerReading};
 use crate::user_cab;
 use crate::{Amp, GuitarAmpParams, GuitarAmpPlugin, Task};
 
-// The width the head's controls and the five pedals are placed in
+// The width the head's controls are placed in, and five of the wide pedals
 const RIG_WIDTH: u32 = 960;
-#[cfg(not(feature = "board_mock"))]
-const WINDOW_WIDTH: u32 = RIG_WIDTH;
-#[cfg(feature = "board_mock")]
-const WINDOW_WIDTH: u32 = crate::board_mock::WINDOW_WIDTH;
+const WINDOW_WIDTH: u32 = crate::board::WINDOW_WIDTH;
 const WINDOW_HEIGHT: u32 = 694;
 
 // The head across the top, the pedalboard in the rest of the window below it
@@ -74,10 +71,11 @@ const LED_Y: f32 = 309.0;
 const CAPTION_Y: f32 = 335.0;
 const CAPTION_SIZE: f32 = 17.0;
 
-// The pedalboard: five slots in signal order, left to right
-const PEDAL_SLOTS: usize = 5;
+// The pedals: five wide ones, as many as fit in the width of the rig, and five slim ones
+const WIDE_PEDALS: usize = 5;
+const PEDAL_SLOTS: usize = 10;
 pub(crate) const PEDAL_TOP: f32 = BENCH_MARGIN + HEAD_HEIGHT + BENCH_MARGIN;
-pub(crate) const PEDAL_WIDTH: f32 = (RIG_WIDTH as f32 - BENCH_MARGIN) / PEDAL_SLOTS as f32 - BENCH_MARGIN;
+pub(crate) const PEDAL_WIDTH: f32 = (RIG_WIDTH as f32 - BENCH_MARGIN) / WIDE_PEDALS as f32 - BENCH_MARGIN;
 pub(crate) const PEDAL_HEIGHT: f32 = WINDOW_HEIGHT as f32 - BENCH_MARGIN - PEDAL_TOP;
 
 // On every pedal, from its top centre: the LED under the title, the knobs, the switch at the bottom.
@@ -117,7 +115,13 @@ pub(crate) struct Pedals<'a> {
 }
 
 impl Pedals<'_> {
-    /// Draws the pedal of `slot`, counted in signal order, in `rect`. Returns its top face
+    /// Whether the pedal of `slot` is a slim one: two knobs, one above the other
+    pub(crate) fn is_slim(slot: usize) -> bool {
+        slot >= WIDE_PEDALS
+    }
+
+    /// Draws the pedal of `slot` in `rect`: the five wide ones first, as the chain had
+    /// them before there were more, then the slim ones. Returns its top face
     pub(crate) fn pedal(&self, ui: &mut Ui, slot: usize, rect: Rect) -> Rect {
         let (params, setter) = (self.params, self.setter);
         let pedals: [Pedal; PEDAL_SLOTS] = [
@@ -138,8 +142,22 @@ impl Pedals<'_> {
                 &[(&params.delay_time, "Time"), (&params.delay_feedback, "Repeat"), (&params.delay_mix, "Mix")],
             ),
             ("Reverb", &params.reverb_on, &[(&params.reverb_decay, "Decay"), (&params.reverb_mix, "Mix")]),
+            ("Comp", &params.comp_on, &[(&params.comp_sustain, "Sustain"), (&params.comp_level, "Level")]),
+            ("Chorus", &params.chorus_on, &[(&params.chorus_rate, "Rate"), (&params.chorus_depth, "Depth")]),
+            ("Phaser", &params.phaser_on, &[(&params.phaser_rate, "Rate"), (&params.phaser_depth, "Depth")]),
+            ("Flanger", &params.flanger_on, &[(&params.flanger_rate, "Rate"), (&params.flanger_depth, "Depth")]),
+            ("Tremolo", &params.trem_on, &[(&params.trem_rate, "Rate"), (&params.trem_depth, "Depth")]),
         ];
         let (title, on, knobs) = pedals[slot];
+        if Self::is_slim(slot) {
+            let face = ui::slim_pedal(ui, rect, STYLE.paint, title);
+            let top = face.center_top();
+            for (&(param, caption), offset) in knobs.iter().zip(SLIM_KNOBS) {
+                param_knob(ui, setter, param, top + offset, SLIM_KNOB_RADIUS, caption, None);
+            }
+            param_switch(ui, setter, on, top + SLIM_SWITCH, top + SLIM_LED);
+            return face;
+        }
         let face = ui::mini_pedal(ui, rect, STYLE.paint, title);
         let top = face.center_top();
 
@@ -311,14 +329,7 @@ pub fn create(
                     cab_loader: &cab_loader,
                     async_executor: &async_executor,
                 };
-                #[cfg(not(feature = "board_mock"))]
-                for slot in 0..PEDAL_SLOTS {
-                    let left = BENCH_MARGIN + (PEDAL_WIDTH + BENCH_MARGIN) * slot as f32;
-                    let rect = Rect::from_min_size(window + vec2(left, PEDAL_TOP), vec2(PEDAL_WIDTH, PEDAL_HEIGHT));
-                    pedals.pedal(ui, slot, rect);
-                }
-                #[cfg(feature = "board_mock")]
-                crate::board_mock::board(ui, window, &pedals);
+                crate::board::board(ui, window, &pedals, &params.order);
             });
         },
     )

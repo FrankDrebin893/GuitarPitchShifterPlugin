@@ -79,8 +79,8 @@ impl Pedal {
     }
 }
 
-// What a saved project calls the amp and its cabinet, between the two zones
-const AMP_ID: &str = "amp";
+/// What a saved project calls the amp and its cabinet, between the two zones
+pub const AMP_ID: &str = "amp";
 
 /// Every pedal once: the first `front` of them in front of the amp in that order, the rest
 /// behind the cabinet in theirs. Always a legal arrangement
@@ -132,8 +132,8 @@ impl ChainOrder {
 
     /// The order with `pedal` taken out and put back as number `place` of `zone` (0 is
     /// first; past the end is last). A pedal that cannot stand in that zone stays where it is
-    // The board moves pedals with this once they can be dragged
-    #[cfg_attr(not(test), allow(dead_code))]
+    // For the tests of the chain: the board works out a whole row and hands it over as ids
+    #[cfg(test)]
     pub fn moved(&self, pedal: Pedal, zone: Zone, place: usize) -> ChainOrder {
         if !pedal.can_be_in(zone) {
             return *self;

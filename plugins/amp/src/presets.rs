@@ -3,7 +3,8 @@
 //!
 //! A preset holds every parameter except four: Bypass, the Tuner switch, and Input and
 //! Output, which are the player's gain staging for their guitar and their mix. They stay
-//! where they are when a preset is loaded.
+//! where they are when a preset is loaded. It also holds the order the pedals stand in,
+//! which is not a parameter.
 //!
 //! Values are written as the knobs show them: dials 0.0 to 10.0, dB, ms, s and percent.
 //! `dial` and `percent` turn them into what the parameters store.
@@ -11,6 +12,7 @@
 use nih_plug::prelude::*;
 
 use crate::dial_memory;
+use crate::order::ChainOrder;
 use crate::{Amp, GuitarAmpParams};
 
 /// Shown behind the name once a knob no longer stands where the preset put it
@@ -38,7 +40,21 @@ pub struct Preset {
     pub delay: (bool, f32, f32, f32),
     /// Switch, decay in s, mix in percent
     pub reverb: (bool, f32, f32),
+    /// Switch, then Sustain, Level: 0.0 to 10.0
+    pub comp: (bool, [f32; 2]),
+    /// Chorus, phaser, flanger, tremolo: switch, rate in Hz, depth in percent
+    pub mods: [(bool, f32, f32); 4],
+    /// The pedals in the order the signal goes through them, with `amp` where the amp and
+    /// its cabinet are: what `ChainOrder::from_ids` reads
+    pub order: &'static [&'static str],
 }
+
+// The compressor and the modulation pedals switched off, with their dials where the
+// parameters start
+const COMP_OFF: (bool, [f32; 2]) = (OFF, [5.0, 5.0]);
+const MODS_OFF: [(bool, f32, f32); 4] = [(OFF, 0.8, 50.0), (OFF, 0.5, 50.0), (OFF, 0.3, 50.0), (OFF, 5.0, 50.0)];
+// The order the chain starts in: `ChainOrder::default`
+const USUAL_ORDER: &[&str] = &["comp", "drive", "phaser", "amp", "chorus", "flanger", "tremolo", "delay", "reverb"];
 
 // Chosen from the amp models' constants and measured with `preset_report` below: nobody
 // has listened to them yet. Master is where their levels were matched, by how loud they
@@ -62,6 +78,9 @@ pub static PRESETS: [Preset; 12] = [
         cab: (ON, [5.0, 5.0]),
         delay: (OFF, 350.0, 35.0, 25.0),
         reverb: (OFF, 1.5, 20.0),
+        comp: COMP_OFF,
+        mods: MODS_OFF,
+        order: USUAL_ORDER,
     },
     // Klar. Glassy clean: below the point where the stages bend, where the bright lift is
     // strongest, the top end up and a little off the amp's full low end. A short room
@@ -74,6 +93,9 @@ pub static PRESETS: [Preset; 12] = [
         cab: (ON, [6.0, 5.0]),
         delay: (OFF, 350.0, 30.0, 20.0),
         reverb: (ON, 1.2, 12.0),
+        comp: COMP_OFF,
+        mods: MODS_OFF,
+        order: USUAL_ORDER,
     },
     // Klar. Warm clean for the neck pickup: mids filled in against the amp's scoop, treble
     // and presence down, a darker microphone
@@ -86,6 +108,9 @@ pub static PRESETS: [Preset; 12] = [
         cab: (ON, [3.5, 5.0]),
         delay: (OFF, 350.0, 30.0, 20.0),
         reverb: (ON, 1.4, 14.0),
+        comp: COMP_OFF,
+        mods: MODS_OFF,
+        order: USUAL_ORDER,
     },
     // Klar. Ambient: clean, long repeats into a long tail. The gate stays on so the effects
     // can fall idle, but low and slow so it does not cut a note that fades
@@ -98,6 +123,9 @@ pub static PRESETS: [Preset; 12] = [
         cab: (ON, [4.5, 5.0]),
         delay: (ON, 480.0, 45.0, 35.0),
         reverb: (ON, 4.0, 40.0),
+        comp: COMP_OFF,
+        mods: MODS_OFF,
+        order: USUAL_ORDER,
     },
     // Klar. Edge of breakup: the amp where its stages start to bend, and the drive pedal as
     // the overdrive in front, so picking harder is what distorts
@@ -110,6 +138,9 @@ pub static PRESETS: [Preset; 12] = [
         cab: (ON, [5.0, 5.0]),
         delay: (OFF, 350.0, 30.0, 20.0),
         reverb: (ON, 1.5, 15.0),
+        comp: COMP_OFF,
+        mods: MODS_OFF,
+        order: USUAL_ORDER,
     },
     // Brøl. Cleaned up: the bottom of the Gain dial, where every stage is turned down, with
     // Master at the centre so pick attacks do not push the power stage
@@ -122,6 +153,9 @@ pub static PRESETS: [Preset; 12] = [
         cab: (ON, [5.5, 5.0]),
         delay: (OFF, 350.0, 30.0, 20.0),
         reverb: (ON, 1.4, 15.0),
+        comp: COMP_OFF,
+        mods: MODS_OFF,
+        order: USUAL_ORDER,
     },
     // Brøl. Rhythm crunch: a little past the centre of the Gain dial, mids forward, dry
     Preset {
@@ -133,6 +167,9 @@ pub static PRESETS: [Preset; 12] = [
         cab: (ON, [5.0, 5.0]),
         delay: (OFF, 350.0, 30.0, 20.0),
         reverb: (OFF, 1.5, 15.0),
+        comp: COMP_OFF,
+        mods: MODS_OFF,
+        order: USUAL_ORDER,
     },
     // Brøl. Lead: high on the Gain dial with the pedal pushing it, less bass into it, mids
     // up to carry single notes, a darker microphone and one delay behind
@@ -145,6 +182,9 @@ pub static PRESETS: [Preset; 12] = [
         cab: (ON, [4.5, 5.0]),
         delay: (ON, 380.0, 30.0, 22.0),
         reverb: (OFF, 1.8, 12.0),
+        comp: COMP_OFF,
+        mods: MODS_OFF,
+        order: USUAL_ORDER,
     },
     // Torden. Tight modern rhythm: the pedal as a boost (Drive low, Level high), which cuts
     // the lows going into the amp. Gain no higher than it needs: the amp is fully squeezed
@@ -158,6 +198,9 @@ pub static PRESETS: [Preset; 12] = [
         cab: (ON, [5.5, 5.0]),
         delay: (OFF, 350.0, 30.0, 20.0),
         reverb: (OFF, 1.5, 10.0),
+        comp: COMP_OFF,
+        mods: MODS_OFF,
+        order: USUAL_ORDER,
     },
     // Torden. Scooped and heavier: mids down, bass and treble up (which deepens the scoop),
     // more gain, more thump from the cabinet
@@ -170,6 +213,9 @@ pub static PRESETS: [Preset; 12] = [
         cab: (ON, [5.0, 6.0]),
         delay: (OFF, 350.0, 30.0, 20.0),
         reverb: (OFF, 1.5, 10.0),
+        comp: COMP_OFF,
+        mods: MODS_OFF,
+        order: USUAL_ORDER,
     },
     // Torden. Palm mutes in a drop tuning: the hardest boost and the brightest pedal, bass
     // down, the cabinet's resonance well down so the low roots do not smear, the fastest gate
@@ -182,6 +228,9 @@ pub static PRESETS: [Preset; 12] = [
         cab: (ON, [5.5, 2.5]),
         delay: (OFF, 350.0, 30.0, 20.0),
         reverb: (OFF, 1.5, 10.0),
+        comp: COMP_OFF,
+        mods: MODS_OFF,
+        order: USUAL_ORDER,
     },
     // Torden. Lead: mids back up, a darker microphone, a slower gate that lets notes ring,
     // a delay and a little reverb
@@ -194,6 +243,9 @@ pub static PRESETS: [Preset; 12] = [
         cab: (ON, [4.5, 5.0]),
         delay: (ON, 420.0, 30.0, 20.0),
         reverb: (ON, 2.0, 10.0),
+        comp: COMP_OFF,
+        mods: MODS_OFF,
+        order: USUAL_ORDER,
     },
 ];
 
@@ -226,14 +278,26 @@ pub fn neighbour(index: usize, forward: bool) -> usize {
 
 impl Preset {
     /// Every continuous parameter the preset holds, with the value it gets
-    fn knobs<'a>(&self, params: &'a GuitarAmpParams) -> [(&'a FloatParam, f32); 18] {
+    fn knobs<'a>(&self, params: &'a GuitarAmpParams) -> [(&'a FloatParam, f32); 28] {
         let [gain, bass, mid, treble, presence, master] = self.dials;
         let (_, gate_thresh_db, gate_release_ms) = self.gate;
         let (_, [drive_gain, drive_tone, drive_level]) = self.drive;
         let (_, [cab_mic, cab_res]) = self.cab;
         let (_, delay_time_ms, delay_feedback, delay_mix) = self.delay;
         let (_, reverb_decay_s, reverb_mix) = self.reverb;
+        let (_, [comp_sustain, comp_level]) = self.comp;
+        let [chorus, phaser, flanger, tremolo] = self.mods;
         [
+            (&params.comp_sustain, dial(comp_sustain)),
+            (&params.comp_level, dial(comp_level)),
+            (&params.chorus_rate, chorus.1),
+            (&params.chorus_depth, percent(chorus.2)),
+            (&params.phaser_rate, phaser.1),
+            (&params.phaser_depth, percent(phaser.2)),
+            (&params.flanger_rate, flanger.1),
+            (&params.flanger_depth, percent(flanger.2)),
+            (&params.trem_rate, tremolo.1),
+            (&params.trem_depth, percent(tremolo.2)),
             (&params.gate_thresh, gate_thresh_db),
             (&params.gate_release, gate_release_ms),
             (&params.drive_gain, dial(drive_gain)),
@@ -259,13 +323,11 @@ impl Preset {
     fn switches<'a>(&self, params: &'a GuitarAmpParams) -> [(&'a BoolParam, bool); 10] {
         [
             (&params.gate_on, self.gate.0),
-            // No preset uses the compressor or the modulation pedals yet: loading one
-            // switches them off
-            (&params.comp_on, OFF),
-            (&params.chorus_on, OFF),
-            (&params.phaser_on, OFF),
-            (&params.flanger_on, OFF),
-            (&params.trem_on, OFF),
+            (&params.comp_on, self.comp.0),
+            (&params.chorus_on, self.mods[0].0),
+            (&params.phaser_on, self.mods[1].0),
+            (&params.flanger_on, self.mods[2].0),
+            (&params.trem_on, self.mods[3].0),
             (&params.drive_on, self.drive.0),
             (&params.cab_on, self.cab.0),
             (&params.delay_on, self.delay.0),
@@ -281,9 +343,11 @@ impl Preset {
     /// older than the last preset loaded
     ///
     /// The amp that is left for the preset's remembers its dials, and the preset's amp
-    /// remembers the preset's: see `dial_memory`
+    /// remembers the preset's: see `dial_memory`. The pedals go into the preset's order,
+    /// which the host is not told: it is no parameter
     pub fn load(&self, params: &GuitarAmpParams, setter: &ParamSetter) {
         dial_memory::preset_loaded(params, self.amp, self.dials.map(dial));
+        params.order.put(self.chain_order());
         set(setter, &params.amp, self.amp);
         for (param, on) in self.switches(params) {
             set(setter, param, on);
@@ -293,9 +357,16 @@ impl Preset {
         }
     }
 
-    /// Whether every parameter the preset holds still stands where the preset puts it
+    /// The order the preset puts the pedals in
+    pub fn chain_order(&self) -> ChainOrder {
+        ChainOrder::from_ids(self.order.iter().copied())
+    }
+
+    /// Whether every parameter the preset holds still stands where the preset puts it, and
+    /// the pedals in its order
     pub fn matches(&self, params: &GuitarAmpParams) -> bool {
         params.amp.value() == self.amp
+            && params.order.get() == self.chain_order()
             && self.switches(params).into_iter().all(|(param, on)| param.value() == on)
             && self.knobs(params).into_iter().all(|(param, value)| {
                 (param.unmodulated_normalized_value() - param.preview_normalized(value)).abs() <= MATCH_TOLERANCE
@@ -322,6 +393,12 @@ fn set<P: Param>(setter: &ParamSetter, param: &P, value: P::Plain) {
 mod tests {
     use super::*;
     use crate::chain::{AmpChain, AmpSettings};
+    use crate::comp::CompSettings;
+    use crate::mods::chorus::ChorusSettings;
+    use crate::mods::flanger::FlangerSettings;
+    use crate::mods::phaser::PhaserSettings;
+    use crate::mods::tremolo::TremoloSettings;
+    use crate::order::Pedal;
     use crate::delay::DelaySettings;
     use crate::dsp::shaper::OUTPUT_CLIP_KNEE;
     use crate::gate::tests::{decaying_note, gain_trace, hiss, transitions as gate_changes};
@@ -340,7 +417,35 @@ mod tests {
             let [gain, bass, mid, treble, presence, master] = self.dials.map(dial);
             let [drive_gain, drive_tone, drive_level] = self.drive.1.map(dial);
             let [cab_mic, cab_res] = self.cab.1.map(dial);
+            let [comp_sustain, comp_level] = self.comp.1.map(dial);
+            let [chorus, phaser, flanger, tremolo] = self.mods;
             AmpSettings {
+                comp: CompSettings {
+                    on: self.comp.0,
+                    sustain: comp_sustain,
+                    level: comp_level,
+                },
+                chorus: ChorusSettings {
+                    on: chorus.0,
+                    rate_hz: chorus.1,
+                    depth: percent(chorus.2),
+                },
+                phaser: PhaserSettings {
+                    on: phaser.0,
+                    rate_hz: phaser.1,
+                    depth: percent(phaser.2),
+                },
+                flanger: FlangerSettings {
+                    on: flanger.0,
+                    rate_hz: flanger.1,
+                    depth: percent(flanger.2),
+                },
+                tremolo: TremoloSettings {
+                    on: tremolo.0,
+                    rate_hz: tremolo.1,
+                    depth: percent(tremolo.2),
+                },
+                order: self.chain_order(),
                 gate_on: self.gate.0,
                 gate_thresh_db: self.gate.1,
                 gate_release_ms: self.gate.2,
@@ -430,7 +535,7 @@ mod tests {
     fn test_printed_values_are_on_their_scales() {
         // Dials and percentages are written as the knobs show them, not as they are stored
         for preset in &PRESETS {
-            let dials = preset.dials.iter().chain(&preset.drive.1).chain(&preset.cab.1);
+            let dials = preset.dials.iter().chain(&preset.drive.1).chain(&preset.cab.1).chain(&preset.comp.1);
             for &shown in dials {
                 assert!((0.0..=10.0).contains(&shown), "{}: dial at {shown}", preset.name);
             }
@@ -438,7 +543,34 @@ mod tests {
             for shown in [preset.delay.3, preset.reverb.2] {
                 assert!((0.0..=100.0).contains(&shown), "{}: mix at {shown}", preset.name);
             }
+            for (_, _, depth) in preset.mods {
+                assert!((0.0..=100.0).contains(&depth), "{}: depth at {depth}", preset.name);
+            }
         }
+    }
+
+    #[test]
+    fn test_orders_are_written_out_in_full_and_legal() {
+        assert_eq!(USUAL_ORDER, ChainOrder::default().ids());
+        for preset in &PRESETS {
+            // Every pedal named once, on a side it can stand on: read back, the list is
+            // what was written, with nothing put right
+            assert_eq!(preset.chain_order().ids(), preset.order, "{}", preset.name);
+            assert_eq!(preset.order.len(), Pedal::ALL.len() + 1, "{}", preset.name);
+        }
+        // The presets from before the pedals could be moved keep the order of then
+        for preset in &PRESETS[..12] {
+            assert_eq!(preset.chain_order(), ChainOrder::default(), "{}", preset.name);
+            assert_eq!((preset.comp, preset.mods), (COMP_OFF, MODS_OFF), "{}", preset.name);
+        }
+    }
+
+    #[test]
+    fn test_a_moved_pedal_marks_the_preset_as_edited() {
+        let params = GuitarAmpParams::default();
+        assert!(PRESETS[0].matches(&params));
+        params.order.put(ChainOrder::default().moved(Pedal::Reverb, crate::order::Zone::Back, 0));
+        assert_eq!(PRESETS[0].display_name(&params), "Init*");
     }
 
     #[test]

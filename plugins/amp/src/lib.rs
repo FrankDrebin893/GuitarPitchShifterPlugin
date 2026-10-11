@@ -3,8 +3,7 @@ use nih_plug_egui::EguiState;
 use std::sync::Arc;
 
 mod amp;
-#[cfg(feature = "board_mock")]
-mod board_mock;
+mod board;
 mod cab;
 mod cab_stage;
 mod chain;
@@ -61,7 +60,7 @@ pub enum Task {
 // The full table of ids, including the ones not added yet, is in docs/amp-progress.md
 #[derive(Params)]
 pub struct GuitarAmpParams {
-    #[persist = "editor-state-rig2"]
+    #[persist = "editor-state-rig3"]
     pub editor_state: Arc<EguiState>,
 
     /// Index into `presets::PRESETS` of the preset loaded last. Not a parameter: the editor

@@ -1,16 +1,17 @@
-//! A mock of the round 2 pedalboard, to look at and try before any of it is built: one wide
-//! row of the five pedals there are and five slim ones that do nothing yet, in an order set
-//! by dragging a pedal by its title. Only compiled with the feature `board_mock`.
+//! The pedalboard: one row of pedals under the head, in the order the signal goes through
+//! them, with the amp's place marked between the pedals in front of it and the cabinet. A
+//! pedal is moved by dragging it by its title: the others make room, and it lands in the
+//! nearest place it may have.
 //!
-//! Nothing in here reaches the sound or is saved. The order and the new pedals' settings
-//! live in the window and are gone when it closes.
+//! The order itself is `order::ChainOrder`, kept with the parameters and saved with the
+//! project. What lives in the window is only where the pedals are drawn while one is held
+//! or gliding to its place.
 
 use nih_plug_egui::egui::{vec2, Id, Pos2, Rect, Ui};
-use suite_common::ui::{
-    self, value_knob, value_switch, BENCH_MARGIN, SLIM_KNOBS, SLIM_KNOB_RADIUS, SLIM_LED, SLIM_PEDAL_WIDTH, SLIM_SWITCH,
-};
+use suite_common::ui::{self, BENCH_MARGIN, SLIM_PEDAL_WIDTH};
 
-use crate::editor::{Pedals, CAB_SLOT, GATE_SLOT, HEAD_HEIGHT, PEDAL_HEIGHT, PEDAL_TOP, PEDAL_WIDTH, STYLE};
+use crate::editor::{Pedals, CAB_SLOT, GATE_SLOT, HEAD_HEIGHT, PEDAL_HEIGHT, PEDAL_TOP, PEDAL_WIDTH};
+use crate::order::{self, ChainOrder};
 
 const PEDALS: usize = 10;
 // The bench between the last pedal in front of the amp and the cabinet, where the amp's
@@ -22,15 +23,6 @@ pub const WINDOW_WIDTH: u32 = 1590;
 
 // Share of its way to its place that a pedal making room goes in a second, were it to keep its speed
 const GLIDE_PER_SECOND: f32 = 18.0;
-
-// The pedals that are not built yet: title and the captions of the two knobs
-const SLIM: [(&str, [&str; 2]); 5] = [
-    ("Comp", ["Sustain", "Level"]),
-    ("Chorus", ["Rate", "Depth"]),
-    ("Phaser", ["Rate", "Depth"]),
-    ("Flanger", ["Rate", "Depth"]),
-    ("Tremolo", ["Rate", "Depth"]),
-];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Pedal {
@@ -58,13 +50,6 @@ enum Zone {
     Either,
 }
 
-enum Kind {
-    /// One of the five there are, by its slot in the editor
-    Built(usize),
-    /// One of `SLIM`
-    Mock(usize),
-}
-
 impl Pedal {
     fn zone(self) -> Zone {
         match self {
@@ -75,25 +60,55 @@ impl Pedal {
         }
     }
 
-    fn kind(self) -> Kind {
+    /// The pedal's number in the editor's list of pedals
+    fn slot(self) -> usize {
         match self {
-            Pedal::Gate => Kind::Built(GATE_SLOT),
-            Pedal::Drive => Kind::Built(1),
-            Pedal::Cab => Kind::Built(CAB_SLOT),
-            Pedal::Delay => Kind::Built(3),
-            Pedal::Reverb => Kind::Built(4),
-            Pedal::Comp => Kind::Mock(0),
-            Pedal::Chorus => Kind::Mock(1),
-            Pedal::Phaser => Kind::Mock(2),
-            Pedal::Flanger => Kind::Mock(3),
-            Pedal::Tremolo => Kind::Mock(4),
+            Pedal::Gate => GATE_SLOT,
+            Pedal::Drive => 1,
+            Pedal::Cab => CAB_SLOT,
+            Pedal::Delay => 3,
+            Pedal::Reverb => 4,
+            Pedal::Comp => 5,
+            Pedal::Chorus => 6,
+            Pedal::Phaser => 7,
+            Pedal::Flanger => 8,
+            Pedal::Tremolo => 9,
         }
     }
 
     fn width(self) -> f32 {
-        match self.kind() {
-            Kind::Built(_) => PEDAL_WIDTH,
-            Kind::Mock(_) => SLIM_PEDAL_WIDTH,
+        if Pedals::is_slim(self.slot()) {
+            SLIM_PEDAL_WIDTH
+        } else {
+            PEDAL_WIDTH
+        }
+    }
+
+    /// What the chain calls the pedal. None for the two that are no part of its order
+    fn in_chain(self) -> Option<order::Pedal> {
+        match self {
+            Pedal::Gate | Pedal::Cab => None,
+            Pedal::Comp => Some(order::Pedal::Comp),
+            Pedal::Drive => Some(order::Pedal::Drive),
+            Pedal::Phaser => Some(order::Pedal::Phaser),
+            Pedal::Chorus => Some(order::Pedal::Chorus),
+            Pedal::Flanger => Some(order::Pedal::Flanger),
+            Pedal::Tremolo => Some(order::Pedal::Tremolo),
+            Pedal::Delay => Some(order::Pedal::Delay),
+            Pedal::Reverb => Some(order::Pedal::Reverb),
+        }
+    }
+
+    fn of_chain(pedal: order::Pedal) -> Pedal {
+        match pedal {
+            order::Pedal::Comp => Pedal::Comp,
+            order::Pedal::Drive => Pedal::Drive,
+            order::Pedal::Phaser => Pedal::Phaser,
+            order::Pedal::Chorus => Pedal::Chorus,
+            order::Pedal::Flanger => Pedal::Flanger,
+            order::Pedal::Tremolo => Pedal::Tremolo,
+            order::Pedal::Delay => Pedal::Delay,
+            order::Pedal::Reverb => Pedal::Reverb,
         }
     }
 }
@@ -114,6 +129,28 @@ impl Default for Order {
 }
 
 impl Order {
+    /// The row the chain's order makes: the gate, the pedals in front of the amp, the
+    /// cabinet, the pedals behind it
+    fn of_chain(chain: &ChainOrder) -> Order {
+        let front = chain.front().iter().map(|&pedal| Pedal::of_chain(pedal));
+        let back = chain.back().iter().map(|&pedal| Pedal::of_chain(pedal));
+        let row = std::iter::once(Pedal::Gate).chain(front).chain(std::iter::once(Pedal::Cab)).chain(back);
+        let mut pedals = [Pedal::Gate; PEDALS];
+        for (place, pedal) in pedals.iter_mut().zip(row) {
+            *place = pedal;
+        }
+        Order { pedals, front: chain.front().len() + 1 }
+    }
+
+    /// The chain's order for this row
+    fn chain(&self) -> ChainOrder {
+        let ids = self.pedals.iter().enumerate().filter_map(|(place, pedal)| match pedal.in_chain() {
+            Some(pedal) => Some(pedal.id()),
+            None => (place == self.front).then_some(order::AMP_ID),
+        });
+        ChainOrder::from_ids(ids)
+    }
+
     /// The left edge of every pedal (by `Pedal as usize`) and of the amp's gap, from the
     /// left edge of the window
     fn places(&self) -> ([f32; PEDALS], f32) {
@@ -181,56 +218,34 @@ struct Held {
     left: f32,
 }
 
+/// What the window keeps of the board from frame to frame
 #[derive(Clone)]
 struct Board {
-    order: Order,
     held: Option<Held>,
     /// Where every pedal and the amp's gap are drawn now: they glide to their places
     lefts: [f32; PEDALS],
     gap: f32,
-    /// Switch and knobs of every pedal of `SLIM`
-    mock: [(bool, [f32; 2]); SLIM.len()],
 }
 
-impl Default for Board {
-    fn default() -> Self {
-        let order = Order::default();
+impl Board {
+    /// Every pedal in its place
+    fn at_rest(order: &Order) -> Self {
         let (lefts, gap) = order.places();
-        Self { order, held: None, lefts, gap, mock: [(false, [0.5; 2]); SLIM.len()] }
+        Self { held: None, lefts, gap }
     }
 }
 
-/// What the tape under a knob of a mock pedal says
-fn worded(caption: &str, value: f32) -> String {
-    match caption {
-        "Rate" => format!("{:.1} Hz", 0.1 * 100.0_f32.powf(value)),
-        "Depth" => format!("{:.0} %", value * 100.0),
-        _ => format!("{:.1}", value * 10.0),
-    }
-}
-
-/// Draws the pedal `index` of `SLIM` in `rect`. Returns its top face
-fn mock_pedal(ui: &mut Ui, rect: Rect, index: usize, (on, knobs): &mut (bool, [f32; 2])) -> Rect {
-    let (title, captions) = SLIM[index];
-    let face = ui::slim_pedal(ui, rect, STYLE.paint, title);
-    let top = face.center_top();
-    for ((value, caption), offset) in knobs.iter_mut().zip(captions).zip(SLIM_KNOBS) {
-        let id = format!("{title} {caption}");
-        value_knob(ui, &id, value, 0.5, top + offset, SLIM_KNOB_RADIUS, caption, |value| worded(caption, value));
-    }
-    value_switch(ui, title, on, top + SLIM_SWITCH, top + SLIM_LED);
-    face
-}
-
-/// The whole row under the head. `window` is the window's top left corner; `built` draws
-/// the five pedals there are
-pub fn board(ui: &mut Ui, window: Pos2, built: &Pedals) {
-    let id = Id::new("board_mock");
-    let mut board: Board = ui.data(|data| data.get_temp(id)).unwrap_or_default();
+/// The whole row under the head, in the order `chain` holds, which a pedal that is dragged
+/// and let go changes. `window` is the window's top left corner; `pedals` draws each pedal
+pub fn board(ui: &mut Ui, window: Pos2, pedals: &Pedals, chain: &order::StoredOrder) {
+    // Read every frame: a preset or the host may have changed it
+    let order = Order::of_chain(&chain.get());
+    let id = Id::new("board");
+    let mut board: Board = ui.data(|data| data.get_temp(id)).unwrap_or_else(|| Board::at_rest(&order));
     let held = board.held.map(|held| held.pedal);
 
     // The others stand where they would if the held pedal were let go now
-    let shown = board.held.map_or(board.order, |held| board.order.nearest(held.pedal, held.left));
+    let shown = board.held.map_or(order, |held| order.nearest(held.pedal, held.left));
     let (places, gap_place) = shown.places();
     let step = (ui.input(|input| input.stable_dt) * GLIDE_PER_SECOND).min(1.0);
     let mut gliding = false;
@@ -263,10 +278,7 @@ pub fn board(ui: &mut Ui, window: Pos2, built: &Pedals) {
         if Some(pedal) == held {
             rect = ui::lifted(ui.painter(), rect);
         }
-        let face = match pedal.kind() {
-            Kind::Built(slot) => built.pedal(ui, slot, rect),
-            Kind::Mock(index) => mock_pedal(ui, rect, index, &mut board.mock[index]),
-        };
+        let face = pedals.pedal(ui, pedal.slot(), rect);
         if pedal.zone() == Zone::Fixed {
             continue;
         }
@@ -286,7 +298,7 @@ pub fn board(ui: &mut Ui, window: Pos2, built: &Pedals) {
         }
         if grip.drag_stopped() {
             if let Some(held) = board.held.take() {
-                board.order = board.order.nearest(held.pedal, held.left);
+                chain.put(order.nearest(held.pedal, held.left).chain());
             }
         }
     }
@@ -339,6 +351,23 @@ mod tests {
             for pedal in MOVABLE {
                 assert_eq!(order.pedals.iter().filter(|&&other| other == pedal).count(), 1, "{order:?}");
             }
+        }
+    }
+
+    #[test]
+    fn the_row_is_the_chains_order_and_back() {
+        // The default row is the default chain, and every row two moves from it comes
+        // back from the chain's order as it was
+        assert_eq!(Order::of_chain(&ChainOrder::default()), Order::default());
+        let mut orders = vec![Order::default()];
+        for _ in 0..2 {
+            orders = orders.iter().flat_map(|order| MOVABLE.iter().flat_map(|&pedal| order.moves(pedal))).collect();
+        }
+        for order in orders {
+            assert_eq!(Order::of_chain(&order.chain()), order, "{order:?}");
+        }
+        for pedal in MOVABLE {
+            assert_eq!(pedal.in_chain().map(Pedal::of_chain), Some(pedal));
         }
     }
 

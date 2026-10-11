@@ -12,9 +12,6 @@ crate-type = ["cdylib", "lib"]
 # cargo run -p amp --features standalone
 [features]
 standalone = ["nih_plug/standalone"]
-# A mock of the round 2 pedalboard in the standalone, to look at and try. Not for a bundle:
-# cargo run -p amp --features board_mock -- --backend dummy
-board_mock = ["standalone"]
 
 [[bin]]
 name = "amp_standalone"
