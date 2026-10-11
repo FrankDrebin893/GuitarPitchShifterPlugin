@@ -43,18 +43,18 @@ bottom row is full (three amp switches, Tuner, On), the board holds exactly five
 becomes a `stepper` (any number of amps), and pedals are added by widening the window to six
 slots. Do not start backlog 4 without his answer.
 
-Until then, work that needs no layout decision:
-- Cost has crept up: everything on (Torden) is 3.0 % of a core at 48 kHz, where it was 2.0 %
-  after M5. `stage_report` says where; the finer clipping with the drive on and the second
-  order stages are the suspects. Look for the cheap wins again
-- A 40 ms user cabinet at 192 kHz takes the plugin to about 16 % of a core. Not done: a
-  zero-latency two-stage convolver (the first taps direct, the rest in a partitioned FFT
-  convolver hidden behind them; own radix-2 FFT, no dependency, no spikes), or running the
-  tail at a lower rate. The bar: within 0.1 dB of the direct FIR from 60 Hz to 10 kHz, no
-  added latency. "Not worth it", with numbers, is a fine result
-- Backlog 5 (mic choices per cabinet), 6 (lower CPU), 8 (shared `suite_common::dsp`)
+Nobody has listened to anything yet, and the plugin has not been in a DAW. That is now the
+most useful next step by far, and it is Rasmus's. If he has listened and left notes, they
+come first.
 
-Nobody has listened to anything yet. If Rasmus has listened and left notes, they come first.
+Work that needs neither:
+- Backlog 5 (mic choices per cabinet: needs room on the Cab pedal, which is full), 8 (shared
+  `suite_common::dsp`: touches the drums)
+- A logarithm of our own in the second-order clippers would save about 1.7 us per block but
+  changes the last bits of the output: needs a decision
+- The report tests do not pin their thread, so timings on this machine come out in two
+  modes (fast and slow cores, 1.33 times apart). Pinning inside the reports would make
+  before/after comparisons trustworthy
 
 ## What was decided with Rasmus
 
@@ -235,6 +235,18 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
 - 2026-10-11 Built-in cabinets are designed at 48 kHz, the rate they were tuned at, and
   resampled for every other rate; 48 kHz is unchanged to the bit. The resampler moved to
   `dsp/resample.rs` and serves user cabinets too
+- 2026-10-11 Cost: the 39.7 us figure was a slow core (cores 2 to 9 of this machine take 1.33
+  times as long). On a fast core it was 30.8 us against 27.3 after M5: 2.6 us the finer
+  clipping, 0.3 us a branch that had joined the power stage's feedback loop, nothing
+  measurable from lamps, hand-off check, tuner or dial jump
+- 2026-10-11 Clippers take two samples as one SSE2 pair, bit-identical (hash of 54 renders).
+  Rejected: block passes for auto-vectorising (stages got slower: the filters no longer
+  overlap the clipping), plain two-number pairs in release, an own logarithm (not bit-identical)
+- 2026-10-11 Long user cabinets: zero-latency two-stage convolver. The head of two blocks
+  stays a direct FIR, the rest runs in uniform FFT partitions (block 64 up to 96 kHz, 128
+  above), own radix-2 FFT, work spread per sample, spectra made off the audio thread in
+  `CabStage::offer`. Response identical to the direct FIR; no tail under 641 taps. A tail at
+  a decimated rate was not built: from the measured parts it cannot beat this
 - 2026-10-10 Worktrees for subagents start from `main`, not from `amp-sim`. Tell each agent to
   run `git merge --ff-only amp-sim` first
 
@@ -346,6 +358,23 @@ from 60 Hz to 10 kHz. Everything on, stereo, both effects (Torden Gain 10): 39.7
 10 / 10 / 10 adds 0.4 % (Klar), 0.8 % (Brøl), 0.6 % (Torden) of a core at 48 kHz. Designing
 the cabinets for a new rate takes 4 to 12 ms once; setting a known rate 0.1 ms.
 
+- A swap to a long user cabinet now waits for its tail: up to 40 ms after a built-in or short
+  cabinet (the old one plays on), two blocks after another long one. It was immediate before
+- With 16-sample host blocks the cabinet's worst block is up to 1.9 times its median (each
+  FFT is done in one piece); far below what the chain takes
+- When Bypass has faded while a long cabinet is in use, the reset clears about 60 KB of tail
+  buffers once, on the audio thread
+- The SSE2 pair path of the clippers is compiled only in optimised x86-64 builds, so
+  `cargo test` in debug does not run it; `cargo test -p amp --release` does and passes.
+  The inlining attributes around it were chosen by timing the test binary, not the plugin
+- Debug-mode amp tests take 24 to 29 s now
+
+Figures of 2026-10-11 after the cost work, on a fast core, Torden Gain 10, everything on,
+stereo, both effects: 27.1 us per 64-sample block (2.0 %) at 48 kHz, 17.1 us (2.6 %) at
+96 kHz, 18.5 us (5.5 %) at 192 kHz; drive off 22.4 us (1.7 %) at 48 kHz. With a 40 ms user
+cabinet: 28.2 us (2.1 %), 18.2 us (2.7 %), 18.4 us (5.5 %); it was 15.4 % at 192 kHz. The
+earlier "3.0 % at 48 kHz" was measured on a slow core; on a fast core it was 2.3 %.
+
 ## Last report
 
 After M5 and the presets (2026-10-10). Run the reports for the full tables.
@@ -391,7 +420,7 @@ Idle after the last note: 3.5 s at default effects, 63 s at delay 1000 ms / 90 %
 3. Tuner (done)
 4. More amps and pedals (compressor, fuzz, chorus)
 5. Mic choices per cabinet
-6. Lower CPU (shorter or partitioned IRs, SIMD)
+6. Lower CPU (shorter or partitioned IRs, SIMD) (done)
 7. Input and output meters (small version done: gate-open and clip lamps)
 8. Shared `suite_common::dsp` for filters used by more than one plugin
 9. Per-amp knob memory (done)

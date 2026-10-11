@@ -234,13 +234,16 @@ gain). They share the six dials.
 - `src/amp/` - `model.rs` (`Amp` and one `AmpModel` of constants per amp), `preamp.rs`,
   `tonestack.rs`, `poweramp.rs`
 - `src/cab.rs` - Cabinet: impulse response designed in code at 48 kHz and resampled for other
-  rates, direct FIR, Mic and Resonance filters behind it
+  rates, direct FIR; a player's response of 641 taps or more keeps its first two blocks as a
+  direct FIR and runs the rest through the `Tail`; Mic and Resonance filters behind it
 - `src/user_cab.rs` - The player's own cabinets: folder, WAV reading, resampler, trim, cut, level
 - `src/cab_stage.rs` - `CabStage` (lock-free hand-off of a cabinet to the audio thread) and
   `CabLoader` (reads the chosen file on a background task)
 - `src/delay.rs`, `src/reverb.rs` - Stereo delay; stereo reverb (8-line feedback delay network)
 - `src/dsp/` - `filters.rs` (f64 biquads), `oversample.rs` (minimum-phase IIR half-bands),
-  `shaper.rs` (antialiased clippers), `resample.rs` (windowed-sinc resampler for cabinets)
+  `shaper.rs` (antialiased clippers), `resample.rs` (windowed-sinc resampler for cabinets),
+  `pair.rs` (two samples' divisions and square roots as one SSE2 pair), `fft.rs` (radix-2 real
+  FFT), `partitioned.rs` (`Tail`: the late part of a long impulse response in FFT partitions)
 - `src/presets.rs` - Factory presets as plain data, and `preset_report`
 - `src/dial_memory.rs` - Each amp's six dial positions, kept by the editor and saved with the
   project (`amp-dials`)
@@ -291,7 +294,15 @@ How it behaves:
 - Files are read on a background task (and in `initialize`), never on the audio thread; the taps
   reach it through `CabStage` without allocating, freeing or waiting
 - The folder is created the first time the stepper is used, not by loading the plugin
-- A 40 ms cabinet adds about 0.3 % of a core at 48 kHz, 2.3 % at 96 kHz, 8.5 % at 192 kHz
+- A 40 ms cabinet adds about 0.1 % of a core against the amp's own at any rate. Its late part is
+  convolved in FFT partitions whose work is spread over the samples of a block: no added latency,
+  the worst block as with the amp's own cabinet, output independent of the host's block size
+- A swap to a long cabinet of the player's own starts its crossfade once its late part is there:
+  about the length of the response after a short or built-in cabinet, two blocks after another
+  long one. The cabinet before plays on meanwhile
+- The clippers work on two samples at a time (`dsp/pair.rs`), the same to the bit as one by one.
+  That path is only compiled in optimised x86-64 builds: run `cargo test -p amp --release` too
+  when touching the clippers
 - `hound` is the amp's one dependency besides nih-plug; it reads the WAV files
 - Each amp remembers its own six dials: the selector on the head stores them under the amp that
   is left and sets them to what the amp that is picked had (defaults if never left). The dials
@@ -309,7 +320,9 @@ How it behaves:
   the DSP modules; a test pins the values
 - A preset holds everything except Bypass, Input and Output, so every preset must fit at
   Output 0 dB (a test checks peak and level of each)
-- Cost with everything on (Torden): about 3 % of a core at 48 kHz, 3.8 % at 96 kHz, 7.8 % at 192 kHz
+- Cost with everything on (Torden): about 2.0 % of a core at 48 kHz, 2.6 % at 96 kHz, 5.5 % at
+  192 kHz, on a fast core. The cores of a machine differ (1.33 times on the development
+  machine): pin the thread when comparing timings
 
 | Parameter (id) | Range | Default | Description |
 |----------------|-------|---------|-------------|
@@ -362,6 +375,9 @@ cargo test -p amp --release tuner_report -- --ignored --nocapture
 
 # The player's cabinets: cost per length and rate, latency, what loading does to a response.
 cargo test -p amp --release user_cab_report -- --ignored --nocapture
+
+# Long cabinets: direct FIR against the tail, per length and rate; error, evenness, swaps.
+cargo test -p amp --release convolver_report -- --ignored --nocapture
 
 # The three built-in cabinets as 48 kHz WAV files in target/renders/cabinets.
 cargo test -p amp --release export_cabinets -- --ignored --nocapture
