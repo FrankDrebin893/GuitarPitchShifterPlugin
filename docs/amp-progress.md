@@ -31,8 +31,8 @@ Decided with Rasmus on 2026-10-11:
 |---|---|
 | M0 Loudness measure, `loudness_report`, pinned reports | done 2026-10-11 |
 | M1 Clean level | done 2026-10-11 |
-| M2 Board mock in the standalone (feature `board_mock`); needs Rasmus's yes before M3's editor | next |
 | M3 Compressor (`order.rs` with a constant order, `comp.rs`, first slim pedal) | sound done 2026-10-11: `comp.rs` in the chain, `comp_on`, `comp_sustain`, `comp_level`. No pedal on the board yet: the editor waits for the mock |
+| M2 Board mock in the standalone (feature `board_mock`); needs Rasmus's yes before M3's editor | built 2026-10-11, waits for Rasmus |
 | M4 Mods (`mods/`, four slim pedals, `mods_report`) | |
 | M5 Order (`chain-order` persisted, re-route with a fade, dragging, order in presets) | |
 | M6 New presets, docs | |
@@ -41,6 +41,24 @@ Planned parameter ids: `comp_on`, `comp_sustain`, `comp_level`, `chorus_on`, `ch
 `chorus_depth`, `phaser_on`, `phaser_rate`, `phaser_depth`, `flanger_on`, `flanger_rate`,
 `flanger_depth`, `trem_on`, `trem_rate`, `trem_depth`. The order is not a parameter: persisted
 as `chain-order`.
+
+### M2: the mock
+
+`cargo run -p amp --features board_mock -- --backend dummy`. Without the feature nothing is
+different. Captures in `target/mock`. All of it is in `board_mock.rs` (order, rules, dragging,
+the five pedals that do nothing yet) and `suite_common::ui` (`slim_pedal`, `title_grip`,
+`lifted`, `amp_marker`, `value_knob`, `value_switch`).
+
+- Window 1590 x 694: five pedals of 180, five slim ones of 110, and 40 px of bench for the
+  amp's place in front of the Cab. The head's controls are as they were, 315 px further right
+- The amp's place: two patch cables from the pedals on both sides up to the head, with a
+  cream tag `AMP` on them, printed in ink like the name band
+- A slim pedal cannot have the LED above two knobs one over the other at the heights of the
+  wide pedals: that is 37 px too tall. So the LED has the place of a trio's upper left knob,
+  the first knob the upper right one, and the second is below to the left. Titles are size 21
+  (24 on the wide ones) so `TREMOLO` and `FLANGER` fit in 110
+- A pedal held where it may not be keeps the nearest place it may have, and the others show
+  it. Nothing else says no
 
 ### What M0 found
 

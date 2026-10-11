@@ -3,6 +3,8 @@ use nih_plug_egui::EguiState;
 use std::sync::Arc;
 
 mod amp;
+#[cfg(feature = "board_mock")]
+mod board_mock;
 mod cab;
 mod cab_stage;
 mod chain;
