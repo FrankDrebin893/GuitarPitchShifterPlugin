@@ -17,6 +17,7 @@
 //! 5. Levelled like the cabinets designed here: 0 dB average power from 100 Hz to 4 kHz
 
 use crate::cab::{ir_magnitude, level_gain, user_ir_len, USER_IR_MS};
+use crate::dsp::resample::resample;
 use std::fs::File;
 use std::io::{BufReader, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -56,13 +57,6 @@ const LEAD_MS: f64 = 2.0;
 const TAIL_MS: f64 = 5.0;
 // A response that needs more gain than this to be levelled has nothing in the band
 const LEVEL_GAIN_MAX: f32 = 1e4;
-
-// The resampler: a sinc with this many zero crossings either side, under a Kaiser window
-// that keeps what would fold back 90 dB down. Its corner sits this far below half the
-// lower of the two rates, so that it has fallen that far there: flat to 0.41 of the rate
-const ZERO_CROSSINGS: f64 = 32.0;
-const KAISER_BETA: f64 = 9.0;
-const CUTOFF_SHARE: f64 = 0.91;
 
 /// Why a file gave no cabinet
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -239,60 +233,6 @@ fn peak(samples: &[f32]) -> f32 {
     samples.iter().fold(0.0, |top, sample| top.max(sample.abs()))
 }
 
-fn sinc(x: f64) -> f64 {
-    if x.abs() < 1e-9 {
-        1.0
-    } else {
-        let phase = std::f64::consts::PI * x;
-        phase.sin() / phase
-    }
-}
-
-/// Modified Bessel function of the first kind and order zero, for the Kaiser window
-fn bessel_i0(x: f64) -> f64 {
-    let quarter = x * x / 4.0;
-    let (mut sum, mut term) = (1.0, 1.0);
-    for step in 1..60 {
-        term *= quarter / (step * step) as f64;
-        sum += term;
-        if term < sum * 1e-17 {
-            break;
-        }
-    }
-    sum
-}
-
-/// A signal at another sample rate, as many seconds long. Band-limited to just under half
-/// the lower of the two rates. The first sample stays the first: nothing is delayed
-pub fn resample(input: &[f32], from_rate: f64, to_rate: f64) -> Vec<f32> {
-    if input.is_empty() {
-        return Vec::new();
-    }
-    // Input samples per output sample, and the lower rate as a share of the input's
-    let step = from_rate / to_rate;
-    let low = (to_rate / from_rate).min(1.0);
-    let cutoff = low * CUTOFF_SHARE;
-    let half_width = ZERO_CROSSINGS / low;
-    let window_scale = 1.0 / bessel_i0(KAISER_BETA);
-
-    let len = (input.len() as f64 / step).ceil() as usize;
-    (0..len)
-        .map(|index| {
-            let centre = index as f64 * step;
-            let first = (centre - half_width).ceil().max(0.0) as usize;
-            let last = ((centre + half_width).floor() as usize).min(input.len() - 1);
-            let mut sum = 0.0;
-            for (offset, &sample) in input[first..=last].iter().enumerate() {
-                let distance = centre - (first + offset) as f64;
-                let position = distance / half_width;
-                let window = bessel_i0(KAISER_BETA * (1.0 - position * position).max(0.0).sqrt()) * window_scale;
-                sum += sample as f64 * cutoff * sinc(cutoff * distance) * window;
-            }
-            sum as f32
-        })
-        .collect()
-}
-
 /// Where a response starts: at its first sample of `START_GAIN` of its peak, or `PRE_MS`
 /// before its first of `ARRIVAL_GAIN`, whichever is later. With it, where that arrival is,
 /// and whether something of the response is left in front of the start
@@ -377,6 +317,7 @@ pub mod tests {
     use super::*;
     use crate::amp::model::Amp;
     use crate::cab::{design_ir, CabIr, Cabinet};
+    use crate::dsp::resample::sinc;
     use crate::test_util::{to_db, Noise};
 
     /// A folder for the files of one test, below `target`, empty
@@ -425,12 +366,9 @@ pub mod tests {
     }
 
     // The band the responses are held against each other in. The cabinets designed here
-    // are only the same at every sample rate up to `DESIGN_TOP_HZ`: above it they are far
-    // down their roll-off, where a filter designed at 48 kHz bends away from the same one
-    // designed at 192 kHz (3 dB at 8 kHz for the steepest). That is the designs, not the
-    // resampler, which is held to the whole band against the response it was given
+    // are the same at every sample rate over all of it (they are designed at 48 kHz and
+    // resampled), so a file of one, loaded at any rate, is held to the built-in one there
     pub const BAND_HZ: [f32; 2] = [60.0, 8000.0];
-    const DESIGN_TOP_HZ: f32 = 4000.0;
 
     /// Largest difference in dB between two responses, given as their gain at a frequency,
     /// over `probes` frequencies from 60 Hz to `top_hz`, and the frequency it is at
@@ -563,8 +501,8 @@ pub mod tests {
                 let native = design_ir(&amp.model().cab, to_rate).taps;
                 let native = trim_and_level(&native, to_rate).unwrap();
                 let resampled = trim_and_level(&resample(&original, 48000.0, to_rate as f64), to_rate).unwrap();
-                let (difference, freq_hz) = largest_difference_db((&resampled, to_rate), (&native, to_rate), DESIGN_TOP_HZ, 80);
-                assert!(difference.abs() < 0.5, "{:?} to {} Hz: {:.2} dB at {:.0} Hz", amp, to_rate, difference, freq_hz);
+                let (difference, freq_hz) = largest_difference_db((&resampled, to_rate), (&native, to_rate), BAND_HZ[1], 80);
+                assert!(difference.abs() < 0.1, "{:?} to {} Hz: {:.2} dB at {:.0} Hz", amp, to_rate, difference, freq_hz);
             }
         }
     }
@@ -699,12 +637,9 @@ pub mod tests {
             let path = dir.join(format!("{}.wav", amp.model().name));
             write_ir_wav(&path, &whole_response(amp, 48000.0, EXPORT_S, EXPORT_LEVEL), 1, 24, false, 48000);
             for sample_rate in [44100.0, 48000.0, 96000.0] {
-                // At the rate of the file the whole band; at another, as far up as the
-                // built-in one is the same cabinet there
-                let top_hz = if sample_rate == 48000.0 { BAND_HZ[1] } else { DESIGN_TOP_HZ };
                 let taps = load(&path, sample_rate).unwrap();
-                let (difference, freq_hz) = off_the_built_in_db(&taps, amp, sample_rate, top_hz, 80);
-                assert!(difference.abs() < 0.5, "{:?} at {} Hz: {:.2} dB at {:.0} Hz", amp, sample_rate, difference, freq_hz);
+                let (difference, freq_hz) = off_the_built_in_db(&taps, amp, sample_rate, BAND_HZ[1], 80);
+                assert!(difference.abs() < 0.25, "{:?} at {} Hz: {:.2} dB at {:.0} Hz", amp, sample_rate, difference, freq_hz);
             }
         }
     }
@@ -816,8 +751,8 @@ pub mod tests {
         }
         println!();
 
-        for top_hz in [DESIGN_TOP_HZ, BAND_HZ[1]] {
-            println!("Resampled 48 kHz cabinet against the one designed at that rate, 60 Hz to {} Hz, in dB", top_hz);
+        for top_hz in [BAND_HZ[1]] {
+            println!("Resampled 48 kHz cabinet against the built-in one at that rate, 60 Hz to {} Hz, in dB", top_hz);
             println!("{:<8}{:>18}{:>18}{:>18}", "", 44100, 96000, 192000);
             for amp in Amp::ALL {
                 let original = design_ir(&amp.model().cab, 48000.0).taps;
@@ -834,7 +769,7 @@ pub mod tests {
         }
 
         let dir = test_dir("report");
-        for top_hz in [DESIGN_TOP_HZ, BAND_HZ[1]] {
+        for top_hz in [BAND_HZ[1]] {
             println!(
                 "Built-in cabinet as a 48 kHz, 24 bit file, loaded: taps, and largest difference from the built-in one, 60 Hz to {} Hz",
                 top_hz

@@ -147,6 +147,40 @@ pub fn band_level_db(signal: &[f32], sample_rate: f32, from_hz: Option<f32>, to_
     to_db(rms(&band) / rms(signal).max(1e-10))
 }
 
+/// Level of what a signal has between two frequencies, in dB relative to the whole signal,
+/// from its spectrum: pieces of 50 ms under a Hann window, their energy summed at every
+/// 20 Hz of the band. Unlike `band_level_db` it has no filter that is bent by the sample
+/// rate, so it reads the same sound the same at every rate, also where a much stronger
+/// band sits right below the one that is asked for
+pub fn spectrum_level_db(signal: &[f32], sample_rate: f32, from_hz: f32, to_hz: f32) -> f32 {
+    const PIECE_S: f64 = 0.05;
+    const STEP_HZ: f64 = 20.0;
+    let piece = (PIECE_S * sample_rate as f64) as usize;
+    let window: Vec<f64> = (0..piece).map(|i| 0.5 - 0.5 * (TAU * i as f64 / piece as f64).cos()).collect();
+    let bins = ((to_hz - from_hz) as f64 / STEP_HZ) as usize;
+    let (mut band, mut total) = (0.0, 0.0);
+    // Pieces half a piece apart, so every part of the signal counts the same
+    for start in (0..signal.len().saturating_sub(piece)).step_by(piece / 2) {
+        let windowed: Vec<f64> = signal[start..start + piece].iter().zip(&window).map(|(&s, w)| s as f64 * w).collect();
+        total += windowed.iter().map(|s| s * s).sum::<f64>();
+        for bin in 0..bins {
+            let omega = TAU * (from_hz as f64 + (bin as f64 + 0.5) * STEP_HZ) / sample_rate as f64;
+            let (step_sin, step_cos) = omega.sin_cos();
+            let (mut re, mut im) = (0.0, 0.0);
+            let (mut sin, mut cos) = (0.0, 1.0);
+            for &sample in &windowed {
+                re += sample * cos;
+                im += sample * sin;
+                (sin, cos) = (sin * step_cos + cos * step_sin, cos * step_cos - sin * step_sin);
+            }
+            // Both sides of the spectrum, as a share of all of it (which adds up to the
+            // sample rate times the energy of the piece)
+            band += 2.0 * (re * re + im * im) * STEP_HZ / sample_rate as f64;
+        }
+    }
+    (10.0 * (band / total.max(1e-300)).max(1e-20).log10()) as f32
+}
+
 /// Edges of the bands `tight_levels_db` reports, in Hz: sub lows, low mids (where mud
 /// gathers), mids, upper mids, fizz
 pub const TIGHT_EDGES_HZ: [f32; 4] = [100.0, 400.0, 1600.0, 6400.0];

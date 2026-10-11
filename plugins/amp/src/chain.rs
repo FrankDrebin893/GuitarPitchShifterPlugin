@@ -818,6 +818,7 @@ impl AmpChain {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cab::tests::{design_ms, off_the_design_rate};
     use crate::cab::{user_ir_len, MAX_USER_IR_LEN, USER_IR_MS};
     use crate::cab_stage::{CabLoader, CabStatus};
     use crate::drive::tests::new_drive;
@@ -1460,11 +1461,14 @@ mod tests {
             let output = run(&settings, &same_chords(sample_rate, 0.5), sample_rate);
             let mut levels = vec![to_db(rms(&output))];
             levels.extend(band_levels_db(&output, sample_rate));
+            // And far down the cabinet's roll-off, where it once was another cabinet at
+            // every rate
+            levels.push(spectrum_level_db(&output, sample_rate, 8000.0, 16000.0));
             levels
         };
         let (low, high) = (measure(SAMPLE_RATE), measure(96000.0));
         for (index, (a, b)) in low.iter().zip(&high).enumerate() {
-            assert!((a - b).abs() < 0.5, "Level {}: {:.2} dB at 48 kHz, {:.2} dB at 96 kHz", index, a, b);
+            assert!((a - b).abs() < 0.25, "Level {}: {:.2} dB at 48 kHz, {:.2} dB at 96 kHz", index, a, b);
         }
 
         let aliasing = aliasing_db_at(&settings, ALIAS_TONES_HZ[1], 96000.0);
@@ -4219,14 +4223,18 @@ mod tests {
         }
 
         println!();
+        print_cabinet_rates();
+
+        println!();
         print_drive_aliasing();
 
         println!();
         println!("The same sound at every sample rate: chords put together from sines (RMS in dBFS and octave");
-        println!("bands in dB relative to the whole signal) and the 220 Hz sine (THD in dB). `off` is the");
-        println!("largest difference from the 48 kHz row in the levels and in the THD");
+        println!("bands in dB relative to the whole signal, the last one 8 to 16 kHz, read from the spectrum)");
+        println!("and the 220 Hz sine (THD in dB). `off` is the largest difference from the 48 kHz row in");
+        println!("the levels and in the THD");
         print!("{:<20}{:>8}{:>8}{:>8}", "", "Hz", "RMS", "THD");
-        for edge in &BAND_EDGES_HZ[..BAND_EDGES_HZ.len() - 1] {
+        for edge in BAND_EDGES_HZ {
             print!("{:>7}", edge);
         }
         println!("{:>14}", "off");
@@ -4243,6 +4251,7 @@ mod tests {
                 let tone_out = run(settings, &sine(220.0, 0.178, sample_rate, 2 * half), sample_rate);
                 let mut levels = vec![to_db(rms(&chords_out))];
                 levels.extend(band_levels_db(&chords_out, sample_rate));
+                levels.push(spectrum_level_db(&chords_out, sample_rate, 8000.0, 16000.0));
                 (levels, thd_db(&tone_out[half..], sample_rate, 220.0))
             };
             let reference = measure(SAMPLE_RATE);
@@ -4271,6 +4280,53 @@ mod tests {
 
         println!();
         print_stage_times();
+    }
+
+    /// The part of `amp_report` on the cabinets at each sample rate, by itself:
+    ///   cargo test -p amp --release cab_rate_report -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn cab_rate_report() {
+        print_cabinet_rates();
+    }
+
+    fn print_cabinet_rates() {
+        println!("Cabinet response per sample rate in dB, and the largest difference from the 48 kHz one");
+        println!("from 60 Hz to 10 kHz (600 frequencies) and where it is");
+        let probes = [63.0, 100.0, 250.0, 1000.0, 2000.0, 3150.0, 4000.0, 5000.0, 6300.0, 8000.0, 10000.0, 16000.0];
+        print!("{:<16}{:>6}", "Hz", "taps");
+        for probe in probes {
+            print!("{:>7}", probe);
+        }
+        println!("{:>20}", "off");
+        for amp in Amp::ALL {
+            for sample_rate in [44100.0, 48000.0, 88200.0, 96000.0, 192000.0] {
+                let ir = design_ir(&amp.model().cab, sample_rate);
+                print!("{:<8}{:>8}{:>6}", amp.model().name, sample_rate, ir.taps.len());
+                for probe in probes {
+                    print!("{:>7.1}", to_db(ir.magnitude(probe, sample_rate)));
+                }
+                let (off, freq_hz) = off_the_design_rate(amp, sample_rate, 10_000.0, 600);
+                println!("{:>9.3} at {:>5.0} Hz", off, freq_hz);
+            }
+        }
+
+        println!();
+        println!("Time in ms to design the three cabinets for a sample rate, which is done the first time");
+        println!("that rate is set (48 kHz is the design itself, the others are resampled from it), and to");
+        println!("set the sample rate of the whole chain once they are known");
+        println!("{:>11}{:>10}{:>10}", "", "design", "set");
+        for sample_rate in [44100.0, 48000.0, 88200.0, 96000.0, 192000.0] {
+            let mut chain = new_chain(sample_rate);
+            let set = (0..5)
+                .map(|_| {
+                    let start = Instant::now();
+                    chain.set_sample_rate(sample_rate);
+                    start.elapsed().as_secs_f64() * 1e3
+                })
+                .fold(f64::MAX, f64::min);
+            println!("{:>8} Hz{:>10.2}{:>10.2}", sample_rate, design_ms(sample_rate), set);
+        }
     }
 
     /// The drive pedal's settings the aliasing is measured at: one that pushes an amp, one

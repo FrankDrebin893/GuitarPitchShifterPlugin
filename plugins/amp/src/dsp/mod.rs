@@ -1,5 +1,6 @@
 pub mod filters;
 pub mod oversample;
+pub mod resample;
 pub mod shaper;
 
 pub fn db_to_gain(db: f32) -> f32 {

@@ -101,6 +101,7 @@ pub struct PowerModel {
 }
 
 /// The cabinet: speaker and box, as heard by a microphone close to the cone
+#[derive(Clone, Copy, PartialEq)]
 pub struct CabModel {
     /// Speaker resonance: a high-pass with a bump at its corner
     pub resonance_hz: f32,

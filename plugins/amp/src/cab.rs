@@ -1,6 +1,8 @@
 use crate::amp::model::CabModel;
 use crate::dsp::db_to_gain;
 use crate::dsp::filters::{Biquad, BiquadCoeffs, GlidingBiquad};
+use crate::dsp::resample::resample;
+use std::sync::Mutex;
 
 /// The longest impulse response a cabinet designed here can have: 20 ms at 192 kHz
 pub const MAX_IR_LEN: usize = 3840;
@@ -10,6 +12,12 @@ pub const MAX_IR_LEN: usize = 3840;
 pub const USER_IR_MS: f32 = 40.0;
 /// The longest impulse response the cabinet can hold: `USER_IR_MS` at 192 kHz
 pub const MAX_USER_IR_LEN: usize = 7680;
+
+// The sample rate the cabinets are designed at. Their filters are bent by the rate they are
+// made for, most where the cone rolls off: the same filters made for 192 kHz are 3 dB off
+// at 8 kHz. So they are made for this rate only, the one the cabinets were tuned at, and
+// the impulse response is resampled for every other
+const DESIGN_RATE: f32 = 48000.0;
 
 // No impulse response is longer than this. The cabinets designed here are a quarter to
 // less than half of it (`CabModel.ir_ms`)
@@ -112,20 +120,70 @@ impl CabIr {
     }
 }
 
-/// Designs a cabinet. The same model sounds the same at every sample rate. Allocates and
-/// takes a while: not for the audio thread
+// Every cabinet designed so far, with its model and sample rate: a design is the same
+// every time, and a host may set the sample rate often
+static DESIGNS: Mutex<Vec<(CabModel, f32, CabIr)>> = Mutex::new(Vec::new());
+
+/// Designs a cabinet. The same model sounds the same at every sample rate. Allocates,
+/// takes a lock, and the first time for a model and a rate takes a while: not for the
+/// audio thread
 pub fn design_ir(model: &CabModel, sample_rate: f32) -> CabIr {
+    let find = |designs: &Vec<(CabModel, f32, CabIr)>| {
+        designs.iter().find(|(known, rate, _)| known == model && *rate == sample_rate).map(|(_, _, ir)| ir.clone())
+    };
+    let known = find(&DESIGNS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
+    known.unwrap_or_else(|| {
+        // Designed with the lock released, so another thread does not wait for it. If
+        // that one designed the same meanwhile, its result is the same
+        let ir = design_at(model, sample_rate);
+        let mut designs = DESIGNS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if find(&designs).is_none() {
+            designs.push((*model, sample_rate, ir.clone()));
+        }
+        ir
+    })
+}
+
+/// The cabinet as designed at `DESIGN_RATE`, and how far the fit moved the frequency and
+/// the Q of its resonance
+fn design_reference(model: &CabModel) -> (CabIr, [f32; 2]) {
+    let sample_rate = DESIGN_RATE;
     let rest = rest_filters(model, sample_rate);
     let len = ((model.ir_ms * 0.001 * sample_rate).round() as usize).clamp(16, ir_len(sample_rate));
     let taps = faded_response(&rest, len, FADE_SHARE);
-    let lows = fit_lows(model, &long_response(model, sample_rate), &taps, sample_rate);
-    let mut ir = CabIr { taps, lows };
+    let moved = fit_lows(model, &long_response(model, sample_rate), &taps, sample_rate);
+    let mut ir = CabIr {
+        taps,
+        lows: lows_filter(model, moved, sample_rate),
+    };
 
     let gain = level_gain(|freq_hz| ir.magnitude(freq_hz, sample_rate));
     for tap in &mut ir.taps {
         *tap *= gain;
     }
-    ir
+    (ir, moved)
+}
+
+/// The reference cabinet at another sample rate: its impulse response resampled, and its
+/// resonance filter made for that rate, which so far below every rate is the same filter
+fn design_at(model: &CabModel, sample_rate: f32) -> CabIr {
+    let (reference, moved) = design_reference(model);
+    if sample_rate == DESIGN_RATE {
+        return reference;
+    }
+    // As many seconds of it, each sample worth less by as much as there are more of them
+    let scale = DESIGN_RATE / sample_rate;
+    let mut taps: Vec<f32> =
+        resample(&reference.taps, DESIGN_RATE as f64, sample_rate as f64).iter().map(|tap| tap * scale).collect();
+    taps.truncate(ir_len(sample_rate));
+    // The reference has faded to nothing at its end
+    if let Some(last) = taps.last_mut() {
+        *last = 0.0;
+    }
+    CabIr {
+        taps,
+        lows: lows_filter(model, moved, sample_rate),
+    }
 }
 
 fn resonance_filter(model: &CabModel, sample_rate: f32) -> BiquadCoeffs {
@@ -140,9 +198,14 @@ fn long_response(model: &CabModel, sample_rate: f32) -> Vec<f32> {
     faded_response(&filters, ir_len(sample_rate), LONG_FADE_SHARE)
 }
 
-/// The resonance filter that, behind `taps`, comes closest to `long` at the low end: the
-/// model's own, with its frequency and Q moved a little
-fn fit_lows(model: &CabModel, long: &[f32], taps: &[f32], sample_rate: f32) -> BiquadCoeffs {
+/// The model's resonance filter with its frequency and Q moved by these factors
+fn lows_filter(model: &CabModel, moved: [f32; 2], sample_rate: f32) -> BiquadCoeffs {
+    BiquadCoeffs::highpass(model.resonance_hz * moved[0], model.resonance_q * moved[1], sample_rate)
+}
+
+/// How the model's resonance filter has to be moved (`lows_filter`) to come closest to
+/// `long` at the low end when it runs behind `taps`
+fn fit_lows(model: &CabModel, long: &[f32], taps: &[f32], sample_rate: f32) -> [f32; 2] {
     let ratio = (FIT_BAND_HZ[1] / FIT_BAND_HZ[0]).powf(1.0 / (FIT_PROBES - 1) as f32);
     // What the filter has to do at each probe, in dB
     let wanted: Vec<(f32, f32)> = (0..FIT_PROBES)
@@ -152,11 +215,8 @@ fn fit_lows(model: &CabModel, long: &[f32], taps: &[f32], sample_rate: f32) -> B
             (freq_hz, long_db - gain_to_db(ir_magnitude(taps, freq_hz, sample_rate)))
         })
         .collect();
-    let design = |moved: [f32; 2]| {
-        BiquadCoeffs::highpass(model.resonance_hz * moved[0], model.resonance_q * moved[1], sample_rate)
-    };
     let error = |moved: [f32; 2]| {
-        let filter = design(moved);
+        let filter = lows_filter(model, moved, sample_rate);
         wanted
             .iter()
             .map(|&(freq_hz, wanted_db)| (filter.magnitude_db(freq_hz, sample_rate) - wanted_db).abs())
@@ -182,7 +242,7 @@ fn fit_lows(model: &CabModel, long: &[f32], taps: &[f32], sample_rate: f32) -> B
         }
         span = [span[0] / FIT_STEPS as f32, span[1] / FIT_STEPS as f32];
     }
-    design(best)
+    best
 }
 
 /// Everything a cabinet does but its resonance
@@ -551,12 +611,13 @@ impl CabVoicing {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::amp::model::Amp;
     use crate::test_util::{rms, sine, to_db, Noise};
 
-    const PROBES_HZ: [f32; 7] = [100.0, 250.0, 500.0, 1000.0, 2000.0, 3000.0, 4000.0];
+    // How close a cabinet is to itself at another sample rate, in dB, from 60 Hz to 10 kHz
+    const SAME_DB: f32 = 0.1;
 
     fn design(amp: Amp, sample_rate: f32) -> CabIr {
         design_ir(&amp.model().cab, sample_rate)
@@ -573,14 +634,15 @@ mod tests {
         block
     }
 
-    /// Largest difference in dB, from 60 Hz to 8 kHz, between a cabinet and the one long
-    /// impulse response it was tuned as, both levelled alike. And the frequency it is at
+    /// Largest difference in dB, from 60 Hz to 8 kHz, between a cabinet at a sample rate
+    /// and the one long impulse response it was tuned as, which is at `DESIGN_RATE`, both
+    /// levelled alike. And the frequency it is at
     fn off_the_long_response(amp: Amp, sample_rate: f32, probes: usize) -> (f32, f32) {
         let ir = design(amp, sample_rate);
-        let long = long_response(&amp.model().cab, sample_rate);
+        let long = long_response(&amp.model().cab, DESIGN_RATE);
         let ratio = (LEVEL_BAND_HZ[1] / LEVEL_BAND_HZ[0]).powf(1.0 / (LEVEL_PROBES - 1) as f32);
         let long_level: f32 = (0..LEVEL_PROBES)
-            .map(|probe| ir_magnitude(&long, LEVEL_BAND_HZ[0] * ratio.powi(probe as i32), sample_rate).powi(2))
+            .map(|probe| ir_magnitude(&long, LEVEL_BAND_HZ[0] * ratio.powi(probe as i32), DESIGN_RATE).powi(2))
             .sum::<f32>()
             / LEVEL_PROBES as f32;
         let long_level_db = 0.5 * gain_to_db(long_level);
@@ -589,7 +651,7 @@ mod tests {
         for probe in 0..probes {
             let freq_hz = 60.0 * (8000.0f32 / 60.0).powf(probe as f32 / (probes - 1) as f32);
             let off = gain_to_db(ir.magnitude(freq_hz, sample_rate))
-                - (gain_to_db(ir_magnitude(&long, freq_hz, sample_rate)) - long_level_db);
+                - (gain_to_db(ir_magnitude(&long, freq_hz, DESIGN_RATE)) - long_level_db);
             if off.abs() > worst.0.abs() {
                 worst = (off, freq_hz);
             }
@@ -659,7 +721,7 @@ mod tests {
     #[test]
     fn test_cabinet_stays_within_half_a_db_of_the_long_impulse_response() {
         for amp in Amp::ALL {
-            for sample_rate in [44100.0, 48000.0, 96000.0] {
+            for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0] {
                 let (off, freq_hz) = off_the_long_response(amp, sample_rate, 150);
                 assert!(off.abs() < 0.5, "{:?} at {} Hz: {:.2} dB at {:.0} Hz", amp, sample_rate, off, freq_hz);
             }
@@ -732,24 +794,72 @@ mod tests {
         }
     }
 
+    /// Time to design the three cabinets for a sample rate from nothing, in ms: what
+    /// setting a sample rate for the first time costs. The fastest of three
+    pub fn design_ms(sample_rate: f32) -> f64 {
+        (0..3)
+            .map(|_| {
+                let start = std::time::Instant::now();
+                for amp in Amp::ALL {
+                    std::hint::black_box(design_at(&amp.model().cab, sample_rate));
+                }
+                start.elapsed().as_secs_f64() * 1e3
+            })
+            .fold(f64::MAX, f64::min)
+    }
+
+    /// Largest difference in dB between a cabinet at a sample rate and the same cabinet
+    /// at `DESIGN_RATE`, over `probes` frequencies from 60 Hz to `top_hz`, and where it is
+    pub fn off_the_design_rate(amp: Amp, sample_rate: f32, top_hz: f32, probes: usize) -> (f32, f32) {
+        let (ir, reference) = (design(amp, sample_rate), design(amp, DESIGN_RATE));
+        let mut worst = (0.0f32, 0.0);
+        for probe in 0..probes {
+            let freq_hz = 60.0 * (top_hz / 60.0).powf(probe as f32 / (probes - 1) as f32);
+            let off = to_db(ir.magnitude(freq_hz, sample_rate) / reference.magnitude(freq_hz, DESIGN_RATE));
+            if off.abs() > worst.0.abs() {
+                worst = (off, freq_hz);
+            }
+        }
+        worst
+    }
+
     #[test]
     fn test_ir_sounds_the_same_at_every_sample_rate() {
+        // Far down the roll-off as well, where filters made for each rate were 3 dB apart
         for amp in Amp::ALL {
-            let reference = design(amp, 48000.0);
+            for sample_rate in [44100.0, 88200.0, 96000.0, 192000.0] {
+                let (off, freq_hz) = off_the_design_rate(amp, sample_rate, 10_000.0, 120);
+                assert!(off.abs() < SAME_DB, "{:?} at {} Hz: {:.3} dB at {:.0} Hz", amp, sample_rate, off, freq_hz);
+            }
+        }
+    }
+
+    #[test]
+    fn test_ir_at_the_design_rate_is_the_design_itself() {
+        for amp in Amp::ALL {
+            let model = &amp.model().cab;
+            assert_eq!(design(amp, DESIGN_RATE), design_reference(model).0);
+            // And a design asked for again is the one that was kept
+            assert_eq!(design(amp, 44100.0), design_at(model, 44100.0));
+        }
+    }
+
+    #[test]
+    fn test_ir_starts_at_once_at_every_sample_rate() {
+        // Resampled, the response still arrives when the reference does: within a sample
+        // of the rate it is at
+        let arrival_s = |ir: &CabIr, sample_rate: f32| {
+            let top = ir.taps.iter().fold(0.0f32, |top, tap| top.max(tap.abs()));
+            ir.taps.iter().position(|tap| tap.abs() >= 0.5 * top).unwrap() as f32 / sample_rate
+        };
+        for amp in Amp::ALL {
+            let reference = arrival_s(&design(amp, DESIGN_RATE), DESIGN_RATE);
             for sample_rate in [44100.0, 96000.0, 192000.0] {
                 let ir = design(amp, sample_rate);
-                for freq in PROBES_HZ {
-                    let difference =
-                        to_db(ir.magnitude(freq, sample_rate) / reference.magnitude(freq, 48000.0));
-                    assert!(
-                        difference.abs() < 1.0,
-                        "{:?} at {} Hz and {} Hz rate: {:.2} dB",
-                        amp,
-                        freq,
-                        sample_rate,
-                        difference
-                    );
-                }
+                let late = arrival_s(&ir, sample_rate) - reference;
+                assert!(late.abs() <= 1.0 / sample_rate.min(DESIGN_RATE), "{:?} at {}: {} s", amp, sample_rate, late);
+                let expected = (amp.model().cab.ir_ms * 0.001 * sample_rate).round() as usize;
+                assert!(ir.taps.len().abs_diff(expected) <= 1, "{:?} at {}: {} taps", amp, sample_rate, ir.taps.len());
             }
         }
     }
