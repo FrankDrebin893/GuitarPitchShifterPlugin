@@ -256,9 +256,11 @@ impl Preset {
     }
 
     /// Every switch the preset holds, with the position it gets
-    fn switches<'a>(&self, params: &'a GuitarAmpParams) -> [(&'a BoolParam, bool); 5] {
+    fn switches<'a>(&self, params: &'a GuitarAmpParams) -> [(&'a BoolParam, bool); 6] {
         [
             (&params.gate_on, self.gate.0),
+            // No preset uses the compressor yet: loading one switches it off
+            (&params.comp_on, OFF),
             (&params.drive_on, self.drive.0),
             (&params.cab_on, self.cab.0),
             (&params.delay_on, self.delay.0),

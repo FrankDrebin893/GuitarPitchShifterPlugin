@@ -32,7 +32,7 @@ Decided with Rasmus on 2026-10-11:
 | M0 Loudness measure, `loudness_report`, pinned reports | done 2026-10-11 |
 | M1 Clean level | done 2026-10-11 |
 | M2 Board mock in the standalone (feature `board_mock`); needs Rasmus's yes before M3's editor | next |
-| M3 Compressor (`order.rs` with a constant order, `comp.rs`, first slim pedal) | |
+| M3 Compressor (`order.rs` with a constant order, `comp.rs`, first slim pedal) | sound done 2026-10-11: `comp.rs` in the chain, `comp_on`, `comp_sustain`, `comp_level`. No pedal on the board yet: the editor waits for the mock |
 | M4 Mods (`mods/`, four slim pedals, `mods_report`) | |
 | M5 Order (`chain-order` persisted, re-route with a fade, dragging, order in presets) | |
 | M6 New presets, docs | |
@@ -112,6 +112,22 @@ clip from -18 on). A held note in Klar at Gain 5: -77 / -70 / -61 / -20 / -12 dB
 - The plan's target of amps within 3 LU from -30 to -18 dBFS RMS is not met and cannot be:
   Brøl and Torden themselves are 3.3 LU apart at -30. Held instead: within 3 LU at the
   reference level, within 5 LU 6 dB either side
+
+### M3 so far
+
+- `comp.rs` (by a subagent, merged): feed-forward, no lookahead, side chain high-passed at
+  80 Hz, the level held over 15 to 30 ms so a held note does not ripple, soft knee, 3 ms
+  attack with at most 6 dB of overshoot, 150 ms release, make-up tied to Sustain (within
+  0.3 LU of the pedal off at the reference level), at most 20 dB of gain on silence. 5 ns
+  per sample. `comp_report`, `render_comp`
+- The chain walks `ChainOrder::front()` between the oversampler and the preamp and `back()`
+  behind the DC blocker; the order is the default until M5. With the pedal off every render
+  of `fingerprint_report` is the same as after M1
+- Loading a preset switches the compressor off; no preset uses it yet
+- A switch to Klar with compressor and drive on is up to 1.8 times as steep as Klar settled,
+  for the 20 ms its power stage takes to give way (the test allows 2.0)
+- Sustain 10 raises hiss by 20 dB when the gate is off; behind the cabinet the pedal is not
+  calibrated (levels differ there): to measure once it can be moved
 
 ## How to resume (round 1)
 

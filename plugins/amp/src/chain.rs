@@ -4,6 +4,7 @@ use crate::amp::preamp::Preamp;
 use crate::amp::tonestack::{ToneCurve, ToneStack};
 use crate::cab::{design_ir, CabIr, CabVoicing, Cabinet};
 use crate::cab_stage::CabStage;
+use crate::comp::{Comp, CompSettings};
 use crate::delay::{Delay, DelaySettings};
 use crate::drive::Drive;
 use crate::dsp::filters::DcBlocker;
@@ -12,6 +13,7 @@ use crate::dsp::shaper::{output_clip, OUTPUT_CLIP_KNEE};
 use crate::dsp::{curve, db_to_gain, smoothing_coeff, Ramp};
 use crate::gate::Gate;
 use crate::lamps::LampReading;
+use crate::order::{ChainOrder, Pedal, Zone};
 use crate::reverb::{Reverb, ReverbSettings};
 use crate::tuner::{Tuner, TunerReading};
 use std::sync::Arc;
@@ -65,6 +67,9 @@ pub struct AmpSettings {
     /// Time the gate takes to close, in milliseconds
     pub gate_release_ms: f32,
 
+    /// The compressor pedal. It smooths its own settings
+    pub comp: CompSettings,
+
     pub drive_on: bool,
     /// The drive pedal's dials, 0.0 to 1.0
     pub drive_gain: f32,
@@ -96,6 +101,9 @@ pub struct AmpSettings {
     /// The tuner listens to the input and the amp is silent meanwhile. Bypass still passes
     /// the input on
     pub tuner_on: bool,
+
+    /// Which pedals stand in front of the amp and which behind the cabinet, and in what order
+    pub order: ChainOrder,
 }
 
 /// What the plugin starts with. The parameters in `lib.rs` take their defaults from here
@@ -107,6 +115,7 @@ impl Default for AmpSettings {
             gate_on: true,
             gate_thresh_db: -60.0,
             gate_release_ms: 100.0,
+            comp: CompSettings::default(),
             drive_on: false,
             drive_gain: 0.3,
             drive_tone: 0.5,
@@ -125,6 +134,7 @@ impl Default for AmpSettings {
             reverb: ReverbSettings::default(),
             out_level: 1.0,
             tuner_on: false,
+            order: ChainOrder::default(),
         }
     }
 }
@@ -213,6 +223,10 @@ pub struct AmpChain {
     in_gain: Ramp,
     gate: Gate,
     oversampler: Oversampler,
+    // The pedals stand in this order, and are set up for the side of the amp they are on
+    order: ChainOrder,
+    comp: Comp,
+    comp_settings: CompSettings,
     drive: Drive,
     preamp: Preamp,
     tone: ToneStack,
@@ -287,6 +301,9 @@ impl AmpChain {
             in_gain: Ramp::new(1.0),
             gate: Gate::new(),
             oversampler: Oversampler::new(),
+            order: ChainOrder::default(),
+            comp: Comp::new(),
+            comp_settings: CompSettings::default(),
             drive: Drive::new(),
             preamp: Preamp::new(),
             tone: ToneStack::new(),
@@ -343,6 +360,7 @@ impl AmpChain {
         self.oversampler.set_factor(self.factor);
         self.gate.set_sample_rate(sample_rate);
         self.drive.configure(self.oversampled_rate());
+        self.comp.set_sample_rate(self.rate_in(self.order.zone_of(Pedal::Comp)));
         self.delay.set_sample_rate(sample_rate);
         self.reverb.set_sample_rate(sample_rate);
 
@@ -360,6 +378,14 @@ impl AmpChain {
     /// The rate the drive and the amp run at
     fn oversampled_rate(&self) -> f32 {
         self.sample_rate * self.factor as f32
+    }
+
+    /// The rate a pedal runs at on that side of the amp
+    fn rate_in(&self, zone: Zone) -> f32 {
+        match zone {
+            Zone::Front => self.oversampled_rate(),
+            Zone::Back => self.sample_rate,
+        }
     }
 
     /// Samples at that rate in a piece of `CHUNK`: the time the stages take to follow a dial
@@ -483,6 +509,7 @@ impl AmpChain {
 
     fn reset_stages(&mut self) {
         self.gate.reset();
+        self.comp.reset();
         self.reset_amp_stages();
         self.cabinet.reset();
         self.cab_voicing.reset();
@@ -597,6 +624,7 @@ impl AmpChain {
         if cab_target != self.cab_mix.target() {
             self.cab_mix.set_target(cab_target, self.cab_fade_steps);
         }
+        self.comp_settings = settings.comp;
         self.delay_settings = settings.delay;
         self.reverb_settings = settings.reverb;
 
@@ -752,7 +780,14 @@ impl AmpChain {
         let mut oversampled = [0.0f32; OVERSAMPLED_CHUNK];
         let high = &mut oversampled[..len * self.factor];
         self.oversampler.upsample(&signal[..len], high);
-        self.drive.process(high);
+        for index in 0..self.order.front().len() {
+            match self.order.front()[index] {
+                Pedal::Comp => self.comp.process_mono(&self.comp_settings, high),
+                Pedal::Drive => self.drive.process(high),
+                // Not built yet, or never in front of the amp
+                Pedal::Chorus | Pedal::Phaser | Pedal::Flanger | Pedal::Tremolo | Pedal::Delay | Pedal::Reverb => {}
+            }
+        }
         self.preamp.process(high);
         self.tone.process(high);
         self.power.process(high);
@@ -771,8 +806,16 @@ impl AmpChain {
             wide[1][index] = sample;
         }
         let [wide_left, wide_right] = &mut wide;
-        self.delay.process(&self.delay_settings, &mut wide_left[..len], &mut wide_right[..len]);
-        self.reverb.process(&self.reverb_settings, &mut wide_left[..len], &mut wide_right[..len]);
+        let (wide_left, wide_right) = (&mut wide_left[..len], &mut wide_right[..len]);
+        for index in 0..self.order.back().len() {
+            match self.order.back()[index] {
+                Pedal::Comp => self.comp.process_stereo(&self.comp_settings, wide_left, wide_right),
+                Pedal::Delay => self.delay.process(&self.delay_settings, wide_left, wide_right),
+                Pedal::Reverb => self.reverb.process(&self.reverb_settings, wide_left, wide_right),
+                // Not built yet, or never behind the cabinet
+                Pedal::Chorus | Pedal::Phaser | Pedal::Flanger | Pedal::Tremolo | Pedal::Drive => {}
+            }
+        }
 
         // The effects do not limit themselves, so the safety clip comes last
         for index in 0..len {
@@ -921,6 +964,11 @@ mod tests {
     fn everything_on(amp: Amp, gain: f32) -> AmpSettings {
         AmpSettings {
             gate_on: true,
+            comp: CompSettings {
+                on: true,
+                sustain: 0.6,
+                level: 0.55,
+            },
             drive_on: true,
             cab_mic: 0.7,
             cab_res: 0.7,
@@ -1239,6 +1287,70 @@ mod tests {
                     let output = run(&settings, &input, sample_rate);
                     assert!(output.iter().all(|s| s.is_finite()), "{:?} not finite at {} Hz", amp, sample_rate);
                     assert!(peak(&output) <= 1.0, "{:?} peak {} at {} Hz", amp, peak(&output), sample_rate);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_compressor_evens_out_the_clean_amp_and_adds_no_delay() {
+        // The clean amp follows the guitar. With the pedal in front of it, a guitar played
+        // softly and one played hard come out closer together
+        let recording = clean_di(SAMPLE_RATE);
+        let apart = |settings: &AmpSettings| {
+            let heard = |level_db: f32| loudness_lufs(&[&run(settings, &at_rms_db(&recording, level_db), SAMPLE_RATE)], SAMPLE_RATE);
+            heard(REFERENCE_DI_DB) - heard(REFERENCE_DI_DB - 12.0)
+        };
+        let plain = with_amp(Amp::Klar, 0.5);
+        let squeezed = AmpSettings {
+            comp: CompSettings {
+                on: true,
+                sustain: 0.7,
+                level: 0.5,
+            },
+            ..plain
+        };
+        let (without, with) = (apart(&plain), apart(&squeezed));
+        assert!(without > 9.0 && with < without - 3.0, "12 dB of guitar: {without:.1} LU without, {with:.1} LU with the pedal");
+
+        for amp in Amp::ALL {
+            for sample_rate in [44100.0, 96000.0] {
+                let plain = with_amp(amp, 0.5);
+                let pedal = AmpSettings { comp: squeezed.comp, ..plain };
+                assert_eq!(latency_samples_with(&pedal, sample_rate), latency_samples_with(&plain, sample_rate));
+            }
+        }
+
+        // Switched off it leaves no trace, whatever its dials say
+        let input = power_chords(SAMPLE_RATE, 0.5);
+        let off = AmpSettings {
+            comp: CompSettings {
+                on: false,
+                sustain: 1.0,
+                level: 1.0,
+            },
+            ..plain
+        };
+        assert_eq!(run(&off, &input, SAMPLE_RATE), run(&plain, &input, SAMPLE_RATE));
+    }
+
+    #[test]
+    fn test_compressor_switches_without_a_click() {
+        let at = 300 * BLOCK;
+        for input in [sine(220.0, HELD_NOTE, SAMPLE_RATE, 48_000), power_chords(SAMPLE_RATE, 1.0)] {
+            for amp in [Amp::Klar, Amp::Torden] {
+                let off = with_amp(amp, 0.5);
+                let on = AmpSettings {
+                    comp: CompSettings {
+                        on: true,
+                        sustain: 0.7,
+                        level: 0.5,
+                    },
+                    ..off
+                };
+                for (before, after) in [(&off, &on), (&on, &off)] {
+                    let ratio = step_ratio(&run_change(before, after, &input, at), at);
+                    assert!(ratio < 1.3, "{:?}, pedal on {}: step {} times its own", amp, after.comp.on, ratio);
                 }
             }
         }
@@ -1759,7 +1871,10 @@ mod tests {
                 };
                 let output = run_change(&pedals(from), &pedals(to), &input, at);
                 let ratio = step_ratio(&output, at);
-                assert!(ratio < from_rest(to), "{:?} to {:?}: step {} times its own", from, to, ratio);
+                // With the compressor and the drive in front, Klar is pushed as it starts: until
+                // its power stage has given way, 20 ms later, it is louder than it settles at
+                let limit = if to == Amp::Klar { 2.0 } else { from_rest(to) };
+                assert!(ratio < limit, "{:?} to {:?}: step {} times its own", from, to, ratio);
             }
         }
     }

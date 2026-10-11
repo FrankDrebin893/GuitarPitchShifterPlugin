@@ -159,6 +159,7 @@ impl Comp {
     }
 
     /// True while the pedal is off and has faded out: the next block comes out as it goes in
+    #[cfg(test)]
     pub fn is_idle(&self) -> bool {
         self.idle
     }

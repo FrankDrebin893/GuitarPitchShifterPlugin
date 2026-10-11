@@ -6,8 +6,6 @@ mod amp;
 mod cab;
 mod cab_stage;
 mod chain;
-// Wired into the chain in the next step
-#[allow(dead_code)]
 mod comp;
 mod delay;
 mod dial_memory;
@@ -16,7 +14,7 @@ mod dsp;
 mod editor;
 mod gate;
 mod lamps;
-// The chain follows it from the next step on
+// The chain stands in its default order until the pedals can be moved
 #[allow(dead_code)]
 mod order;
 mod presets;
@@ -28,6 +26,7 @@ mod user_cab;
 pub use amp::model::Amp;
 use cab_stage::CabLoader;
 use chain::{AmpChain, AmpSettings, GATE_RELEASE_MS, GATE_THRESHOLD_DB, IN_GAIN_DB};
+use comp::CompSettings;
 use dial_memory::DialMemory;
 use delay::{DelaySettings, FEEDBACK_MAX, TIME_MAX_MS, TIME_MIN_MS};
 use reverb::{ReverbSettings, DECAY_MAX_S, DECAY_MIN_S};
@@ -90,6 +89,16 @@ pub struct GuitarAmpParams {
 
     #[id = "gate_release"]
     pub gate_release: FloatParam,
+
+    // Compressor pedal
+    #[id = "comp_on"]
+    pub comp_on: BoolParam,
+
+    #[id = "comp_sustain"]
+    pub comp_sustain: FloatParam,
+
+    #[id = "comp_level"]
+    pub comp_level: FloatParam,
 
     // Drive pedal
     #[id = "drive_on"]
@@ -233,6 +242,10 @@ impl Default for GuitarAmpParams {
             .with_unit(" ms")
             .with_value_to_string(formatters::v2s_f32_rounded(0)),
 
+            comp_on: BoolParam::new("Comp", defaults.comp.on),
+            comp_sustain: dial_param("Comp Sustain", defaults.comp.sustain),
+            comp_level: dial_param("Comp Level", defaults.comp.level),
+
             drive_on: BoolParam::new("Drive", defaults.drive_on),
             drive_gain: dial_param("Drive Gain", defaults.drive_gain),
             drive_tone: dial_param("Drive Tone", defaults.drive_tone),
@@ -312,6 +325,11 @@ impl GuitarAmpParams {
             gate_on: self.gate_on.value(),
             gate_thresh_db: self.gate_thresh.value(),
             gate_release_ms: self.gate_release.value(),
+            comp: CompSettings {
+                on: self.comp_on.value(),
+                sustain: self.comp_sustain.value(),
+                level: self.comp_level.value(),
+            },
             drive_on: self.drive_on.value(),
             drive_gain: self.drive_gain.value(),
             drive_tone: self.drive_tone.value(),
@@ -339,6 +357,7 @@ impl GuitarAmpParams {
             },
             out_level: self.out_level.value(),
             tuner_on: self.tuner_on.value(),
+            order: order::ChainOrder::default(),
         }
     }
 }
@@ -501,6 +520,7 @@ mod tests {
         // project sounds that never touched that knob
         let settings = params.settings();
         assert!(!settings.bypass && settings.gate_on && !settings.drive_on && settings.cab_on);
+        assert_eq!((settings.comp.on, settings.comp.sustain, settings.comp.level), (false, 0.5, 0.5));
         assert!(!settings.delay.on && !settings.reverb.on && !settings.tuner_on);
         assert_eq!(settings.amp, Amp::Brol);
         assert_eq!((settings.in_gain_db, settings.gate_thresh_db, settings.gate_release_ms), (0.0, -60.0, 100.0));
@@ -524,7 +544,7 @@ mod tests {
         assert_eq!(range(&params.delay_mix), (0.0, 1.0));
         assert_eq!(range(&params.reverb_decay), (0.3, 6.0));
         assert_eq!(range(&params.reverb_mix), (0.0, 1.0));
-        for dial in [&params.gain, &params.drive_gain, &params.cab_mic] {
+        for dial in [&params.gain, &params.drive_gain, &params.cab_mic, &params.comp_sustain, &params.comp_level] {
             assert_eq!(range(dial), (0.0, 1.0));
         }
     }
