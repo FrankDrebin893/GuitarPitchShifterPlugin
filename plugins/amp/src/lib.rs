@@ -6,6 +6,9 @@ mod amp;
 mod cab;
 mod cab_stage;
 mod chain;
+// Wired into the chain in the next step
+#[allow(dead_code)]
+mod comp;
 mod delay;
 mod dial_memory;
 mod drive;
