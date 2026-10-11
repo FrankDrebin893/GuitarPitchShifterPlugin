@@ -4,6 +4,10 @@ Working file for the amp simulator in `plugins/amp/`. Branch `amp-sim`, never me
 by the agent. A new session continues from this file and the branch alone: read it top to
 bottom, run the commands under "How to resume", then carry on with "Next".
 
+Merged to `main` on 2026-10-11 at Rasmus's request, after he had listened ("it sounds
+fantastic"). The rule below about never merging held until then; new work can go on `main`
+or a new branch as he says.
+
 ## How to resume
 
 ```bash

@@ -6,7 +6,7 @@ A suite of VST3/CLAP plugins built with Rust and the nih-plug framework. The bra
 
 - `plugins/pitch_shifter/` - Real-time guitar pitch shifter (effect)
 - `plugins/drums/` - Synthesized drum instrument (full kit, Rock/Jazz/Metal)
-- `plugins/amp/` - Guitar amp simulator (effect). In progress on branch `amp-sim`: see `docs/amp-progress.md`
+- `plugins/amp/` - Guitar amp simulator (effect). Its decisions, known problems and backlog are in `docs/amp-progress.md`
 - `crates/suite_common/` - Shared code: `VENDOR` and `BRAND` constants, `ui` module (the pedal look, see Look below)
 - `crates/suite_common/assets/fonts/` - Embedded fonts (SIL OFL) with their licence files
 - `xtask/` - nih-plug bundler
@@ -220,7 +220,7 @@ Not there yet: separate outputs per drum, hi-hat openness from CC4, cymbal choke
 
 ### Guitar Amp (`plugins/amp`)
 
-In progress on branch `amp-sim`. `docs/amp-progress.md` has the plan, the decisions, the known
+`docs/amp-progress.md` has the plan, the decisions, the known
 problems and the backlog; read it before working on the plugin.
 
 A guitar amp with a full signal chain, all our own designs: own names, no real makers' names,
