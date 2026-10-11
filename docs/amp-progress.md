@@ -34,7 +34,7 @@ Decided with Rasmus on 2026-10-11:
 | M3 Compressor (`order.rs` with a constant order, `comp.rs`, first slim pedal) | sound done 2026-10-11: `comp.rs` in the chain, `comp_on`, `comp_sustain`, `comp_level`. No pedal on the board yet: the editor waits for the mock |
 | M2 Board mock in the standalone (feature `board_mock`); needs Rasmus's yes before M3's editor | built 2026-10-11, waits for Rasmus |
 | M4 Mods (`mods/`, four slim pedals, `mods_report`) | sound done 2026-10-11: in the chain with their twelve parameters. No pedals on the board yet |
-| M5 Order (`chain-order` persisted, re-route with a fade, dragging, order in presets) | |
+| M5 Order (`chain-order` persisted, re-route with a fade, dragging, order in presets) | sound done 2026-10-11: the chain follows the saved order. Nothing in the window changes it yet; presets do not hold it yet |
 | M6 New presets, docs | |
 
 Planned parameter ids: `comp_on`, `comp_sustain`, `comp_level`, `chorus_on`, `chorus_rate`,
@@ -166,6 +166,22 @@ clip from -18 on). A held note in Klar at Gain 5: -77 / -70 / -61 / -20 / -12 dB
   is about 2 LU under one side; at Depth 0 it is 1.5 LU under off
 - A reset pedal that is on fades in over 10 ms; `set_sample_rate` resets a pedal, which is
   what M5 will do to one that changes sides
+
+### M5 so far
+
+- `GuitarAmpParams.order` (`#[persist = "chain-order"]`, `order::StoredOrder`): saved as the
+  list of pedal ids with `amp` between the two sides. A project without it gets the default
+- The chain reads the order with the dials. A new order fades the output to silence in 5 ms
+  (`ORDER_FADE_MS`), the pedals change places at the silent sample, and it fades back; a
+  pedal that changes sides is set up for the rate of its new side from rest. Bypassed, the
+  order changes at once
+- Tests: six orders are heard, bounded, the same in every block size, at 44.1 and 96 kHz,
+  with the latency of the default; changing to and from each while chords play is no
+  steeper than 1.2 times the chords themselves and falls on the same sample in other blocks
+- Every render of `fingerprint_report` is still the same as after M1
+- Left: nothing in the window sets the order (the mock keeps its own); presets do not hold
+  it; a pedal that changes sides starts its sweep again; what a swap of delay and reverb
+  does to their tails was only measured as steps, not heard
 
 ## How to resume (round 1)
 

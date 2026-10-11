@@ -132,6 +132,8 @@ impl ChainOrder {
 
     /// The order with `pedal` taken out and put back as number `place` of `zone` (0 is
     /// first; past the end is last). A pedal that cannot stand in that zone stays where it is
+    // The board moves pedals with this once they can be dragged
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn moved(&self, pedal: Pedal, zone: Zone, place: usize) -> ChainOrder {
         if !pedal.can_be_in(zone) {
             return *self;

@@ -17,8 +17,6 @@ mod editor;
 mod gate;
 mod lamps;
 mod mods;
-// The chain stands in its default order until the pedals can be moved
-#[allow(dead_code)]
 mod order;
 mod presets;
 mod reverb;
@@ -34,6 +32,7 @@ use mods::chorus::{self, ChorusSettings};
 use mods::flanger::{self, FlangerSettings};
 use mods::phaser::{self, PhaserSettings};
 use mods::tremolo::{self, TremoloSettings};
+use order::StoredOrder;
 use dial_memory::DialMemory;
 use delay::{DelaySettings, FEEDBACK_MAX, TIME_MAX_MS, TIME_MIN_MS};
 use reverb::{ReverbSettings, DECAY_MAX_S, DECAY_MIN_S};
@@ -80,6 +79,11 @@ pub struct GuitarAmpParams {
     /// The audio thread never reads it
     #[persist = "amp-dials"]
     pub dial_memory: DialMemory,
+
+    /// The order the pedals stand in. Not a parameter: an arrangement cannot be automated.
+    /// The editor changes it, and the audio thread reads it with the dials
+    #[persist = "chain-order"]
+    pub order: StoredOrder,
 
     #[id = "bypass"]
     pub bypass: BoolParam,
@@ -242,6 +246,7 @@ impl Default for GuitarAmpParams {
             editor_state: editor::default_state(),
             preset: std::sync::atomic::AtomicU32::new(0),
             cabinet: std::sync::Mutex::new(String::new()),
+            order: StoredOrder::new(),
             dial_memory: DialMemory::new([
                 defaults.gain,
                 defaults.bass,
@@ -434,7 +439,7 @@ impl GuitarAmpParams {
             },
             out_level: self.out_level.value(),
             tuner_on: self.tuner_on.value(),
-            order: order::ChainOrder::default(),
+            order: self.order.get(),
         }
     }
 }

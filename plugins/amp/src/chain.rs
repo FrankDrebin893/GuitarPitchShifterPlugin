@@ -42,6 +42,10 @@ const BYPASS_FADE_MS: f32 = 10.0;
 // set up as the new amp, and it fades back in as fast
 const AMP_FADE_MS: f32 = 5.0;
 
+// When the pedals are put in another order, the output fades to silence in this time, the
+// pedals change places there, and it fades back in as fast
+const ORDER_FADE_MS: f32 = 5.0;
+
 // Crossfade between the cabinet and the amp's own signal when the cabinet is switched
 const CAB_FADE_MS: f32 = 20.0;
 
@@ -237,8 +241,14 @@ pub struct AmpChain {
     in_gain: Ramp,
     gate: Gate,
     oversampler: Oversampler,
-    // The pedals stand in this order, and are set up for the side of the amp they are on
+    // The pedals stand in this order, and are set up for the side of the amp they are on.
+    // And the order the settings ask for
     order: ChainOrder,
+    wanted_order: ChainOrder,
+    // Level of the output in steps: `order_fade_len` playing, down to 0 on the way to
+    // another order and back up after
+    order_fade: u32,
+    order_fade_len: u32,
     comp: Comp,
     comp_settings: CompSettings,
     chorus: Chorus,
@@ -325,6 +335,9 @@ impl AmpChain {
             gate: Gate::new(),
             oversampler: Oversampler::new(),
             order: ChainOrder::default(),
+            wanted_order: ChainOrder::default(),
+            order_fade: 1,
+            order_fade_len: 1,
             comp: Comp::new(),
             comp_settings: CompSettings::default(),
             chorus: Chorus::new(),
@@ -384,6 +397,7 @@ impl AmpChain {
         self.wet_step = 1.0 / (BYPASS_FADE_MS * 0.001 * sample_rate);
         self.amp_fade_len = ((AMP_FADE_MS * 0.001 * sample_rate).round() as u32).max(1);
         self.cab_fade_steps = ((CAB_FADE_MS * 0.001 * sample_rate).round() as u32).max(1);
+        self.order_fade_len = ((ORDER_FADE_MS * 0.001 * sample_rate).round() as u32).max(1);
         self.tuner_fade_steps = ((TUNER_FADE_MS * 0.001 * sample_rate).round() as u32).max(1);
         self.tuner.set_sample_rate(sample_rate);
 
@@ -391,11 +405,9 @@ impl AmpChain {
         self.oversampler.set_factor(self.factor);
         self.gate.set_sample_rate(sample_rate);
         self.drive.configure(self.oversampled_rate());
-        self.comp.set_sample_rate(self.rate_in(self.order.zone_of(Pedal::Comp)));
-        self.chorus.set_sample_rate(self.rate_in(self.order.zone_of(Pedal::Chorus)));
-        self.phaser.set_sample_rate(self.rate_in(self.order.zone_of(Pedal::Phaser)));
-        self.flanger.set_sample_rate(self.rate_in(self.order.zone_of(Pedal::Flanger)));
-        self.tremolo.set_sample_rate(self.rate_in(self.order.zone_of(Pedal::Tremolo)));
+        for pedal in Pedal::ALL {
+            self.set_up_pedal(pedal);
+        }
         self.delay.set_sample_rate(sample_rate);
         self.reverb.set_sample_rate(sample_rate);
 
@@ -420,6 +432,44 @@ impl AmpChain {
         match zone {
             Zone::Front => self.oversampled_rate(),
             Zone::Back => self.sample_rate,
+        }
+    }
+
+    /// Sets a pedal that can stand on either side of the amp up for the side it is on, from
+    /// rest. Does not allocate
+    fn set_up_pedal(&mut self, pedal: Pedal) {
+        let rate = self.rate_in(self.order.zone_of(pedal));
+        match pedal {
+            Pedal::Comp => self.comp.set_sample_rate(rate),
+            Pedal::Chorus => self.chorus.set_sample_rate(rate),
+            Pedal::Phaser => self.phaser.set_sample_rate(rate),
+            Pedal::Flanger => self.flanger.set_sample_rate(rate),
+            Pedal::Tremolo => self.tremolo.set_sample_rate(rate),
+            // These stay on their side, and are set up with the chain
+            Pedal::Drive | Pedal::Delay | Pedal::Reverb => {}
+        }
+    }
+
+    /// Moves towards the order the settings ask for. Does not allocate. While the amp is
+    /// heard the output first fades to silence; there the pedals change places, and one
+    /// that changes sides starts from rest at the rate of its new side. The repeats and the
+    /// tail of the effects ring on through it
+    fn follow_order(&mut self) {
+        if self.wanted_order == self.order {
+            return;
+        }
+        let unheard = !self.primed || self.wet == 0.0;
+        if !unheard && self.order_fade > 0 {
+            return;
+        }
+        let before = std::mem::replace(&mut self.order, self.wanted_order);
+        for pedal in Pedal::ALL {
+            if before.zone_of(pedal) != self.order.zone_of(pedal) {
+                self.set_up_pedal(pedal);
+            }
+        }
+        if unheard {
+            self.order_fade = self.order_fade_len;
         }
     }
 
@@ -567,6 +617,7 @@ impl AmpChain {
             self.reverb.reset();
         }
         self.amp_fade = self.amp_fade_len;
+        self.order_fade = self.order_fade_len;
         self.cabinet_busy = 0;
     }
 
@@ -601,11 +652,13 @@ impl AmpChain {
         let wet_target = if settings.bypass { 0.0 } else { 1.0 };
         if !self.primed {
             self.wet = wet_target;
+            self.wanted_order = settings.order;
         }
 
         let mut start = 0;
         while start < left.len() {
             self.follow_amp();
+            self.follow_order();
             self.follow_cabinet();
             if self.until_tick == 0 {
                 self.read_dials(settings);
@@ -619,6 +672,10 @@ impl AmpChain {
                 if wait > 0 {
                     len = len.min(wait);
                 }
+            }
+            if self.wanted_order != self.order && self.order_fade > 0 {
+                // Likewise where the output has faded to silence for another order
+                len = len.min(self.order_fade as usize);
             }
             let end = start + len;
             let right_chunk = right.as_deref_mut().map(|right| &mut right[start..end]);
@@ -673,6 +730,9 @@ impl AmpChain {
         if cab_target != self.cab_mix.target() {
             self.cab_mix.set_target(cab_target, self.cab_fade_steps);
         }
+        // The order is read here as well, so a change falls on the same sample whatever
+        // the block size
+        self.wanted_order = settings.order;
         self.comp_settings = settings.comp;
         self.chorus_settings = settings.chorus;
         self.phaser_settings = settings.phaser;
@@ -878,6 +938,23 @@ impl AmpChain {
             }
         }
 
+        // Down to silence while another order is waiting, and back up after
+        let reordering = self.wanted_order != self.order || self.order_fade < self.order_fade_len;
+        let mut order_share = [1.0f32; CHUNK];
+        if reordering {
+            let down = self.wanted_order != self.order;
+            for share in &mut order_share[..len] {
+                if down {
+                    self.order_fade = self.order_fade.saturating_sub(1);
+                } else if self.order_fade < self.order_fade_len {
+                    self.order_fade += 1;
+                }
+                // Eased at both ends
+                let position = self.order_fade as f32 / self.order_fade_len as f32;
+                *share = position * position * (3.0 - 2.0 * position);
+            }
+        }
+
         // The effects do not limit themselves, so the safety clip comes last
         for index in 0..len {
             let level = self.out_level.next();
@@ -891,6 +968,9 @@ impl AmpChain {
             if muting {
                 output *= heard_share[index];
             }
+            if reordering {
+                output *= order_share[index];
+            }
             if self.wet >= 1.0 {
                 left[index] = output;
             } else {
@@ -902,6 +982,9 @@ impl AmpChain {
                 let mut output = output_clip(driven);
                 if muting {
                     output *= heard_share[index];
+                }
+                if reordering {
+                    output *= order_share[index];
                 }
                 if self.wet >= 1.0 {
                     right[index] = output;
@@ -1485,6 +1568,127 @@ mod tests {
             run_stereo_blocks(&mut chain, &on, &vec![0.0; 48_000], BLOCK);
             assert!(chain.is_idle(), "{name} never falls idle");
         }
+    }
+
+    /// A few of the orders the pedals can stand in, all different from the default
+    fn other_orders() -> Vec<(&'static str, ChainOrder)> {
+        let default = ChainOrder::default();
+        vec![
+            ("reverb into delay", default.moved(Pedal::Reverb, Zone::Back, 3)),
+            ("chorus in front of the drive", default.moved(Pedal::Chorus, Zone::Front, 1)),
+            ("compressor behind the cabinet", default.moved(Pedal::Comp, Zone::Back, 0)),
+            ("phaser last", default.moved(Pedal::Phaser, Zone::Back, 99)),
+            (
+                "all that can in front",
+                default
+                    .moved(Pedal::Tremolo, Zone::Front, 0)
+                    .moved(Pedal::Flanger, Zone::Front, 0)
+                    .moved(Pedal::Chorus, Zone::Front, 99)
+                    .moved(Pedal::Drive, Zone::Front, 0),
+            ),
+            (
+                "all that can behind",
+                default
+                    .moved(Pedal::Comp, Zone::Back, 99)
+                    .moved(Pedal::Phaser, Zone::Back, 0)
+                    .moved(Pedal::Delay, Zone::Back, 0),
+            ),
+        ]
+    }
+
+    /// Every pedal and effect on
+    fn whole_board(amp: Amp) -> AmpSettings {
+        let (_, mods) = with_mods(with_effects(everything_on(amp, 0.5))).pop().unwrap();
+        mods
+    }
+
+    #[test]
+    fn test_every_order_is_heard_and_does_not_depend_on_block_size() {
+        let input = power_chords(SAMPLE_RATE, 0.5);
+        let default = whole_board(Amp::Brol);
+        let reference = run_stereo(&default, &input, SAMPLE_RATE);
+        for (name, order) in other_orders() {
+            let settings = AmpSettings { order, ..default };
+            let whole = run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, input.len());
+            assert!(whole != reference, "{name} sounds like the default order");
+            assert!(whole.0.iter().chain(&whole.1).all(|sample| sample.is_finite() && sample.abs() <= 1.0));
+            for block in [1, 7, 33, 64, 480] {
+                let output = run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, block);
+                assert!(output == whole, "{name} in blocks of {block}");
+            }
+            // A pedal in front of the amp runs at the amp's rate, which is another multiple
+            // of the host's from 88.2 kHz on
+            for sample_rate in [44100.0, 96000.0] {
+                let chords = power_chords(sample_rate, 0.3);
+                let (left, right) = run_stereo(&settings, &chords, sample_rate);
+                assert!(left.iter().chain(&right).all(|sample| sample.is_finite() && sample.abs() <= 1.0));
+                assert_eq!(
+                    latency_samples_with(&AmpSettings { order, ..with_amp(Amp::Brol, 0.5) }, sample_rate),
+                    latency_samples_with(&with_amp(Amp::Brol, 0.5), sample_rate),
+                    "{name} at {sample_rate} Hz"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_order_changes_while_playing_without_a_click_whatever_the_block_size() {
+        let input = power_chords(SAMPLE_RATE, 2.0);
+        let at = 600 * BLOCK;
+        let default = whole_board(Amp::Brol);
+        for (name, order) in other_orders() {
+            let moved = AmpSettings { order, ..default };
+            for (before, after) in [(&default, &moved), (&moved, &default)] {
+                let change = |block: usize| {
+                    let mut chain = new_chain(SAMPLE_RATE);
+                    let (mut left, mut right) = (input.clone(), input.clone());
+                    let mut start = 0;
+                    for (l, r) in left.chunks_mut(block).zip(right.chunks_mut(block)) {
+                        chain.process(if start < at { before } else { after }, l, Some(r));
+                        start += l.len();
+                    }
+                    (left, right)
+                };
+                let (left, right) = change(BLOCK);
+                for side in [&left, &right] {
+                    let ratio = step_ratio(side, at);
+                    assert!(ratio < 1.2, "{name}: step {ratio} times its own");
+                }
+                // The output is silent where the pedals change places
+                let silent = at + (ORDER_FADE_MS * 0.001 * SAMPLE_RATE) as usize + CHUNK;
+                assert!(peak(&left[silent - 40..silent - 30]) < 0.3 * peak(&left[at - 4800..at]), "{name}");
+
+                // And ends up about as loud as a chain that stood in the new order all along.
+                // Not the same: a pedal that changed sides starts its sweep again
+                let settled = run_stereo(after, &input, SAMPLE_RATE).0;
+                let tail = input.len() - 24_000..input.len();
+                let apart = to_db(rms(&left[tail.clone()])) - to_db(rms(&settled[tail]));
+                assert!(apart.abs() < 3.0, "{name}: {apart:.2} dB from the order itself");
+
+                assert!(change(at / 8) == (left, right), "{name} in other blocks");
+            }
+        }
+    }
+
+    #[test]
+    fn test_order_changes_at_once_while_bypassed_and_keeps_the_default_to_the_bit() {
+        let input = power_chords(SAMPLE_RATE, 0.5);
+        let (_, order) = other_orders().remove(1);
+        let moved = AmpSettings { order, ..whole_board(Amp::Klar) };
+
+        // Bypassed, nothing is heard of the amp: the order is in place when it comes back
+        let bypassed = AmpSettings { bypass: true, order: ChainOrder::default(), ..moved };
+        let mut chain = new_chain(SAMPLE_RATE);
+        run_stereo_blocks(&mut chain, &bypassed, &input, BLOCK);
+        run_stereo_blocks(&mut chain, &AmpSettings { bypass: true, ..moved }, &input[..BLOCK], BLOCK);
+        assert_eq!(chain.order, order);
+        assert_eq!(chain.order_fade, chain.order_fade_len);
+
+        // The order a project from before has: nothing in the output says it can be changed
+        let plain = with_effects(everything_on(Amp::Torden, 0.6));
+        let named = AmpSettings { order: ChainOrder::from_ids(["drive", "amp", "delay", "reverb"]), ..plain };
+        assert_eq!(named.order, ChainOrder::default());
+        assert!(run_stereo(&named, &input, SAMPLE_RATE) == run_stereo(&plain, &input, SAMPLE_RATE));
     }
 
     #[test]
