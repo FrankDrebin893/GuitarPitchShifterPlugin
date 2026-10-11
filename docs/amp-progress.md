@@ -30,8 +30,8 @@ Decided with Rasmus on 2026-10-11:
 | Milestone | State |
 |---|---|
 | M0 Loudness measure, `loudness_report`, pinned reports | done 2026-10-11 |
-| M1 Clean level | next |
-| M2 Board mock in the standalone (feature `board_mock`); needs Rasmus's yes before M3's editor | |
+| M1 Clean level | done 2026-10-11 |
+| M2 Board mock in the standalone (feature `board_mock`); needs Rasmus's yes before M3's editor | next |
 | M3 Compressor (`order.rs` with a constant order, `comp.rs`, first slim pedal) | |
 | M4 Mods (`mods/`, four slim pedals, `mods_report`) | |
 | M5 Order (`chain-order` persisted, re-route with a fade, dragging, order in presets) | |
@@ -51,6 +51,67 @@ Gain 5. So with a guitar recorded at -30 dBFS RMS the clean presets are 9 to 11 
 Torden ones (Glas -24.0, Stram -15.1 LUFS), at -24 still 3 to 5, and at -36 about 15. That is
 what Rasmus heard. Brøl below Gain 3 (Kobber) behaves like Klar. Klar's peaks are already in
 the output's safety clip at -18 (-0.2 dBFS), so more gain alone is no answer.
+
+### M1: what was done
+
+- The amps are matched by loudness (LUFS) for a guitar at -24 dBFS RMS (`REFERENCE_DI_DB`),
+  not by RMS at -18. Klar got 5.8 dB more gain at the centre of its dials, all of it in front
+  of its power stage (`power.drive_db` -10 to +1.5 at Master 5, `volume_db` -2.5 to -9,
+  `makeup_db` to 0)
+- Klar's power stage holds the peaks with a curve of its own (`PowerModel.clean_to` 0.65,
+  `shaper::kneed_curve`): exactly straight up to 0.65 of the ceiling, then bending over. A
+  first try with the old curve, which bends from the start, gave a held note at -24 dBFS RMS
+  -36 dB of distortion; this one gives -61 dB, and -70 dB at -30 (cleaner than before M1)
+- Brøl below Gain 5: `level_db` 6 / 3 to 23 / 9.7 and `makeup_db` 15 / 6.5 to 1.5 / 1.0, so
+  3.5 and 1.2 dB louder and with the peaks held by the power stage, not the safety clip.
+  From Gain 5 up the constants are untouched
+- `PowerModel.driven_sag` changed its meaning: with the pedal on, the stage divides what it
+  is given by one plus `driven_sag` times the load over `driven_sag_from` (Klar 40, 0.45). It
+  used to lower the headroom, which made a stage that now clips clip harder: -60 dB of
+  aliasing with the pedal at 10 / 10 / 10. Now -95 / -91 dB at 48 kHz
+- Presets: Master of Glas 5.0 to 4.9, Tåge 4.9 to 4.6, Kobber 4.6 to 5.3. Every preset but
+  Init is within 2 LU of the middle one at the reference level (a test)
+- Checked with `fingerprint_report` against the build before: Brøl at Gain 5, 7.5 and 10 and
+  Torden everywhere are the same to the bit, plain, with the drive and with the effects, at
+  48 and 96 kHz. Klar everywhere and Brøl at Gain 0 and 2.5 changed
+- Tests that held the old level at -18 dBFS were moved to the reference level: the clean
+  checks use a held note at -24 dBFS RMS (`HELD_NOTE`), the match is LUFS. Click limits for a
+  switch to Klar are 1.35 times its own steepest step (it starts with its full headroom) and
+  1.8 for a jump of the pedal's Level into Klar
+
+Loudness after M1, riffs / clean playing, LUFS, Gain 5 (`loudness_report` has every Gain):
+
+| DI dBFS RMS | -36 | -30 | -24 | -18 | -12 |
+|---|---|---|---|---|---|
+| Klar before | -30.8 / -31.5 | -24.8 / -25.6 | -19.2 / -19.8 | -14.1 / -14.5 | -10.2 / -10.1 |
+| Klar | -25.0 / -25.7 | -19.5 / -20.0 | -15.5 / -15.4 | -13.0 / -12.4 | -11.6 / -10.7 |
+| Brøl | -24.2 / -24.9 | -20.5 / -20.8 | -17.9 / -17.8 | -16.1 / -15.7 | -15.0 / -14.4 |
+| Torden | -17.9 / -16.8 | -17.2 / -16.2 | -16.8 / -15.8 | -16.6 / -15.7 | -16.3 / -15.6 |
+
+Klar's crest on the riffs: 19.8 / 17.5 / 14.8 / 12.8 / 11.9 dB (was 20.3 / 20.0 / 19.2 /
+16.2 / 12.4): at the reference level its power stage takes 4.4 dB off the hardest attacks,
+at -36 half a decibel. Peaks: -7.6 / -4.3 / -2.9 / -2.3 / -1.8 dBFS (were in the safety
+clip from -18 on). A held note in Klar at Gain 5: -77 / -70 / -61 / -20 / -12 dB.
+
+### M1: what it leaves
+
+- Nobody has heard it. Whether Klar's rounded attacks still sound clean, and whether the
+  presets feel equally loud when playing, is Rasmus's to say (`amp_presets_in_a_row.wav`,
+  `amp_klar_clean_playing_gain5_di-30 / -24 / -18.wav` in `target/renders`)
+- The match holds at one guitar level. A guitar at -30 dBFS RMS still has the clean presets
+  about 4 LU under the Torden ones (it was 9 to 11), one at -36 about 7 (was 13): the Input
+  knob, or the compressor of M3, closes the rest. Nothing in the window says what level the
+  guitar comes in at; an input lamp would
+- A guitar hotter than -20 dBFS RMS makes Klar's held notes distort (-20 dB at -18 dBFS
+  RMS): it has less headroom than before for hot pickups. Input down, or Master down, gives
+  it back
+- Klar is louder for 20 ms after it is switched to or the pedal's Level jumps (the sag and
+  the giving way take that long)
+- Tåge with its long repeats and tail reaches -2.1 dBFS on chords from a guitar at -18 dBFS
+  RMS, 0.4 dB into the safety clip's knee
+- The plan's target of amps within 3 LU from -30 to -18 dBFS RMS is not met and cannot be:
+  Brøl and Torden themselves are 3.3 LU apart at -30. Held instead: within 3 LU at the
+  reference level, within 5 LU 6 dB either side
 
 ## How to resume (round 1)
 

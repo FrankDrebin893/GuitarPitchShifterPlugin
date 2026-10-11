@@ -639,6 +639,15 @@ pub fn stiff_string(freq_hz: f32, inharmonicity: f32, how: Pluck, sample_rate: f
     recording.iter().map(|&sample| (0.5 * sample / top) as f32).collect()
 }
 
+/// The level of a direct recording the amps are matched at, in dBFS RMS: a guitar recorded
+/// with room to spare, as most are. `guitar_di` and the other made-up recordings are 6 dB
+/// hotter, which is a guitar recorded as loud as it will go
+pub const REFERENCE_DI_DB: f32 = -24.0;
+
+/// A held note at the level one has in a recording at `REFERENCE_DI_DB`, as the peak of a
+/// sine: -24 dBFS RMS. The clean amp leaves it clean; 6 dB more and its power stage bends it
+pub const HELD_NOTE: f32 = 0.0891;
+
 /// The same recording at another level
 pub fn at_rms_db(recording: &[f32], level_db: f32) -> Vec<f32> {
     let mut recording = recording.to_vec();

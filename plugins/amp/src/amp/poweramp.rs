@@ -6,9 +6,6 @@ use crate::dsp::{curve, db_to_gain, smoothing_coeff, Ramp};
 const RESONANCE_Q: f32 = 1.2;
 const PRESENCE_Q: f32 = 0.6;
 
-// The least headroom the stage is left with, whatever the load
-const MIN_HEADROOM: f32 = 0.25;
-
 /// The power stage: Master drives a symmetric clipper whose headroom sags under sustained
 /// load. Presence and the low resonance sit in front of the clipper, as they do in a stage
 /// with feedback: they shape the sound while it is clean and flatten out as it clips
@@ -20,8 +17,9 @@ pub struct PowerAmp {
     volume: Ramp,
     clipper: PowerClipper,
     sag: f32,
-    // What the drive pedal adds to the sag (see `PowerModel.driven_sag`), and the share of
-    // it that is in force: 1.0 with the pedal on, 0.0 with it off
+    // How far the stage turns itself down under the drive pedal (see
+    // `PowerModel.driven_sag`), and the share of it that is in force: 1.0 with the pedal
+    // on, 0.0 with it off
     driven_sag: f32,
     driven_sag_from: f32,
     driven_share: Ramp,
@@ -59,6 +57,8 @@ impl PowerAmp {
             model.resonance_db,
             sample_rate,
         ));
+        self.clipper.set_knee(model.clean_to);
+        self.clipper.reset();
         self.sag = model.sag;
         self.driven_sag = model.driven_sag;
         self.driven_sag_from = model.driven_sag_from;
@@ -122,13 +122,13 @@ impl PowerAmp {
     #[inline(always)]
     fn process_sample(&mut self, sample: f32, pushed: bool) -> f32 {
         let input = self.dc.process(sample) as f64;
-        let shaped = self.presence.process(self.resonance.process(input)) as f32 * self.drive.next();
-
-        let mut headroom = 1.0 - self.sag * self.load;
+        let mut shaped = self.presence.process(self.resonance.process(input)) as f32 * self.drive.next();
         if pushed {
             let over = (self.load - self.driven_sag_from).max(0.0);
-            headroom = (headroom - self.driven_share.next() * self.driven_sag * over).max(MIN_HEADROOM);
+            shaped /= 1.0 + self.driven_share.next() * self.driven_sag * over;
         }
+
+        let headroom = 1.0 - self.sag * self.load;
         let output = headroom * self.clipper.process(shaped / headroom);
 
         let level = output.abs();
@@ -257,7 +257,7 @@ mod tests {
         let volume = db_to_gain(model.volume_db[1]);
         let (plain_peak, driven_peak) = (peak(&plain[LEN / 2..]) / volume, peak(&driven[LEN / 2..]) / volume);
         assert!(plain_peak > 0.85, "Without the pedal: {plain_peak}");
-        assert!((MIN_HEADROOM..0.65).contains(&driven_peak), "With the pedal: {driven_peak}");
+        assert!((0.25..0.65).contains(&driven_peak), "With the pedal: {driven_peak}");
         assert_eq!(driven[..96], plain[..96]);
 
         // Switched while it is pushed, the level moves without a step, and comes back

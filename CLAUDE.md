@@ -312,8 +312,18 @@ How it behaves:
 - The Gate pedal's `OPEN` lamp is lit while the gate is on and lets the guitar through; `CLIP`
   beside Output is lit for 150 ms after the output went over the safety clip's knee
 - While the drive pedal is on, the second stage of Brøl and of Torden clips at twice the rate
-  (`StageModel.finer_when_driven`) and Klar's power stage gives way under a heavy load, so no
-  setting of the pedal aliases above -70 dB. With the pedal off the output is the same to the bit
+  (`StageModel.finer_when_driven`) and Klar's power stage turns itself down under a heavy load
+  (`PowerModel.driven_sag`), so no setting of the pedal aliases above -70 dB. With the pedal
+  off the output is the same to the bit
+- The amps are matched by loudness (BS.1770, `test_util::loudness_lufs`), not RMS, for a guitar
+  recorded at -24 dBFS RMS (`REFERENCE_DI_DB`). A clean amp follows the guitar dB for dB and
+  one that clips hardly does, so they can only meet at one level: 6 dB quieter the clean
+  settings are 2 to 4 LU under the others, 6 dB hotter as much over. The Input knob is what
+  moves a guitar to that level
+- Klar's power stage holds its peaks (`PowerModel.clean_to`): straight up to a knee, so a note
+  held at -24 dBFS RMS has no distortion (under -60 dB), and rounding off the attacks that go
+  over. Peaks stay under the safety clip's knee up to a guitar at -12 dBFS RMS. Brøl below
+  Gain 5 is made up in front of its power stage for the same reason
 - The built-in cabinets are designed at 48 kHz and resampled for every other rate (within
   0.05 dB of each other from 60 Hz to 10 kHz). A rate is designed once and kept
 - `lib.rs` takes every parameter default and range from `AmpSettings::default` and the limits in
@@ -322,7 +332,7 @@ How it behaves:
   Output 0 dB (a test checks peak and level of each)
 - Cost with everything on (Torden): about 2.0 % of a core at 48 kHz, 2.6 % at 96 kHz, 5.5 % at
   192 kHz, on a fast core. The cores of a machine differ (1.33 times on the development
-  machine): pin the thread when comparing timings
+  machine): the reports pin their thread (`test_util::pin_thread`)
 
 | Parameter (id) | Range | Default | Description |
 |----------------|-------|---------|-------------|
@@ -360,6 +370,14 @@ tests are the tools for working on the sound:
 # Run before and after a DSP change and compare.
 cargo test -p amp --release amp_report -- --ignored --nocapture
 
+# How loud each amp is heard (LUFS), its peaks and crest per Gain, for guitars recorded from
+# -36 to -12 dBFS RMS, and the distortion of a held note at those levels.
+cargo test -p amp --release loudness_report -- --ignored --nocapture
+
+# One number per amp, Gain and pedal that changes with any bit of the output. Save the lines
+# before and after a change that must leave a sound as it is, and compare them.
+cargo test -p amp --release fingerprint_report -- --ignored --nocapture
+
 # Delay and reverb by themselves: echo times, decay times, density, width, cost.
 cargo test -p amp --release effects_report -- --ignored --nocapture
 
@@ -383,9 +401,11 @@ cargo test -p amp --release convolver_report -- --ignored --nocapture
 cargo test -p amp --release export_cabinets -- --ignored --nocapture
 
 # A DI guitar through each amp and setting, as WAV files in target/renders (amp_*.wav).
-# Optional: AMP_INPUT_WAV=<recording>. render_effects writes the effects alone (amp_fx_*.wav)
+# Optional: AMP_INPUT_WAV=<recording>. render_effects writes the effects alone (amp_fx_*.wav),
+# render_presets every preset (amp_preset_*.wav) and all of them in a row
 cargo test -p amp --release render_wavs -- --ignored
 cargo test -p amp --release render_effects -- --ignored
+cargo test -p amp --release render_presets -- --ignored
 ```
 
 ## Adding a Plugin

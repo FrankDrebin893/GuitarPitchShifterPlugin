@@ -41,9 +41,12 @@ pub struct Preset {
 }
 
 // Chosen from the amp models' constants and measured with `preset_report` below: nobody
-// has listened to them yet. Master is where their levels were matched: the report's chords
-// come out at -18 to -14 dBFS RMS (cleans lowest, leads highest) with the peaks under the
-// safety clip's knee. The first one is every parameter at its default.
+// has listened to them yet. Master is where their levels were matched, by how loud they
+// are heard (`loudness_lufs`) with a guitar recorded at `REFERENCE_DI_DB`: within 2 LU of
+// each other, leads highest, with the peaks of a guitar recorded 6 dB hotter under the
+// safety clip's knee. A clean preset follows the level of the guitar and one that clips
+// does not, so with a quieter guitar the clean ones come out quieter than the rest, and
+// with a hotter one louder. The first one is every parameter at its default.
 //
 // The gates are set by `preset_gate_report`. A threshold of -54 dB is the highest that
 // leaves palm mutes alone when they are played quietly (peaks at -30 dBFS): from -52 dB up
@@ -65,7 +68,7 @@ pub static PRESETS: [Preset; 12] = [
     Preset {
         name: "Glas",
         amp: Amp::Klar,
-        dials: [3.5, 4.5, 4.5, 6.0, 6.5, 5.0],
+        dials: [3.5, 4.5, 4.5, 6.0, 6.5, 4.9],
         gate: (ON, -66.0, 250.0),
         drive: (OFF, [3.0, 5.0, 5.0]),
         cab: (ON, [6.0, 5.0]),
@@ -89,7 +92,7 @@ pub static PRESETS: [Preset; 12] = [
     Preset {
         name: "Tåge",
         amp: Amp::Klar,
-        dials: [3.0, 4.5, 5.0, 5.5, 5.5, 4.9],
+        dials: [3.0, 4.5, 5.0, 5.5, 5.5, 4.6],
         gate: (ON, -72.0, 500.0),
         drive: (OFF, [3.0, 5.0, 5.0]),
         cab: (ON, [4.5, 5.0]),
@@ -113,7 +116,7 @@ pub static PRESETS: [Preset; 12] = [
     Preset {
         name: "Kobber",
         amp: Amp::Brol,
-        dials: [1.5, 5.5, 5.5, 6.0, 6.0, 4.6],
+        dials: [1.5, 5.5, 5.5, 6.0, 6.0, 5.3],
         gate: (ON, -64.0, 200.0),
         drive: (OFF, [3.0, 5.0, 5.0]),
         cab: (ON, [5.5, 5.0]),
@@ -503,6 +506,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_presets_are_about_as_loud_as_each_other() {
+        // Stepping from a distorted preset to a clean one keeps the volume: for a guitar
+        // recorded at the reference level every preset is heard within 2 LU of the middle
+        // one. The first is not levelled: it is the parameters' defaults
+        let recording = guitar_di(SAMPLE_RATE);
+        let heard: Vec<f32> = PRESETS[1..].iter().map(|preset| loudness_at(preset, &recording, REFERENCE_DI_DB)).collect();
+        let mut sorted = heard.clone();
+        sorted.sort_by(f32::total_cmp);
+        let middle = sorted[sorted.len() / 2];
+        for (preset, loudness) in PRESETS[1..].iter().zip(&heard) {
+            assert!((loudness - middle).abs() < 2.0, "{} is at {loudness:.1} LUFS, the middle one at {middle:.1}", preset.name);
+        }
+    }
+
     /// What a preset's gate does to `input`: the gate's gain for every sample
     fn gate_trace(preset: &Preset, input: &[f32]) -> Vec<f32> {
         let mut gate = Gate::new();
@@ -633,6 +651,36 @@ mod tests {
             });
             println!(" {:>13}", on_hiss.join(" / "));
         }
+    }
+
+    /// Every preset as a WAV file in target/renders (amp_preset_*.wav), played with the
+    /// made-up guitar at the reference level, and `amp_presets_in_a_row.wav`: the first
+    /// four seconds of each, one after the other, for hearing whether they are equally loud.
+    /// Set AMP_INPUT_WAV to the path of a recording to use that instead, at its own level:
+    ///   cargo test -p amp --release render_presets -- --ignored
+    #[test]
+    #[ignore]
+    fn render_presets() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/renders");
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = match std::env::var("AMP_INPUT_WAV") {
+            Ok(path) => {
+                let (recording, sample_rate) = read_wav_mono(&path);
+                assert_eq!(sample_rate as f32, SAMPLE_RATE, "The presets are rendered at {SAMPLE_RATE} Hz");
+                recording
+            }
+            Err(_) => at_rms_db(&guitar_di(SAMPLE_RATE), REFERENCE_DI_DB),
+        };
+        let part = input.len().min(4 * SAMPLE_RATE as usize);
+        let (mut row_left, mut row_right) = (Vec::new(), Vec::new());
+        for (index, preset) in PRESETS.iter().enumerate() {
+            let (left, right) = run(&preset.settings(), &input);
+            let name = format!("amp_preset_{:02}_{}.wav", index, preset.name.to_lowercase());
+            write_wav(&dir.join(name), &[&left, &right], SAMPLE_RATE as u32);
+            row_left.extend_from_slice(&left[..part]);
+            row_right.extend_from_slice(&right[..part]);
+        }
+        write_wav(&dir.join("amp_presets_in_a_row.wav"), &[&row_left, &row_right], SAMPLE_RATE as u32);
     }
 
     /// Level and balance of every preset. Run after changing a preset or the amps:

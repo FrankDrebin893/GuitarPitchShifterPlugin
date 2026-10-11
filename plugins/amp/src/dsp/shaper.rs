@@ -147,6 +147,38 @@ fn power_integral(x: f64) -> f64 {
     }
 }
 
+/// Power stage curve of an amp that stays clean: straight up to `knee`, then bending over
+/// to the same ceiling of 1.0, which it reaches at `2.0 - knee`. A note that stays under
+/// the knee is not touched at all; only what goes over it, the attack of a string picked
+/// hard, is rounded off
+fn kneed_curve(x: f64, knee: f64) -> f64 {
+    let level = x.abs();
+    let corner = 2.0 - knee;
+    if level <= knee {
+        x
+    } else if level < corner {
+        let over = level - knee;
+        (level - over * over / (2.0 * (corner - knee))).copysign(x)
+    } else {
+        x.signum()
+    }
+}
+
+/// Integral of `kneed_curve` from zero
+fn kneed_integral(x: f64, knee: f64) -> f64 {
+    let level = x.abs();
+    let corner = 2.0 - knee;
+    let bend = corner - knee;
+    if level <= knee {
+        0.5 * level * level
+    } else if level < corner {
+        let over = level - knee;
+        0.5 * level * level - over * over * over / (6.0 * bend)
+    } else {
+        0.5 * corner * corner - bend * bend / 6.0 + (level - corner)
+    }
+}
+
 /// Limiter for the output: leaves everything below the knee untouched, then bends smoothly
 /// towards 1.0
 pub fn output_clip(x: f32) -> f32 {
@@ -399,15 +431,26 @@ impl FineClipper {
     }
 }
 
-/// `power_clip`, antialiased
+/// `power_clip`, antialiased. With a knee it is `kneed_curve` instead
 #[derive(Clone, Copy)]
 pub struct PowerClipper {
     averager: Averager,
+    // Where the straight part of the curve ends. 0.0 for the curve that bends from the start
+    knee: f64,
 }
 
 impl PowerClipper {
     pub fn new() -> Self {
-        Self { averager: Averager::new() }
+        Self {
+            averager: Averager::new(),
+            knee: 0.0,
+        }
+    }
+
+    /// The share of the ceiling up to which the stage leaves the signal as it is, under
+    /// 1.0. 0.0 for the curve that bends from the start. Call `reset` after this
+    pub fn set_knee(&mut self, knee: f32) {
+        self.knee = knee as f64;
     }
 
     pub fn reset(&mut self) {
@@ -416,7 +459,12 @@ impl PowerClipper {
 
     pub fn process(&mut self, input: f32) -> f32 {
         let input = input as f64;
-        self.averager.process(input, power_integral(input), power_curve) as f32
+        let knee = self.knee;
+        if knee > 0.0 {
+            self.averager.process(input, kneed_integral(input, knee), |x| kneed_curve(x, knee)) as f32
+        } else {
+            self.averager.process(input, power_integral(input), power_curve) as f32
+        }
     }
 }
 

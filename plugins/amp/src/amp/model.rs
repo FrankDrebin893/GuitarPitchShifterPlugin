@@ -82,14 +82,20 @@ pub struct PowerModel {
     pub drive_db: [f32; 3],
     /// Level after the power stage in dB with Master at 0, 5 and 10
     pub volume_db: [f32; 3],
+    /// Share of the ceiling up to which the stage leaves the signal exactly as it is, and
+    /// bends only what goes over: for a clean amp, where a held note stays clean and the
+    /// attack of a string picked hard is rounded off. 0.0 for a stage that bends from the
+    /// start
+    pub clean_to: f32,
     /// Share of the headroom lost at full sustained output
     pub sag: f32,
     pub sag_attack_ms: f32,
     pub sag_release_ms: f32,
-    /// With the drive pedal on: share of the headroom lost on top of `sag`, per unit of
-    /// load above `driven_sag_from`. For a clean amp, which passes the pedal's Level on to
-    /// the output: the power stage gives way under it before the output's safety clip is
-    /// reached. 0.0 leaves the stage as it is
+    /// With the drive pedal on: how far the stage turns down what it is given, per unit of
+    /// load above `driven_sag_from` (what it is given is divided by one plus this times the
+    /// load above). For a clean amp, which passes the pedal's Level on to its power stage
+    /// as square waves: under that load the stage gives way in front of its clipping, so
+    /// it rounds them off and does not clip them again. 0.0 leaves the stage as it is
     pub driven_sag: f32,
     pub driven_sag_from: f32,
     /// Low peak from the speaker's resonance pushing back on the power stage
@@ -176,11 +182,14 @@ const UNUSED_STAGE: StageModel = StageModel {
     finer_when_driven: false,
 };
 
-/// Clean: glassy, with headroom to spare. Two stages with high ceilings that only bend at
-/// the top of the Gain dial, a bright lift that is strongest at low gain, scooped mids.
-/// Nothing in it squeezes what the drive pedal's Level adds, so with the pedal on its power
-/// stage gives way under a heavy load: sustained notes then stay under the output's safety
-/// clip, which runs at the host's rate and aliases
+/// Clean: glassy. Two stages with high ceilings that only bend at the top of the Gain dial,
+/// a bright lift that is strongest at low gain, scooped mids. Nothing in the preamp squeezes
+/// a note, so the amp follows the guitar, and it is as loud as the other two for a guitar
+/// recorded at -24 dBFS RMS. Its power stage is what holds the peaks: straight up to its
+/// knee, so a held note stays clean, and rounding off the attacks that go over, so they do
+/// not reach the output's safety clip, which runs at the host's rate and aliases. With the
+/// drive pedal on, the stage is handed square waves at the pedal's Level: under that load
+/// it turns itself down and does not clip them again
 static KLAR: AmpModel = AmpModel {
     name: "Klar",
     model_number: "KL-30",
@@ -216,9 +225,8 @@ static KLAR: AmpModel = AmpModel {
     fizz_hz: None,
     lowcut_hz: None,
     level_db: [24.0, 17.0, 8.0, 0.0, -5.5],
-    // Nothing squeezes the peaks of a clean amp, so it is turned down where it is cleanest:
-    // chords then stay 1.2 to 1.4 dB under where the output starts to round them off
-    makeup_db: [-1.3, -1.4, -0.8, -0.4, 0.0],
+    // The power stage holds the peaks, so nothing is made up or taken back behind it
+    makeup_db: [0.0, 0.0, 0.0, 0.0, 0.0],
     tone: ToneModel {
         bass_hz: 120.0,
         bass_db: 10.0,
@@ -233,12 +241,13 @@ static KLAR: AmpModel = AmpModel {
         mid_level_db: 2.0,
     },
     power: PowerModel {
-        drive_db: [-30.0, -10.0, 10.0],
-        volume_db: [-2.5, -2.5, -5.0],
+        drive_db: [-18.5, 1.5, 12.0],
+        volume_db: [-9.0, -9.0, -10.0],
+        clean_to: 0.65,
         sag: 0.12,
         sag_attack_ms: 20.0,
         sag_release_ms: 100.0,
-        driven_sag: 6.0,
+        driven_sag: 40.0,
         driven_sag_from: 0.45,
         resonance_hz: 85.0,
         resonance_db: 2.0,
@@ -310,8 +319,8 @@ static BROL: AmpModel = AmpModel {
     ],
     fizz_hz: None,
     lowcut_hz: None,
-    level_db: [6.0, 3.0, 0.0, -1.5, -2.5],
-    makeup_db: [15.0, 6.5, 0.0, 0.0, 0.0],
+    level_db: [23.0, 9.7, 0.0, -1.5, -2.5],
+    makeup_db: [1.5, 1.0, 0.0, 0.0, 0.0],
     tone: ToneModel {
         bass_hz: 140.0,
         bass_db: 10.0,
@@ -328,6 +337,7 @@ static BROL: AmpModel = AmpModel {
     power: PowerModel {
         drive_db: [-26.0, -6.0, 14.0],
         volume_db: [-8.0, -7.0, -7.5],
+        clean_to: 0.0,
         sag: 0.15,
         sag_attack_ms: 15.0,
         sag_release_ms: 100.0,
@@ -430,6 +440,7 @@ static TORDEN: AmpModel = AmpModel {
     power: PowerModel {
         drive_db: [-26.0, -8.0, 10.0],
         volume_db: [-8.0, -7.0, -7.5],
+        clean_to: 0.0,
         sag: 0.04,
         sag_attack_ms: 10.0,
         sag_release_ms: 60.0,

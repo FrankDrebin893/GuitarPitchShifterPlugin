@@ -1046,7 +1046,8 @@ mod tests {
     /// of the two against the sine, in dB, in the middle of the sweep
     fn zipper_db(dial: &str, freq_hz: f32, sweep_s: f32, sample_rate: f32) -> f32 {
         let len = (sweep_s * sample_rate) as usize;
-        let mut output = sine(freq_hz, 0.178, sample_rate, len);
+        // Quiet enough for the amp to follow it: the dials turn the level up as well
+        let mut output = sine(freq_hz, 0.0447, sample_rate, len);
         let mut chain = new_chain(sample_rate);
         for (index, block) in output.chunks_mut(CHUNK).enumerate() {
             let position = (index * CHUNK) as f32 / len as f32;
@@ -1297,25 +1298,75 @@ mod tests {
 
     #[test]
     fn test_klar_leaves_room_under_the_safety_clip() {
-        // The clean amp has the highest peaks for its level. With the delay and the reverb
-        // on as the plugin starts, chords stay a decibel under the knee of the output clip
+        // The clean amp has the highest peaks for its level, and its power stage is what
+        // holds them: with the delay and the reverb on as the plugin starts, chords from a
+        // guitar recorded hot stay under the knee of the output clip
         let chords = power_chords(SAMPLE_RATE, 2.0);
         for gain in [0.0, 0.25, 0.5] {
             let settings = with_default_effects(with_amp(Amp::Klar, gain));
             let (left, right) = run_stereo(&settings, &chords, SAMPLE_RATE);
             let room = to_db(OUTPUT_CLIP_KNEE) - to_db(peak(&left).max(peak(&right)));
-            assert!(room > 1.0, "Gain {}: {:.2} dB under the knee", gain * 10.0, room);
+            assert!(room > 0.0, "Gain {}: {:.2} dB under the knee", gain * 10.0, room);
         }
     }
 
     #[test]
     fn test_amps_are_equally_loud_at_the_defaults() {
-        let input = power_chords(SAMPLE_RATE, 2.0);
-        let levels: Vec<f32> =
-            Amp::ALL.iter().map(|&amp| to_db(rms(&run(&with_amp(amp, 0.5), &input, SAMPLE_RATE)))).collect();
-        let loudest = levels.iter().cloned().fold(f32::MIN, f32::max);
-        let quietest = levels.iter().cloned().fold(f32::MAX, f32::min);
-        assert!(loudest - quietest < 2.0, "Levels: {:?}", levels);
+        // As loud as they are heard, not as their meters read: the clean amp has far more
+        // peak over its average. And for a guitar at the level most are recorded at: the
+        // clean amp follows that level, the other two hardly do, so they only meet at one
+        let spread = |recording: &[f32], level_db: f32| {
+            let input = at_rms_db(recording, level_db);
+            let heard: Vec<f32> = Amp::ALL
+                .iter()
+                .map(|&amp| loudness_lufs(&[&run(&with_amp(amp, 0.5), &input, SAMPLE_RATE)], SAMPLE_RATE))
+                .collect();
+            let loudest = heard.iter().cloned().fold(f32::MIN, f32::max);
+            let quietest = heard.iter().cloned().fold(f32::MAX, f32::min);
+            (loudest - quietest, heard)
+        };
+        for recording in [guitar_di(SAMPLE_RATE), clean_di(SAMPLE_RATE)] {
+            let (apart, heard) = spread(&recording, REFERENCE_DI_DB);
+            assert!(apart < 3.0, "Loudness at the reference level: {:?}", heard);
+            // A guitar 6 dB quieter or hotter than that still finds them close
+            for level_db in [REFERENCE_DI_DB - 6.0, REFERENCE_DI_DB + 6.0] {
+                let (apart, heard) = spread(&recording, level_db);
+                assert!(apart < 5.0, "Loudness at {level_db} dBFS RMS: {:?}", heard);
+            }
+        }
+    }
+
+    #[test]
+    fn test_clean_settings_are_as_loud_as_the_rest_and_keep_their_peaks_in_the_power_stage() {
+        // Klar anywhere on its Gain dial and Brøl at the bottom of its own, against Brøl
+        // and Torden at the centre
+        let recording = at_rms_db(&clean_di(SAMPLE_RATE), REFERENCE_DI_DB);
+        let heard = |amp: Amp, gain: f32| loudness_lufs(&[&run(&with_amp(amp, gain), &recording, SAMPLE_RATE)], SAMPLE_RATE);
+        let (crunch, high_gain) = (heard(Amp::Brol, 0.5), heard(Amp::Torden, 0.5));
+        let (low, high) = (crunch.min(high_gain), crunch.max(high_gain));
+        for (amp, gain) in [(Amp::Klar, 0.0), (Amp::Klar, 0.25), (Amp::Klar, 0.5), (Amp::Klar, 0.75), (Amp::Brol, 0.0), (Amp::Brol, 0.25)] {
+            let clean = heard(amp, gain);
+            assert!(
+                clean > low - 2.0 && clean < high + 2.0,
+                "{amp:?} at Gain {}: {clean:.1} LUFS, the others {low:.1} to {high:.1}",
+                gain * 10.0
+            );
+        }
+
+        // The hottest guitar does not push the clean amp into the output's safety clip,
+        // which works at the host's rate: its own power stage rounds the attacks off first
+        let hot = at_rms_db(&clean_di(SAMPLE_RATE), -12.0);
+        for gain in [0.0, 0.5, 1.0] {
+            let top = peak(&run(&with_amp(Amp::Klar, gain), &hot, SAMPLE_RATE));
+            assert!(to_db(top) < -1.0, "Klar at Gain {}: peak {:.1} dBFS", gain * 10.0, to_db(top));
+        }
+
+        // And a guitar played softly keeps all of its attack: the power stage is straight
+        // up to its knee
+        let soft = at_rms_db(&clean_di(SAMPLE_RATE), -36.0);
+        let crest = |signal: &[f32]| to_db(peak(signal) / rms(signal));
+        let lost = crest(&soft) - crest(&run(&with_amp(Amp::Klar, 0.5), &soft, SAMPLE_RATE));
+        assert!(lost < 1.5, "Klar takes {lost:.1} dB off the peaks of soft playing");
     }
 
     #[test]
@@ -1328,17 +1379,17 @@ mod tests {
                 .map(|&amp| thd_db(&run(&with_amp(amp, gain), &tone, SAMPLE_RATE)[9600..], SAMPLE_RATE, 220.0))
                 .collect()
         };
-        // A sine at -18 dBFS RMS with the gain low, and one at -36 dBFS RMS with the gain at
+        // A held note with the gain low, and a sine at -36 dBFS RMS with the gain at
         // 5. Louder or with more gain, Brøl and Torden both clip all the way, and which of
         // the two then measures more is a matter of their tone, not of how much they distort
-        for (gain, level) in [(0.0, 0.178), (0.25, 0.178), (0.5, 0.0224)] {
+        for (gain, level) in [(0.0, HELD_NOTE), (0.25, HELD_NOTE), (0.5, 0.0224)] {
             let amps = distortion(gain, level);
             assert!(amps[0] < amps[1] - 6.0, "Gain {}: Klar and Brøl {:?}", gain * 10.0, amps);
             assert!(amps[1] < amps[2] - 3.0, "Gain {}: Brøl and Torden {:?}", gain * 10.0, amps);
         }
         // Klar is the cleanest wherever the dial is
         for gain in [0.5, 1.0] {
-            let amps = distortion(gain, 0.178);
+            let amps = distortion(gain, HELD_NOTE);
             assert!(amps[0] < amps[1] - 6.0 && amps[0] < amps[2] - 6.0, "Gain {}: {:?}", gain * 10.0, amps);
         }
 
@@ -1354,7 +1405,7 @@ mod tests {
 
     #[test]
     fn test_klar_stays_clean_until_gain_is_high() {
-        let tone = sine(220.0, 0.178, SAMPLE_RATE, 19_200);
+        let tone = sine(220.0, HELD_NOTE, SAMPLE_RATE, 19_200);
         let distortion =
             |gain: f32| thd_db(&run(&with_amp(Amp::Klar, gain), &tone, SAMPLE_RATE)[9600..], SAMPLE_RATE, 220.0);
         for gain in [0.0, 0.25, 0.5] {
@@ -1384,8 +1435,14 @@ mod tests {
                 24.0 - (level(&hard) - level(&soft))
             })
             .collect();
-        assert!(squeezed[0] < 3.0, "Klar squeezes by {:.1} dB", squeezed[0]);
-        assert!(squeezed[1] > squeezed[0] + 6.0 && squeezed[2] > squeezed[1] + 6.0, "Squeezed: {:?}", squeezed);
+        // Klar only at the top, where its power stage holds the peaks: up to a held note
+        // it follows what it is given
+        assert!(squeezed[0] < 8.0, "Klar squeezes by {:.1} dB", squeezed[0]);
+        let held = sine(220.0, HELD_NOTE, SAMPLE_RATE, 19_200);
+        let level = |input: &[f32]| to_db(rms(&run(&with_amp(Amp::Klar, 0.5), input, SAMPLE_RATE)[9600..]));
+        let followed = level(&held) - level(&soft);
+        assert!((followed - 12.0).abs() < 0.5, "Klar follows 12 dB more with {followed:.1} dB");
+        assert!(squeezed[1] > squeezed[0] + 3.0 && squeezed[2] > squeezed[1] + 6.0, "Squeezed: {:?}", squeezed);
     }
 
     /// Level below 100 Hz against the level from 400 to 1600 Hz, in dB
@@ -1633,6 +1690,17 @@ mod tests {
         output
     }
 
+    /// How much steeper than once it has settled an amp may be right after it was switched
+    /// to. Klar starts from rest with the whole headroom of its power stage, which holds
+    /// its peaks, and has lost an eighth of it to the sag 20 ms later
+    fn from_rest(amp: Amp) -> f32 {
+        if amp == Amp::Klar {
+            1.35
+        } else {
+            1.2
+        }
+    }
+
     fn transitions() -> Vec<(Amp, Amp)> {
         let mut pairs = Vec::new();
         for from in Amp::ALL {
@@ -1659,7 +1727,7 @@ mod tests {
                     let own_step = largest_step(&output[4800..at]).max(largest_step(&output[at + settle..]));
                     let step = largest_step(&output[at - 1..at + settle]);
                     assert!(
-                        step < own_step * 1.2,
+                        step < own_step * from_rest(to),
                         "{:?} to {:?} at gain {}: step of {} against {}",
                         from,
                         to,
@@ -1691,7 +1759,7 @@ mod tests {
                 };
                 let output = run_change(&pedals(from), &pedals(to), &input, at);
                 let ratio = step_ratio(&output, at);
-                assert!(ratio < 1.2, "{:?} to {:?}: step {} times its own", from, to, ratio);
+                assert!(ratio < from_rest(to), "{:?} to {:?}: step {} times its own", from, to, ratio);
             }
         }
     }
@@ -2199,7 +2267,7 @@ mod tests {
 
     #[test]
     fn test_drive_adds_distortion_and_cuts_lows() {
-        let tone = sine(220.0, 0.178, SAMPLE_RATE, 19_200);
+        let tone = sine(220.0, HELD_NOTE, SAMPLE_RATE, 19_200);
         let distortion = |settings: &AmpSettings| thd_db(&run(settings, &tone, SAMPLE_RATE)[9600..], SAMPLE_RATE, 220.0);
         let clean = distortion(&with_amp(Amp::Klar, 0.3));
         let low = distortion(&with_drive(Amp::Klar, 0.3, 0.0, 0.5, 0.5));
@@ -2245,13 +2313,15 @@ mod tests {
 
     #[test]
     fn test_drive_tone_and_level_move_the_right_way() {
-        let chords = power_chords(SAMPLE_RATE, 1.0);
+        let chords = at_rms_db(&power_chords(SAMPLE_RATE, 1.0), REFERENCE_DI_DB);
         let top = |tone: f32| {
             let output = run(&with_drive(Amp::Klar, 0.3, 0.5, tone, 0.5), &chords, SAMPLE_RATE);
             band_level_db(&output, SAMPLE_RATE, Some(3000.0), None)
         };
         let (dark, centre, bright) = (top(0.0), top(0.5), top(1.0));
-        assert!(centre > dark + 1.5 && bright > centre + 1.5, "Above 3 kHz: {:.1}, {:.1}, {:.1} dB", dark, centre, bright);
+        // Less at the top of the dial: the brighter the pedal, the more the power stage of
+        // the amp behind it gives way
+        assert!(centre > dark + 1.5 && bright > centre + 1.0, "Above 3 kHz: {:.1}, {:.1}, {:.1} dB", dark, centre, bright);
 
         // Klar turned down so far that it follows its input
         let quiet: Vec<f32> = chords.iter().map(|s| s * 0.05).collect();
@@ -2304,7 +2374,10 @@ mod tests {
         for high in jumps {
             let output = run_change(&low, &high, &input, 150 * BLOCK);
             let ratio = step_ratio(&output[..], 150 * BLOCK);
-            assert!(ratio < 1.3, "Step {} times its own for {:?}", ratio, high);
+            // Pushed by the pedal's Level, Klar's power stage gives way: for the 20 ms that
+            // takes, the amp is louder than it is once it has settled
+            let limit = if high.drive_level > low.drive_level { 1.8 } else { 1.3 };
+            assert!(ratio < limit, "Step {} times its own for {:?}", ratio, high);
         }
     }
 
@@ -3521,6 +3594,52 @@ mod tests {
         }
     }
 
+    /// A number that changes with any bit of a render
+    fn fingerprint(channels: &[&[f32]]) -> u64 {
+        let mut hash = 0xcbf2_9ce4_8422_2325u64;
+        for sample in channels.iter().flat_map(|channel| channel.iter()) {
+            for byte in sample.to_bits().to_le_bytes() {
+                hash = (hash ^ byte as u64).wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        hash
+    }
+
+    /// One line per amp, Gain and pedal, with a number that changes with any bit of what
+    /// the chain puts out, at 48 and 96 kHz in stereo. For a change that is meant to leave
+    /// a sound as it is: save the lines before and after and compare them. The numbers are
+    /// the same from run to run on one machine and build, not between machines:
+    ///   cargo test -p amp --release fingerprint_report -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn fingerprint_report() {
+        for sample_rate in [48000.0, 96000.0] {
+            let recording = guitar_di(sample_rate);
+            let recording = &recording[..(4.0 * sample_rate) as usize];
+            for amp in Amp::ALL {
+                for gain in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                    for (pedals, drive_on, effects_on) in [("plain", false, false), ("drive", true, false), ("effects", false, true)] {
+                        let mut settings = with_amp(amp, gain);
+                        settings.drive_on = drive_on;
+                        settings.delay.on = effects_on;
+                        settings.reverb.on = effects_on;
+                        let mut chain = new_chain(sample_rate);
+                        let (mut left, mut right) = (recording.to_vec(), recording.to_vec());
+                        for (left, right) in left.chunks_mut(BLOCK).zip(right.chunks_mut(BLOCK)) {
+                            chain.process(&settings, left, Some(right));
+                        }
+                        println!(
+                            "print {sample_rate:>6} {:<7} gain {:>4.1} {pedals:<8} {:016x}",
+                            amp.model().name,
+                            gain * 10.0,
+                            fingerprint(&[&left, &right])
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// How loud each amp is heard across its Gain dial, for guitars recorded quietly and
     /// hot. A clean amp follows the level it is given; one that clips hardly does, so the
     /// level the amps are matched at decides which of them sounds quiet with a real guitar.
@@ -3559,6 +3678,25 @@ mod tests {
                     // How much of 12 dB more guitar is heard: 12 from a clean amp
                     println!("{:>9.1} LU", loudness[3] - loudness[1]);
                 }
+            }
+        }
+
+        println!("
+A note held at 220 Hz (a sine) at the same levels: distortion in dB against the note");
+        print!("{:<8}{:>5}", "amp", "gain");
+        for level in DI_LEVELS_DB {
+            print!("{:>10}", format!("{level:.0}"));
+        }
+        println!();
+        for amp in Amp::ALL {
+            for gain in gains {
+                print!("{:<8}{:>5.1}", amp.model().name, gain * 10.0);
+                for level in DI_LEVELS_DB {
+                    let tone = sine(220.0, db_to_gain(level) * std::f32::consts::SQRT_2, SAMPLE_RATE, 19_200);
+                    let output = run(&with_amp(amp, gain), &tone, SAMPLE_RATE);
+                    print!("{:>10.1}", thd_db(&output[9600..], SAMPLE_RATE, 220.0));
+                }
+                println!();
             }
         }
     }
@@ -4623,6 +4761,17 @@ mod tests {
         }
         let output = run(&with_amp(Amp::Torden, 0.5), &boosted(&mutes, sample_rate as f32), sample_rate as f32);
         write_wav(&dir.join(file_name(Amp::Torden, "palm_mutes_boosted_gain5")), &[&output, &output], sample_rate);
+
+        // Clean playing from a guitar recorded quietly, at the reference level and hot:
+        // the clean amp follows the level, and rounds off what goes over its power stage
+        let clean = clean_di(sample_rate as f32);
+        for amp in Amp::ALL {
+            for level_db in [REFERENCE_DI_DB - 6.0, REFERENCE_DI_DB, REFERENCE_DI_DB + 6.0] {
+                let output = run(&with_amp(amp, 0.5), &at_rms_db(&clean, level_db), sample_rate as f32);
+                let name = format!("clean_playing_gain5_di{level_db:.0}");
+                write_wav(&dir.join(file_name(amp, &name)), &[&output, &output], sample_rate);
+            }
+        }
 
         // The pedals. Torden with and without the drive in front, on the recording and on
         // palm mutes; Klar with the drive as an overdrive of its own
