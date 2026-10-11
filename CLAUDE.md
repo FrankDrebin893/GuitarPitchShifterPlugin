@@ -103,6 +103,20 @@ controls, portrait) or `plugins/drums/src/editor.rs` (many controls, landscape) 
   `small_footswitch` and the LEDs `rig_led` (an unlit `led` disappears on dark paint), beside or
   above the switch. A mini pedal holds two knobs of radius 24 side by side or three of radius 17
   in a triangle. Everything else in this guide applies
+- **Slim pedals:** a pedal of a rig with two knobs can be a `slim_pedal`, 110 px wide: the
+  LED where a trio's upper left knob is, the two radius-17 knobs upper right and lower left
+  (`SLIM_LED`, `SLIM_KNOBS`), the switch where every pedal has it. Its title is size 21, so
+  seven letters fit. In a row with wide pedals the LEDs and switches line up
+- **A board that can be rearranged:** a pedal is moved by dragging it by its title
+  (`title_grip`); while it is held it is drawn `lifted` and last, the others glide to make
+  room, and it lands in the nearest place it may have. No arrows, menus or lists. A pedal
+  that cannot be moved has no grip
+- **The amp's place in the row** is the one thing drawn on the bench: `amp_marker`, two patch
+  cables (`CABLE`) from the pedals on either side up to the head with a cream tag reading
+  `AMP`, in a 40 px gap. Objects on the bench, not print: silk triangles still mean signal
+  direction at the jacks only
+- **An order is never a parameter.** Keep it in a `#[persist]` field, as ids, like a preset
+  or a file choice
 - **Signal lamps:** a light that follows the sound and not a switch (gate open, output clipping)
   is a `signal_lamp`, with a `silk_label` of size 13 centred 18 px under it, placed beside the
   control it belongs to. An LED above or beside a switch only ever says that the switch is on.
@@ -240,6 +254,11 @@ gain). They share the six dials.
 - `src/cab_stage.rs` - `CabStage` (lock-free hand-off of a cabinet to the audio thread) and
   `CabLoader` (reads the chosen file on a background task)
 - `src/delay.rs`, `src/reverb.rs` - Stereo delay; stereo reverb (8-line feedback delay network)
+- `src/comp.rs` - Compressor pedal
+- `src/mods/` - `chorus.rs`, `flanger.rs`, `phaser.rs`, `tremolo.rs`, with `lfo.rs` and `line.rs`
+  (the modulated delay line of chorus and flanger)
+- `src/order.rs` - `ChainOrder`: which pedals stand in front of the amp and which behind the
+  cabinet, in what order; the rules, and `StoredOrder` (saved as `chain-order`)
 - `src/dsp/` - `filters.rs` (f64 biquads), `oversample.rs` (minimum-phase IIR half-bands),
   `shaper.rs` (antialiased clippers), `resample.rs` (windowed-sinc resampler for cabinets),
   `pair.rs` (two samples' divisions and square roots as one SSE2 pair), `fft.rs` (radix-2 real
@@ -251,21 +270,24 @@ gain). They share the six dials.
   editor shows it
 - `src/tuner.rs` - Tuner: pitch detector on the mono input, `TunerReading` (one atomic shared
   with the editor), `Note`
-- `src/editor.rs` - egui GUI: oxblood head (960 x 694 window) with the preset stepper or the tuner display
-  top centre, over five pedals
+- `src/editor.rs` - egui GUI: oxblood head (1590 x 694 window) with the preset stepper or the tuner
+  display top centre; draws each of the ten pedals
+- `src/board.rs` - The row of pedals under the head in the chain's order, the amp's marker,
+  and dragging a pedal to another place
 
 Signal flow:
 
 1. Input (a stereo input is averaged to mono), input gain, gate. The gate's detector reads the
    input before the input gain; no lookahead. The tuner, when on, hears the same input in front
    of the input gain and the gate
-2. One oversampled region: drive pedal, preamp stages, tone stack, power amp. 4x at 44.1 and
-   48 kHz, 2x from 88.2 kHz on. The clippers are antialiased (antiderivative method; second
-   order where the gain is highest)
+2. One oversampled region: the pedals in front of the amp in their order, preamp stages, tone
+   stack, power amp. 4x at 44.1 and 48 kHz, 2x from 88.2 kHz on. The clippers are antialiased
+   (antiderivative method; second order where the gain is highest)
 3. Cabinet: a short impulse response (5 to 10 ms) with the speaker resonance as a filter behind
    it, then the Mic and Resonance dials, DC blocker
-4. Stereo delay, then stereo reverb. They add wet to an untouched dry signal, smooth their own
-   settings, ring out when switched off and cost nothing once idle
+4. Two channels from here: the pedals behind the cabinet in their order. Delay and reverb add
+   wet to an untouched dry signal, smooth their own settings, ring out when switched off and
+   cost nothing once idle
 5. Output level, safety clip
 
 How it behaves:
@@ -329,7 +351,23 @@ How it behaves:
 - `lib.rs` takes every parameter default and range from `AmpSettings::default` and the limits in
   the DSP modules; a test pins the values
 - A preset holds everything except Bypass, Input and Output, so every preset must fit at
-  Output 0 dB (a test checks peak and level of each)
+  Output 0 dB (a test checks peak and level of each). It holds the pedal order too. New
+  presets go at the end: a project remembers its preset by its number
+- The pedal order (`order.rs`): Gate always first, amp and cabinet one block in the middle.
+  Drive only in front of the amp; Delay and Reverb only behind the cabinet; Comp, Chorus,
+  Phaser, Flanger and Tremolo on either side. Default: Comp, Drive, Phaser, amp, Chorus,
+  Flanger, Tremolo, Delay, Reverb, which with the new pedals off is the chain as it was, to
+  the bit
+- In front of the amp a pedal runs on one channel at the oversampled rate, behind the cabinet
+  on two at the host's rate (chorus, flanger and phaser a quarter turn apart left and right).
+  Either way without latency
+- The order is saved with the project (`chain-order`, a list of pedal ids with `amp` between
+  the sides), not a parameter and not automatable. The chain reads it with the dials: the
+  output fades to silence in 5 ms, the pedals change places, it fades back. A pedal that
+  changes sides starts from rest. A list that is damaged or from another build is put right,
+  never refused
+- The compressor's Level at 5 is as loud as the pedal off (within 0.3 LU at the reference
+  level); Sustain 10 adds at most 20 dB to what is quiet, hiss included
 - Cost with everything on (Torden): about 2.0 % of a core at 48 kHz, 2.6 % at 96 kHz, 5.5 % at
   192 kHz, on a fast core. The cores of a machine differ (1.33 times on the development
   machine): the reports pin their thread (`test_util::pin_thread`)
@@ -341,12 +379,21 @@ How it behaves:
 | Gate (`gate_on`) | on / off | on | Noise gate on the input |
 | Gate Threshold (`gate_thresh`) | -80 to -20 dB | -60 dB | Input level that opens the gate (closes 6 dB lower) |
 | Gate Release (`gate_release`) | 20-500 ms | 100 ms | Time to close after a 40 ms hold |
+| Comp (`comp_on`) | on / off | off | Compressor pedal |
+| Comp Sustain (`comp_sustain`) | 0.0-10.0 | 5.0 | How much it evens out: threshold and ratio together |
+| Comp Level (`comp_level`) | 0.0-10.0 | 5.0 | The pedal's output, -12 to +12 dB around as loud as off |
 | Drive (`drive_on`) | on / off | off | Overdrive pedal in front of the amp |
 | Drive Gain (`drive_gain`) | 0.0-10.0 | 3.0 | Amount of clipping in the pedal |
 | Drive Tone (`drive_tone`) | 0.0-10.0 | 5.0 | The pedal's top end, 1.5 to 7 kHz |
 | Drive Level (`drive_level`) | 0.0-10.0 | 5.0 | The pedal's output, -20 to +20 dB into the amp |
 | Amp (`amp`) | Klar / Brøl / Torden | Brøl | Amp and its cabinet. Variant ids `klar`, `brol`, `torden` |
 | Gain, Bass, Mid, Treble, Presence, Master (`gain`, `bass`, `mid`, `treble`, `presence`, `master`) | 0.0-10.0 | 5.0 | The amp's dials |
+| Chorus, Phaser, Flanger, Tremolo (`chorus_on`, `phaser_on`, `flanger_on`, `trem_on`) | on / off | off | Modulation pedals |
+| Chorus Rate (`chorus_rate`) | 0.1-6 Hz | 0.8 Hz | Speed of the sweep, 7 to 12 ms |
+| Phaser Rate (`phaser_rate`) | 0.1-8 Hz | 0.5 Hz | Speed of the sweep, 200 Hz to 1.6 kHz |
+| Flanger Rate (`flanger_rate`) | 0.05-5 Hz | 0.3 Hz | Speed of the sweep, 0.5 to 6 ms |
+| Tremolo Rate (`trem_rate`) | 0.5-12 Hz | 5 Hz | Speed of the volume wobble |
+| Depth (`chorus_depth`, `phaser_depth`, `flanger_depth`, `trem_depth`) | 0-100 % | 50 % | Width of the sweep; for chorus and flanger also the level of the voice |
 | Cabinet (`cab_on`) | on / off | on | Off passes the amp at about the same level, for a cabinet elsewhere |
 | Cab Mic (`cab_mic`) | 0.0-10.0 | 5.0 | Darker to brighter microphone position |
 | Cab Resonance (`cab_res`) | 0.0-10.0 | 5.0 | Less or more low thump |
@@ -388,6 +435,10 @@ cargo test -p amp --release preset_report -- --ignored --nocapture
 # How every preset's gate treats ringing notes, quiet playing, palm mutes and hiss.
 cargo test -p amp --release preset_gate_report -- --ignored --nocapture
 
+# Compressor and modulation pedals by themselves: what they do per setting, and their cost.
+cargo test -p amp --release comp_report -- --ignored --nocapture
+cargo test -p amp --release mods_report -- --ignored --nocapture
+
 # Tuner: error in cents per note and signal, time to the first reading, drift, cost.
 cargo test -p amp --release tuner_report -- --ignored --nocapture
 
@@ -402,10 +453,13 @@ cargo test -p amp --release export_cabinets -- --ignored --nocapture
 
 # A DI guitar through each amp and setting, as WAV files in target/renders (amp_*.wav).
 # Optional: AMP_INPUT_WAV=<recording>. render_effects writes the effects alone (amp_fx_*.wav),
-# render_presets every preset (amp_preset_*.wav) and all of them in a row
+# render_presets every preset (amp_preset_*.wav) and all of them in a row, render_comp and
+# render_mods those pedals alone (amp_comp_*.wav, amp_mod_*.wav)
 cargo test -p amp --release render_wavs -- --ignored
 cargo test -p amp --release render_effects -- --ignored
 cargo test -p amp --release render_presets -- --ignored
+cargo test -p amp --release render_comp -- --ignored
+cargo test -p amp --release render_mods -- --ignored
 ```
 
 ## Adding a Plugin

@@ -35,7 +35,8 @@ Decided with Rasmus on 2026-10-11:
 | M2 Board mock in the standalone (feature `board_mock`); needs Rasmus's yes before M3's editor | built 2026-10-11, waits for Rasmus |
 | M4 Mods (`mods/`, four slim pedals, `mods_report`) | sound done 2026-10-11: in the chain with their twelve parameters. No pedals on the board yet |
 | M5 Order (`chain-order` persisted, re-route with a fade, dragging, order in presets) | sound done 2026-10-11: the chain follows the saved order. Nothing in the window changes it yet; presets do not hold it yet |
-| M6 New presets, docs | |
+| M6 New presets, docs | done 2026-10-11 |
+| The real board (after Rasmus's yes to the mock on 2026-10-11) | done 2026-10-11 |
 
 Planned parameter ids: `comp_on`, `comp_sustain`, `comp_level`, `chorus_on`, `chorus_rate`,
 `chorus_depth`, `phaser_on`, `phaser_rate`, `phaser_depth`, `flanger_on`, `flanger_rate`,
@@ -182,6 +183,29 @@ clip from -18 on). A held note in Klar at Gain 5: -77 / -70 / -61 / -20 / -12 dB
 - Left: nothing in the window sets the order (the mock keeps its own); presets do not hold
   it; a pedal that changes sides starts its sweep again; what a swap of delay and reverb
   does to their tails was only measured as steps, not heard
+
+### The board, presets and what is left (2026-10-11)
+
+- Rasmus said yes to the mock as it was. `board_mock.rs` became `board.rs`, always built, the
+  feature is gone. Window 1590 x 694, persist key `editor-state-rig3`. The slim pedals have
+  their real parameters; the row is drawn from `params.order` every frame, and letting go of
+  a dragged pedal writes the new order there
+- Presets hold the compressor, the four modulation pedals and the order (`comp`, `mods`,
+  `order` as ids). The first twelve are as they were. Five new at the end: Rav (Klar,
+  compressor, chorus), Puls (Klar, tremolo), Hvirvel (Brøl, phaser in front), Sus (Torden,
+  flanger, delay), Dis (Klar, chorus in front of the amp, reverb into delay). All within 2 LU
+  of the middle preset at the reference level. With the compressor on, Rav is only 3.3 LU
+  apart between a guitar at -30 and one at -18 dBFS RMS (Glas: 6.6)
+- Not exercised in the real build: dragging with a mouse (the same code was dragged in the
+  mock by its subagent; the row to chain order and back is unit-tested), the grab cursor,
+  anything in a DAW. The host is not told when the order changes, and host undo does not
+  cover it, as with the cabinet file
+- `suite_common::ui::value_knob` and `value_switch` (knob and switch for a plain value) were
+  made for the mock and are unused now
+- Nothing shows why a pedal will not go to the other side of the amp: its nearest allowed
+  gap just stays open
+- The head has about 300 px of empty paint on either side of its dials
+- Still for Rasmus: listening to all of it; pushing the branch (the agent's push was blocked)
 
 ## How to resume (round 1)
 

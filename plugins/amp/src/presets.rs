@@ -68,7 +68,7 @@ const USUAL_ORDER: &[&str] = &["comp", "drive", "phaser", "amp", "chorus", "flan
 // leaves palm mutes alone when they are played quietly (peaks at -30 dBFS): from -52 dB up
 // the gate starts to close on the tail of every mute. How fast a gate shuts in a rest is
 // its release, not its threshold: 8 dB of threshold are 9 ms
-pub static PRESETS: [Preset; 12] = [
+pub static PRESETS: [Preset; 17] = [
     Preset {
         name: "Init",
         amp: Amp::Brol,
@@ -246,6 +246,82 @@ pub static PRESETS: [Preset; 12] = [
         comp: COMP_OFF,
         mods: MODS_OFF,
         order: USUAL_ORDER,
+    },
+    // The presets from here on use the pedals that came with the board that can be
+    // rearranged. New ones go at the end: a project remembers its preset by its number.
+    //
+    // Klar. Clean with the compressor in front and a slow chorus behind the cabinet, where
+    // it is wide
+    Preset {
+        name: "Rav",
+        amp: Amp::Klar,
+        dials: [3.5, 4.5, 5.0, 6.0, 6.0, 4.5],
+        gate: (ON, -66.0, 250.0),
+        drive: (OFF, [3.0, 5.0, 5.0]),
+        cab: (ON, [5.5, 5.0]),
+        delay: (OFF, 350.0, 30.0, 20.0),
+        reverb: (ON, 1.4, 14.0),
+        comp: (ON, [5.0, 5.0]),
+        mods: [(ON, 0.8, 55.0), (OFF, 0.5, 50.0), (OFF, 0.3, 50.0), (OFF, 5.0, 50.0)],
+        order: USUAL_ORDER,
+    },
+    // Klar. Warm clean with a tremolo and a longer room behind it
+    Preset {
+        name: "Puls",
+        amp: Amp::Klar,
+        dials: [4.5, 5.0, 5.5, 5.0, 4.5, 4.9],
+        gate: (ON, -66.0, 250.0),
+        drive: (OFF, [3.0, 5.0, 5.0]),
+        cab: (ON, [4.5, 5.0]),
+        delay: (OFF, 350.0, 30.0, 20.0),
+        reverb: (ON, 2.0, 18.0),
+        comp: COMP_OFF,
+        mods: [(OFF, 0.8, 50.0), (OFF, 0.5, 50.0), (OFF, 0.3, 50.0), (ON, 5.5, 60.0)],
+        order: USUAL_ORDER,
+    },
+    // Brøl. Crunch with the phaser in front of the amp, where its sweep is clipped with
+    // the guitar and moves the grit
+    Preset {
+        name: "Hvirvel",
+        amp: Amp::Brol,
+        dials: [5.5, 5.0, 6.0, 5.5, 5.5, 5.0],
+        gate: (ON, -58.0, 150.0),
+        drive: (OFF, [3.0, 5.0, 5.0]),
+        cab: (ON, [5.0, 5.0]),
+        delay: (OFF, 350.0, 30.0, 20.0),
+        reverb: (OFF, 1.5, 15.0),
+        comp: COMP_OFF,
+        mods: [(OFF, 0.8, 50.0), (ON, 0.5, 60.0), (OFF, 0.3, 50.0), (OFF, 5.0, 50.0)],
+        order: USUAL_ORDER,
+    },
+    // Torden. Lead with a slow flanger behind the cabinet and one delay
+    Preset {
+        name: "Sus",
+        amp: Amp::Torden,
+        dials: [6.5, 5.0, 5.5, 5.5, 5.5, 5.0],
+        gate: (ON, -54.0, 120.0),
+        drive: (ON, [1.5, 5.5, 7.0]),
+        cab: (ON, [5.0, 5.0]),
+        delay: (ON, 380.0, 25.0, 18.0),
+        reverb: (OFF, 1.5, 10.0),
+        comp: COMP_OFF,
+        mods: [(OFF, 0.8, 50.0), (OFF, 0.5, 50.0), (ON, 0.25, 50.0), (OFF, 5.0, 50.0)],
+        order: USUAL_ORDER,
+    },
+    // Klar. Haze: the chorus in front of the amp, and the reverb in front of the delay, so
+    // every repeat is the whole room again
+    Preset {
+        name: "Dis",
+        amp: Amp::Klar,
+        dials: [3.0, 4.5, 5.0, 5.5, 5.5, 4.4],
+        gate: (ON, -72.0, 500.0),
+        drive: (OFF, [3.0, 5.0, 5.0]),
+        cab: (ON, [4.5, 5.0]),
+        delay: (ON, 450.0, 40.0, 30.0),
+        reverb: (ON, 3.5, 35.0),
+        comp: (ON, [4.0, 5.0]),
+        mods: [(ON, 0.6, 50.0), (OFF, 0.5, 50.0), (OFF, 0.3, 50.0), (OFF, 5.0, 50.0)],
+        order: &["comp", "chorus", "drive", "phaser", "amp", "flanger", "tremolo", "reverb", "delay"],
     },
 ];
 
