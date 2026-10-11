@@ -133,9 +133,46 @@ pub fn param_knob<P: Param>(
         setter.end_set_parameter(param);
     }
 
-    let painter = ui.painter();
-    knob(painter, center, radius, normalized, scale);
+    knob(ui.painter(), center, radius, normalized, scale);
+    let value = param.normalized_value_to_string(normalized, true);
+    knob_caption(ui.painter(), center, radius, label, &value);
 
+    response
+}
+
+/// Knob that turns a plain value from 0 to 1 and not a parameter, with its name and value
+/// below. It looks and is handled like a `param_knob`. `shown` words the value for the tape.
+#[allow(clippy::too_many_arguments)]
+pub fn value_knob(
+    ui: &mut Ui,
+    id_source: &str,
+    value: &mut f32,
+    default: f32,
+    center: Pos2,
+    radius: f32,
+    label: &str,
+    shown: impl Fn(f32) -> String,
+) -> Response {
+    let rect = Rect::from_center_size(center, Vec2::splat((radius + 6.0) * 2.0));
+    let response = ui.interact(rect, Id::new(("value_knob", id_source)), Sense::click_and_drag());
+
+    if response.dragged() {
+        let fine = ui.input(|input| input.modifiers.shift);
+        let sensitivity = if fine { DRAG_SENSITIVITY * FINE_DRAG_FACTOR } else { DRAG_SENSITIVITY };
+        *value = (*value - response.drag_delta().y * sensitivity).clamp(0.0, 1.0);
+    }
+    if response.double_clicked() {
+        *value = default;
+    }
+
+    knob(ui.painter(), center, radius, *value, None);
+    knob_caption(ui.painter(), center, radius, label, &shown(*value));
+
+    response
+}
+
+/// A knob's name printed under it, and under that its value on label tape
+fn knob_caption(painter: &Painter, center: Pos2, radius: f32, label: &str, value: &str) {
     let (label_size, value_size) = if radius >= BIG_KNOB_RADIUS {
         (19.0, 14.0)
     } else if radius < SMALL_KNOB_RADIUS {
@@ -152,10 +189,7 @@ pub fn param_knob<P: Param>(
         SILK,
         LABEL_SPACING,
     );
-    let value = param.normalized_value_to_string(normalized, true);
-    label_tape(painter, Pos2::new(center.x, label_rect.bottom() + 2.0), &value, value_size);
-
-    response
+    label_tape(painter, Pos2::new(center.x, label_rect.bottom() + 2.0), value, value_size);
 }
 
 /// Value read-out: embossed label tape. `top_center` is the middle of its top edge.
@@ -340,6 +374,15 @@ pub fn param_switch(ui: &mut Ui, setter: &ParamSetter, param: &BoolParam, switch
         setter.begin_set_parameter(param);
         setter.set_parameter(param, !on);
         setter.end_set_parameter(param);
+    }
+}
+
+/// Small stomp switch with its LED for a plain on/off value and not a parameter: lit while
+/// it is on, a click toggles it
+pub fn value_switch(ui: &mut Ui, id_source: &str, on: &mut bool, switch_center: Pos2, led_center: Pos2) {
+    rig_led(ui.painter(), led_center, *on);
+    if small_footswitch(ui, switch_center, id_source).clicked() {
+        *on = !*on;
     }
 }
 

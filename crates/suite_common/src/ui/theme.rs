@@ -39,6 +39,9 @@ pub const LED_OFF: Color32 = Color32::from_rgb(90, 26, 18);
 // Unlit lens on the dark paint of a rig
 pub const LED_OFF_DARK: Color32 = Color32::from_rgb(58, 12, 10);
 
+/// Patch cable on the bench
+pub const CABLE: Color32 = Color32::from_rgb(74, 68, 61);
+
 pub const SHADOW: Color32 = Color32::from_black_alpha(80);
 
 const DISPLAY: &str = "display";

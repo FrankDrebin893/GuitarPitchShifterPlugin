@@ -1,5 +1,5 @@
 use nih_plug::prelude::*;
-use nih_plug_egui::egui::{vec2, Rect, Vec2};
+use nih_plug_egui::egui::{vec2, Rect, Ui, Vec2};
 use nih_plug_egui::{create_egui_editor, EguiState};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, PoisonError};
@@ -16,13 +16,21 @@ use crate::tuner::{Note, TunerReading};
 use crate::user_cab;
 use crate::{Amp, GuitarAmpParams, GuitarAmpPlugin, Task};
 
-const WINDOW_WIDTH: u32 = 960;
+// The width the head's controls and the five pedals are placed in
+const RIG_WIDTH: u32 = 960;
+#[cfg(not(feature = "board_mock"))]
+const WINDOW_WIDTH: u32 = RIG_WIDTH;
+#[cfg(feature = "board_mock")]
+const WINDOW_WIDTH: u32 = crate::board_mock::WINDOW_WIDTH;
 const WINDOW_HEIGHT: u32 = 694;
 
 // The head across the top, the pedalboard in the rest of the window below it
-const HEAD_HEIGHT: f32 = 354.0;
+pub(crate) const HEAD_HEIGHT: f32 = 354.0;
+// On a head wider than the rig, its controls keep their places among each other and sit
+// in the middle
+const HEAD_X: f32 = (WINDOW_WIDTH - RIG_WIDTH) as f32 / 2.0;
 
-const STYLE: PedalStyle = PedalStyle {
+pub(crate) const STYLE: PedalStyle = PedalStyle {
     name: "Guitar Amp",
     model: "GA-3",
     paint: ui::theme::PAINT_OXBLOOD,
@@ -34,7 +42,7 @@ const STYLE: PedalStyle = PedalStyle {
 // The preset display, top centre between the jack captions: its caption, and under it the
 // tape with a button at each end. Wide enough for the longest name and the edited mark.
 // While the tuner is on, its display is there instead, under its own caption
-const PRESET_X: f32 = WINDOW_WIDTH as f32 / 2.0;
+const PRESET_X: f32 = RIG_WIDTH as f32 / 2.0;
 const PRESET_CAPTION_Y: f32 = 25.0;
 const PRESET_Y: f32 = 47.0;
 const PRESET_WIDTH: f32 = 156.0;
@@ -68,9 +76,9 @@ const CAPTION_SIZE: f32 = 17.0;
 
 // The pedalboard: five slots in signal order, left to right
 const PEDAL_SLOTS: usize = 5;
-const PEDAL_TOP: f32 = BENCH_MARGIN + HEAD_HEIGHT + BENCH_MARGIN;
-const PEDAL_WIDTH: f32 = (WINDOW_WIDTH as f32 - BENCH_MARGIN) / PEDAL_SLOTS as f32 - BENCH_MARGIN;
-const PEDAL_HEIGHT: f32 = WINDOW_HEIGHT as f32 - BENCH_MARGIN - PEDAL_TOP;
+pub(crate) const PEDAL_TOP: f32 = BENCH_MARGIN + HEAD_HEIGHT + BENCH_MARGIN;
+pub(crate) const PEDAL_WIDTH: f32 = (RIG_WIDTH as f32 - BENCH_MARGIN) / PEDAL_SLOTS as f32 - BENCH_MARGIN;
+pub(crate) const PEDAL_HEIGHT: f32 = WINDOW_HEIGHT as f32 - BENCH_MARGIN - PEDAL_TOP;
 
 // On every pedal, from its top centre: the LED under the title, the knobs, the switch at the bottom.
 // Two knobs sit side by side. Three do not fit in a row, so they are smaller and in a triangle,
@@ -85,7 +93,7 @@ const TRIO_KNOBS: [Vec2; 3] = [vec2(-45.0, 71.0), vec2(45.0, 71.0), vec2(0.0, 16
 // The Cab pedal has the display for picking the cabinet where a third knob would be: the
 // amp's own or one of the player's files. Its two knobs are the upper two of a trio. The
 // tape is as wide as fits between the buttons, and holds this many letters
-const CAB_SLOT: usize = 2;
+pub(crate) const CAB_SLOT: usize = 2;
 const CAB_CAPTION: Vec2 = vec2(0.0, 174.0);
 const CAB_STEPPER: Vec2 = vec2(0.0, 198.0);
 const CAB_STEPPER_WIDTH: f32 = 100.0;
@@ -93,11 +101,76 @@ const CAB_NAME_CHARS: usize = 10;
 
 // The Gate pedal has a lamp beside its lowest knob that is lit while the gate lets the
 // guitar through. The pedal's LED says that the gate is switched on, like every other
-const GATE_SLOT: usize = 0;
+pub(crate) const GATE_SLOT: usize = 0;
 const GATE_LAMP: Vec2 = vec2(60.0, 164.0);
 
 /// One pedal of the board: its title, its switch and up to three knobs with their captions
 type Pedal<'a> = (&'a str, &'a BoolParam, &'a [(&'a FloatParam, &'a str)]);
+
+/// What the pedals of the board are drawn from
+pub(crate) struct Pedals<'a> {
+    params: &'a GuitarAmpParams,
+    setter: &'a ParamSetter<'a>,
+    gate_open: bool,
+    cab_loader: &'a CabLoader,
+    async_executor: &'a AsyncExecutor<GuitarAmpPlugin>,
+}
+
+impl Pedals<'_> {
+    /// Draws the pedal of `slot`, counted in signal order, in `rect`. Returns its top face
+    pub(crate) fn pedal(&self, ui: &mut Ui, slot: usize, rect: Rect) -> Rect {
+        let (params, setter) = (self.params, self.setter);
+        let pedals: [Pedal; PEDAL_SLOTS] = [
+            (
+                "Gate",
+                &params.gate_on,
+                &[(&params.in_gain, "Input"), (&params.gate_thresh, "Thresh"), (&params.gate_release, "Release")],
+            ),
+            (
+                "Drive",
+                &params.drive_on,
+                &[(&params.drive_gain, "Drive"), (&params.drive_tone, "Tone"), (&params.drive_level, "Level")],
+            ),
+            ("Cab", &params.cab_on, &[(&params.cab_mic, "Mic"), (&params.cab_res, "Res")]),
+            (
+                "Delay",
+                &params.delay_on,
+                &[(&params.delay_time, "Time"), (&params.delay_feedback, "Repeat"), (&params.delay_mix, "Mix")],
+            ),
+            ("Reverb", &params.reverb_on, &[(&params.reverb_decay, "Decay"), (&params.reverb_mix, "Mix")]),
+        ];
+        let (title, on, knobs) = pedals[slot];
+        let face = ui::mini_pedal(ui, rect, STYLE.paint, title);
+        let top = face.center_top();
+
+        let (radius, places) = if knobs.len() > PAIR_KNOBS.len() || slot == CAB_SLOT {
+            (TRIO_RADIUS, &TRIO_KNOBS[..])
+        } else {
+            (PAIR_RADIUS, &PAIR_KNOBS[..])
+        };
+        for (&(param, caption), &offset) in knobs.iter().zip(places) {
+            param_knob(ui, setter, param, top + offset, radius, caption, None);
+        }
+        param_switch(ui, setter, on, top + PEDAL_SWITCH, top + PEDAL_LED);
+
+        if slot == GATE_SLOT {
+            signal_lamp(ui.painter(), top + GATE_LAMP, self.gate_open);
+            silk_label(ui.painter(), top + GATE_LAMP + LAMP_CAPTION, "Open", LAMP_CAPTION_SIZE);
+        }
+
+        if slot == CAB_SLOT {
+            // The cabinet that plays: the amp's own, or a file from the cabinets
+            // folder. The buttons step through them
+            let chosen = params.cabinet.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            let shown = self.cab_loader.display_name(&chosen, CAB_NAME_CHARS);
+            silk_label(ui.painter(), top + CAB_CAPTION, "Speaker", 13.0);
+            if let Some(step) = stepper(ui, top + CAB_STEPPER, CAB_STEPPER_WIDTH, &shown, "cabinet") {
+                step_cabinet(params, self.cab_loader, self.async_executor, step == Step::Next);
+            }
+        }
+        face
+    }
+}
 
 /// Moves the choice of cabinet one on in the round of the amp's own and the files in the
 /// cabinets folder as they are now, and has what it arrives at read away from this thread
@@ -148,7 +221,7 @@ pub fn create(
             }
         },
         move |egui_ctx, setter, lamps| {
-            ui::rig(egui_ctx, |ui, origin| {
+            ui::rig(egui_ctx, |ui, window| {
                 // The update runs with every frame of the window whether it is painted
                 // or not, so this costs two atomic reads per frame, and a repaint only
                 // when a lamp changes
@@ -159,10 +232,12 @@ pub fn create(
                 let (gate_open, clipping) = lamps.shown();
 
                 let head = Rect::from_min_size(
-                    origin + vec2(BENCH_MARGIN, BENCH_MARGIN),
+                    window + vec2(BENCH_MARGIN, BENCH_MARGIN),
                     vec2(WINDOW_WIDTH as f32 - 2.0 * BENCH_MARGIN, HEAD_HEIGHT),
                 );
                 ui::head(ui, head, &STYLE);
+                // What is on the head is placed from here
+                let origin = window + vec2(HEAD_X, 0.0);
 
                 let tuning = params.tuner_on.value();
                 if tuning {
@@ -229,56 +304,21 @@ pub fn create(
                     setter.end_set_parameter(&params.bypass);
                 }
 
-                let pedals: [Pedal; PEDAL_SLOTS] = [
-                    (
-                        "Gate",
-                        &params.gate_on,
-                        &[(&params.in_gain, "Input"), (&params.gate_thresh, "Thresh"), (&params.gate_release, "Release")],
-                    ),
-                    (
-                        "Drive",
-                        &params.drive_on,
-                        &[(&params.drive_gain, "Drive"), (&params.drive_tone, "Tone"), (&params.drive_level, "Level")],
-                    ),
-                    ("Cab", &params.cab_on, &[(&params.cab_mic, "Mic"), (&params.cab_res, "Res")]),
-                    (
-                        "Delay",
-                        &params.delay_on,
-                        &[(&params.delay_time, "Time"), (&params.delay_feedback, "Repeat"), (&params.delay_mix, "Mix")],
-                    ),
-                    ("Reverb", &params.reverb_on, &[(&params.reverb_decay, "Decay"), (&params.reverb_mix, "Mix")]),
-                ];
-                for (slot, (title, on, knobs)) in pedals.into_iter().enumerate() {
+                let pedals = Pedals {
+                    params: &params,
+                    setter,
+                    gate_open,
+                    cab_loader: &cab_loader,
+                    async_executor: &async_executor,
+                };
+                #[cfg(not(feature = "board_mock"))]
+                for slot in 0..PEDAL_SLOTS {
                     let left = BENCH_MARGIN + (PEDAL_WIDTH + BENCH_MARGIN) * slot as f32;
-                    let rect = Rect::from_min_size(origin + vec2(left, PEDAL_TOP), vec2(PEDAL_WIDTH, PEDAL_HEIGHT));
-                    let top = ui::mini_pedal(ui, rect, STYLE.paint, title).center_top();
-
-                    let (radius, places) = if knobs.len() > PAIR_KNOBS.len() || slot == CAB_SLOT {
-                        (TRIO_RADIUS, &TRIO_KNOBS[..])
-                    } else {
-                        (PAIR_RADIUS, &PAIR_KNOBS[..])
-                    };
-                    for (&(param, caption), &offset) in knobs.iter().zip(places) {
-                        param_knob(ui, setter, param, top + offset, radius, caption, None);
-                    }
-                    param_switch(ui, setter, on, top + PEDAL_SWITCH, top + PEDAL_LED);
-
-                    if slot == GATE_SLOT {
-                        signal_lamp(ui.painter(), top + GATE_LAMP, gate_open);
-                        silk_label(ui.painter(), top + GATE_LAMP + LAMP_CAPTION, "Open", LAMP_CAPTION_SIZE);
-                    }
-
-                    if slot == CAB_SLOT {
-                        // The cabinet that plays: the amp's own, or a file from the cabinets
-                        // folder. The buttons step through them
-                        let chosen = params.cabinet.lock().unwrap_or_else(PoisonError::into_inner).clone();
-                        let shown = cab_loader.display_name(&chosen, CAB_NAME_CHARS);
-                        silk_label(ui.painter(), top + CAB_CAPTION, "Speaker", 13.0);
-                        if let Some(step) = stepper(ui, top + CAB_STEPPER, CAB_STEPPER_WIDTH, &shown, "cabinet") {
-                            step_cabinet(&params, &cab_loader, &async_executor, step == Step::Next);
-                        }
-                    }
+                    let rect = Rect::from_min_size(window + vec2(left, PEDAL_TOP), vec2(PEDAL_WIDTH, PEDAL_HEIGHT));
+                    pedals.pedal(ui, slot, rect);
                 }
+                #[cfg(feature = "board_mock")]
+                crate::board_mock::board(ui, window, &pedals);
             });
         },
     )
