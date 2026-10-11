@@ -233,14 +233,14 @@ gain). They share the six dials.
 - `src/gate.rs`, `src/drive.rs` - Noise gate; overdrive pedal
 - `src/amp/` - `model.rs` (`Amp` and one `AmpModel` of constants per amp), `preamp.rs`,
   `tonestack.rs`, `poweramp.rs`
-- `src/cab.rs` - Cabinet: impulse response designed in code per sample rate, direct FIR, Mic and
-  Resonance filters behind it
+- `src/cab.rs` - Cabinet: impulse response designed in code at 48 kHz and resampled for other
+  rates, direct FIR, Mic and Resonance filters behind it
 - `src/user_cab.rs` - The player's own cabinets: folder, WAV reading, resampler, trim, cut, level
 - `src/cab_stage.rs` - `CabStage` (lock-free hand-off of a cabinet to the audio thread) and
   `CabLoader` (reads the chosen file on a background task)
 - `src/delay.rs`, `src/reverb.rs` - Stereo delay; stereo reverb (8-line feedback delay network)
 - `src/dsp/` - `filters.rs` (f64 biquads), `oversample.rs` (minimum-phase IIR half-bands),
-  `shaper.rs` (antialiased clippers)
+  `shaper.rs` (antialiased clippers), `resample.rs` (windowed-sinc resampler for cabinets)
 - `src/presets.rs` - Factory presets as plain data, and `preset_report`
 - `src/dial_memory.rs` - Each amp's six dial positions, kept by the editor and saved with the
   project (`amp-dials`)
@@ -300,13 +300,16 @@ How it behaves:
 - An amp that is switched to starts at the dials' target, at the silent sample of the switch
 - The Gate pedal's `OPEN` lamp is lit while the gate is on and lets the guitar through; `CLIP`
   beside Output is lit for 150 ms after the output went over the safety clip's knee
-- While the drive pedal is on, Torden's second stage clips at twice the rate
-  (`StageModel.finer_when_driven`); with the pedal off the output is the same to the bit
+- While the drive pedal is on, the second stage of Brøl and of Torden clips at twice the rate
+  (`StageModel.finer_when_driven`) and Klar's power stage gives way under a heavy load, so no
+  setting of the pedal aliases above -70 dB. With the pedal off the output is the same to the bit
+- The built-in cabinets are designed at 48 kHz and resampled for every other rate (within
+  0.05 dB of each other from 60 Hz to 10 kHz). A rate is designed once and kept
 - `lib.rs` takes every parameter default and range from `AmpSettings::default` and the limits in
   the DSP modules; a test pins the values
 - A preset holds everything except Bypass, Input and Output, so every preset must fit at
   Output 0 dB (a test checks peak and level of each)
-- Cost with everything on (Torden): about 2 % of a core at 48 kHz, 2.6 % at 96 kHz, 5.6 % at 192 kHz
+- Cost with everything on (Torden): about 3 % of a core at 48 kHz, 3.8 % at 96 kHz, 7.8 % at 192 kHz
 
 | Parameter (id) | Range | Default | Description |
 |----------------|-------|---------|-------------|

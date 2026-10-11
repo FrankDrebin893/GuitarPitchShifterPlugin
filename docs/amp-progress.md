@@ -43,14 +43,15 @@ bottom row is full (three amp switches, Tuner, On), the board holds exactly five
 becomes a `stepper` (any number of amps), and pedals are added by widening the window to six
 slots. Do not start backlog 4 without his answer.
 
-Until then, report-driven work that needs no layout decision:
-- Brøl with the drive at 10 / 10 / 10 aliases at -55 dB at 44.1 kHz and Klar at -66 dB
-  (Brøl: first-order stages fed square waves, the `finer_when_driven` idea applies; Klar:
-  the base-rate safety clip). Neither is a report row yet: add the rows first
-- The built-in cabinets differ between sample rates by up to 3 dB at 8 kHz (in the roll-off).
-  Design them at one rate and resample (the resampler in `user_cab.rs` is within 0.02 dB),
-  or pre-warp the roll-off filters
-- A 40 ms user cabinet at 192 kHz takes the plugin from 7.2 % to 15.7 % of a core
+Until then, work that needs no layout decision:
+- Cost has crept up: everything on (Torden) is 3.0 % of a core at 48 kHz, where it was 2.0 %
+  after M5. `stage_report` says where; the finer clipping with the drive on and the second
+  order stages are the suspects. Look for the cheap wins again
+- A 40 ms user cabinet at 192 kHz takes the plugin to about 16 % of a core. Not done: a
+  zero-latency two-stage convolver (the first taps direct, the rest in a partitioned FFT
+  convolver hidden behind them; own radix-2 FFT, no dependency, no spikes), or running the
+  tail at a lower rate. The bar: within 0.1 dB of the direct FIR from 60 Hz to 10 kHz, no
+  added latency. "Not worth it", with numbers, is a fine result
 - Backlog 5 (mic choices per cabinet), 6 (lower CPU), 8 (shared `suite_common::dsp`)
 
 Nobody has listened to anything yet. If Rasmus has listened and left notes, they come first.
@@ -227,6 +228,13 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
 - 2026-10-10 Preset gates: -54 dB is the highest threshold that leaves palm mutes at -30 dBFS
   untouched; release, not threshold, sets how tight the rests are. Stram -56 dB / 50 ms,
   Granit -54 / 60, Dyb -54 / 40, Lyn -54 / 180. A test holds every preset to it
+- 2026-10-11 Drive aliasing on every amp: Brøl's second stage clips at twice the rate while
+  the pedal is on, as Torden's does; Klar's power stage gives way under a heavy load while
+  the pedal is on, so sustained notes stay under the output's safety clip. Pedal off is
+  bit-identical on every amp
+- 2026-10-11 Built-in cabinets are designed at 48 kHz, the rate they were tuned at, and
+  resampled for every other rate; 48 kHz is unchanged to the bit. The resampler moved to
+  `dsp/resample.rs` and serves user cabinets too
 - 2026-10-10 Worktrees for subagents start from `main`, not from `amp-sim`. Tell each agent to
   run `git merge --ff-only amp-sim` first
 
@@ -307,9 +315,6 @@ worst latency 0.317 ms (Torden, 44.1 kHz, everything on). Run `amp_report` for t
   file there; the host is not told the state changed, and host undo does not cover it
 - User cabinets: stereo files use the left channel; 8-bit and 64-bit float are rejected;
   `initialize` reads the file synchronously (a slow disk delays activation)
-- User cabinets: the built-in designs differ between sample rates by up to 3 dB at 8 kHz (in
-  the roll-off, where the filters warp). Found while testing the resampler; below 4 kHz they
-  agree within 0.16 dB
 - Mic and Res use the selected amp's frequencies also under a user cabinet
 
 - Dial memory: a switch is 7 host undo steps, and host undo does not undo the memory;
@@ -324,6 +329,22 @@ worst latency 0.317 ms (Torden, 44.1 kHz, everything on). Run `amp_report` for t
   the 4186 Hz ones improved (largest: Torden 10, drive 3/5/8, 44.1 kHz, -87.4 to -83.2 dB)
 - Gates: mutes quieter than -36 dBFS are still chopped at -54 dB; a guitar noisier than
   -62 dBFS RMS holds the preset gates open. All measured on synthetic plucks
+
+- The agent doing the drive aliasing and the cabinets was cut off twice and left no report.
+  Its two commits are verified by the tests and `amp_report`; its account of what it tried
+  and rejected is missing. Its third piece (long user cabinets at 192 kHz) was not started
+- Klar's power stage now gives way under a heavy load while the drive pedal is on. That is a
+  change of sound with the pedal at high Level into Klar, chosen by the numbers and unheard
+- With the drive at 10 / 10 / 10 the closest figures to the -70 dB target are Torden Gain 10
+  at 44.1 kHz (-74.8 dB) and Brøl Gain 10 (-75.6 dB)
+
+Figures of 2026-10-11 (48 kHz unless said): aliasing with the drive at 10 / 10 / 10, Gain 10,
+1245 / 4186 Hz tone: Klar -89.9 / -81.7, Brøl -78.6 / -78.5, Torden -78.3 / -76.5 dB; at
+44.1 kHz -88.4 / -79.9, -76.5 / -75.6, -75.5 / -74.8. Cabinets across rates: within 0.044 dB
+from 60 Hz to 10 kHz. Everything on, stereo, both effects (Torden Gain 10): 39.7 us per
+64-sample block (3.0 %), 96 kHz 25.2 us (3.8 %), 192 kHz 26.1 us (7.8 %). The drive at
+10 / 10 / 10 adds 0.4 % (Klar), 0.8 % (Brøl), 0.6 % (Torden) of a core at 48 kHz. Designing
+the cabinets for a new rate takes 4 to 12 ms once; setting a known rate 0.1 ms.
 
 ## Last report
 
