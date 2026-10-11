@@ -13,6 +13,10 @@ use crate::dsp::shaper::{output_clip, OUTPUT_CLIP_KNEE};
 use crate::dsp::{curve, db_to_gain, smoothing_coeff, Ramp};
 use crate::gate::Gate;
 use crate::lamps::LampReading;
+use crate::mods::chorus::{Chorus, ChorusSettings};
+use crate::mods::flanger::{Flanger, FlangerSettings};
+use crate::mods::phaser::{Phaser, PhaserSettings};
+use crate::mods::tremolo::{Tremolo, TremoloSettings};
 use crate::order::{ChainOrder, Pedal, Zone};
 use crate::reverb::{Reverb, ReverbSettings};
 use crate::tuner::{Tuner, TunerReading};
@@ -85,6 +89,12 @@ pub struct AmpSettings {
     pub presence: f32,
     pub master: f32,
 
+    /// The modulation pedals. They smooth their own settings
+    pub chorus: ChorusSettings,
+    pub phaser: PhaserSettings,
+    pub flanger: FlangerSettings,
+    pub tremolo: TremoloSettings,
+
     /// Off leaves the amp's signal as it is, for a cabinet somewhere else
     pub cab_on: bool,
     /// The cabinet's dials, 0.0 to 1.0. Both leave the cabinet as designed at 0.5
@@ -127,6 +137,10 @@ impl Default for AmpSettings {
             treble: 0.5,
             presence: 0.5,
             master: 0.5,
+            chorus: ChorusSettings::default(),
+            phaser: PhaserSettings::default(),
+            flanger: FlangerSettings::default(),
+            tremolo: TremoloSettings::default(),
             cab_on: true,
             cab_mic: 0.5,
             cab_res: 0.5,
@@ -227,6 +241,15 @@ pub struct AmpChain {
     order: ChainOrder,
     comp: Comp,
     comp_settings: CompSettings,
+    chorus: Chorus,
+    phaser: Phaser,
+    flanger: Flanger,
+    tremolo: Tremolo,
+    // What the modulation pedals are told, read with the dials like the effects' settings
+    chorus_settings: ChorusSettings,
+    phaser_settings: PhaserSettings,
+    flanger_settings: FlangerSettings,
+    tremolo_settings: TremoloSettings,
     drive: Drive,
     preamp: Preamp,
     tone: ToneStack,
@@ -304,6 +327,14 @@ impl AmpChain {
             order: ChainOrder::default(),
             comp: Comp::new(),
             comp_settings: CompSettings::default(),
+            chorus: Chorus::new(),
+            phaser: Phaser::new(),
+            flanger: Flanger::new(),
+            tremolo: Tremolo::new(),
+            chorus_settings: ChorusSettings::default(),
+            phaser_settings: PhaserSettings::default(),
+            flanger_settings: FlangerSettings::default(),
+            tremolo_settings: TremoloSettings::default(),
             drive: Drive::new(),
             preamp: Preamp::new(),
             tone: ToneStack::new(),
@@ -361,6 +392,10 @@ impl AmpChain {
         self.gate.set_sample_rate(sample_rate);
         self.drive.configure(self.oversampled_rate());
         self.comp.set_sample_rate(self.rate_in(self.order.zone_of(Pedal::Comp)));
+        self.chorus.set_sample_rate(self.rate_in(self.order.zone_of(Pedal::Chorus)));
+        self.phaser.set_sample_rate(self.rate_in(self.order.zone_of(Pedal::Phaser)));
+        self.flanger.set_sample_rate(self.rate_in(self.order.zone_of(Pedal::Flanger)));
+        self.tremolo.set_sample_rate(self.rate_in(self.order.zone_of(Pedal::Tremolo)));
         self.delay.set_sample_rate(sample_rate);
         self.reverb.set_sample_rate(sample_rate);
 
@@ -510,6 +545,15 @@ impl AmpChain {
     fn reset_stages(&mut self) {
         self.gate.reset();
         self.comp.reset();
+        // As for the delay and the reverb below: a pedal with nothing in it is left alone
+        if !self.chorus.is_idle() {
+            self.chorus.reset();
+        }
+        if !self.flanger.is_idle() {
+            self.flanger.reset();
+        }
+        self.phaser.reset();
+        self.tremolo.reset();
         self.reset_amp_stages();
         self.cabinet.reset();
         self.cab_voicing.reset();
@@ -529,7 +573,12 @@ impl AmpChain {
     /// True when nothing is left to hear of earlier input: no repeats and no reverb tail are
     /// ringing. The amp and the cabinet themselves are silent within milliseconds
     pub fn is_idle(&self) -> bool {
-        self.delay.is_idle() && self.reverb.is_idle()
+        self.delay.is_idle()
+            && self.reverb.is_idle()
+            && self.chorus.is_idle()
+            && self.flanger.is_idle()
+            && self.phaser.is_idle()
+            && self.tremolo.is_idle()
     }
 
     /// Everything between the gate and the cabinet. The effects are not touched: their
@@ -625,6 +674,10 @@ impl AmpChain {
             self.cab_mix.set_target(cab_target, self.cab_fade_steps);
         }
         self.comp_settings = settings.comp;
+        self.chorus_settings = settings.chorus;
+        self.phaser_settings = settings.phaser;
+        self.flanger_settings = settings.flanger;
+        self.tremolo_settings = settings.tremolo;
         self.delay_settings = settings.delay;
         self.reverb_settings = settings.reverb;
 
@@ -784,8 +837,12 @@ impl AmpChain {
             match self.order.front()[index] {
                 Pedal::Comp => self.comp.process_mono(&self.comp_settings, high),
                 Pedal::Drive => self.drive.process(high),
-                // Not built yet, or never in front of the amp
-                Pedal::Chorus | Pedal::Phaser | Pedal::Flanger | Pedal::Tremolo | Pedal::Delay | Pedal::Reverb => {}
+                Pedal::Chorus => self.chorus.process_mono(&self.chorus_settings, high),
+                Pedal::Phaser => self.phaser.process_mono(&self.phaser_settings, high),
+                Pedal::Flanger => self.flanger.process_mono(&self.flanger_settings, high),
+                Pedal::Tremolo => self.tremolo.process_mono(&self.tremolo_settings, high),
+                // Never in front of the amp
+                Pedal::Delay | Pedal::Reverb => {}
             }
         }
         self.preamp.process(high);
@@ -812,8 +869,12 @@ impl AmpChain {
                 Pedal::Comp => self.comp.process_stereo(&self.comp_settings, wide_left, wide_right),
                 Pedal::Delay => self.delay.process(&self.delay_settings, wide_left, wide_right),
                 Pedal::Reverb => self.reverb.process(&self.reverb_settings, wide_left, wide_right),
-                // Not built yet, or never behind the cabinet
-                Pedal::Chorus | Pedal::Phaser | Pedal::Flanger | Pedal::Tremolo | Pedal::Drive => {}
+                Pedal::Chorus => self.chorus.process_stereo(&self.chorus_settings, wide_left, wide_right),
+                Pedal::Phaser => self.phaser.process_stereo(&self.phaser_settings, wide_left, wide_right),
+                Pedal::Flanger => self.flanger.process_stereo(&self.flanger_settings, wide_left, wide_right),
+                Pedal::Tremolo => self.tremolo.process_stereo(&self.tremolo_settings, wide_left, wide_right),
+                // Never behind the cabinet
+                Pedal::Drive => {}
             }
         }
 
@@ -1353,6 +1414,76 @@ mod tests {
                     assert!(ratio < 1.3, "{:?}, pedal on {}: step {} times its own", amp, after.comp.on, ratio);
                 }
             }
+        }
+    }
+
+    /// The four modulation pedals switched on at Depth 7, each by itself and all together
+    fn with_mods(base: AmpSettings) -> Vec<(&'static str, AmpSettings)> {
+        let mut chorus = base;
+        chorus.chorus = ChorusSettings { on: true, depth: 0.7, ..base.chorus };
+        let mut phaser = base;
+        phaser.phaser = PhaserSettings { on: true, depth: 0.7, ..base.phaser };
+        let mut flanger = base;
+        flanger.flanger = FlangerSettings { on: true, depth: 0.7, ..base.flanger };
+        let mut tremolo = base;
+        tremolo.tremolo = TremoloSettings { on: true, depth: 0.7, ..base.tremolo };
+        let all = AmpSettings {
+            chorus: chorus.chorus,
+            phaser: phaser.phaser,
+            flanger: flanger.flanger,
+            tremolo: tremolo.tremolo,
+            ..base
+        };
+        vec![("chorus", chorus), ("phaser", phaser), ("flanger", flanger), ("tremolo", tremolo), ("all four", all)]
+    }
+
+    #[test]
+    fn test_modulation_pedals_are_heard_add_no_delay_and_do_not_depend_on_block_size() {
+        let input = power_chords(SAMPLE_RATE, 0.5);
+        for amp in [Amp::Klar, Amp::Torden] {
+            let plain = with_amp(amp, 0.5);
+            let (dry_left, _) = run_stereo(&plain, &input, SAMPLE_RATE);
+            for (name, settings) in with_mods(plain) {
+                let (left, right) = run_stereo(&settings, &input, SAMPLE_RATE);
+                let changed = left.iter().zip(&dry_left).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+                assert!(changed > 0.01, "{amp:?} with {name}: nothing is heard of it");
+                assert!(left.iter().chain(&right).all(|sample| sample.is_finite() && sample.abs() <= 1.0));
+
+                // The phaser stands in front of the amp, where it has one channel; the others
+                // behind the cabinet, where all but the tremolo make the two sides differ
+                let wide = left != right;
+                assert_eq!(wide, name != "phaser" && name != "tremolo", "{amp:?} with {name}");
+
+                // No later; the phaser turns the phase, which can bring the first half of the
+                // peak a sample forward
+                assert!(latency_samples_with(&settings, SAMPLE_RATE) <= latency_samples_with(&plain, SAMPLE_RATE), "{name}");
+
+                let reference = run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, input.len());
+                for block in [1, 7, 33, 64, 480] {
+                    let output = run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, block);
+                    assert!(output == reference, "{amp:?} with {name} in blocks of {block}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_modulation_pedals_switch_without_a_click_and_ring_out() {
+        let at = 300 * BLOCK;
+        let input = sine(220.0, HELD_NOTE, SAMPLE_RATE, 48_000);
+        let off = with_amp(Amp::Klar, 0.5);
+        for (name, on) in with_mods(off) {
+            for (before, after) in [(&off, &on), (&on, &off)] {
+                let ratio = step_ratio(&run_change(before, after, &input, at), at);
+                assert!(ratio < 1.3, "{name}, on {}: step {} times its own", after != &off, ratio);
+            }
+
+            // Once the guitar stops and the pedal has nothing left in it, the chain is idle
+            let mut chain = new_chain(SAMPLE_RATE);
+            run_stereo_blocks(&mut chain, &on, &input[..24_000], BLOCK);
+            assert!(name == "phaser" || name == "tremolo" || !chain.is_idle(), "{name} has no tail");
+            run_stereo_blocks(&mut chain, &on, &vec![0.0; 48_000], BLOCK);
+            assert!(chain.is_idle(), "{name} never falls idle");
         }
     }
 

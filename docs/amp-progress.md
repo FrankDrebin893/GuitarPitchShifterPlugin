@@ -33,7 +33,7 @@ Decided with Rasmus on 2026-10-11:
 | M1 Clean level | done 2026-10-11 |
 | M3 Compressor (`order.rs` with a constant order, `comp.rs`, first slim pedal) | sound done 2026-10-11: `comp.rs` in the chain, `comp_on`, `comp_sustain`, `comp_level`. No pedal on the board yet: the editor waits for the mock |
 | M2 Board mock in the standalone (feature `board_mock`); needs Rasmus's yes before M3's editor | built 2026-10-11, waits for Rasmus |
-| M4 Mods (`mods/`, four slim pedals, `mods_report`) | |
+| M4 Mods (`mods/`, four slim pedals, `mods_report`) | sound done 2026-10-11: in the chain with their twelve parameters. No pedals on the board yet |
 | M5 Order (`chain-order` persisted, re-route with a fade, dragging, order in presets) | |
 | M6 New presets, docs | |
 
@@ -146,6 +146,26 @@ clip from -18 on). A held note in Klar at Gain 5: -77 / -70 / -61 / -20 / -12 dB
   for the 20 ms its power stage takes to give way (the test allows 2.0)
 - Sustain 10 raises hiss by 20 dB when the gate is off; behind the cabinet the pedal is not
   calibrated (levels differ there): to measure once it can be moved
+
+### M4 so far
+
+- `mods/` (by a subagent, merged): chorus (one voice per side, 7 to 12 ms, 0.1 to 6 Hz),
+  flanger (0.5 to 6 ms, feedback 0.5, 0.05 to 5 Hz), phaser (four all-pass stages, 200 Hz to
+  1.6 kHz, feedback 0.25, 0.1 to 8 Hz), tremolo (sine, 0.5 to 12 Hz). Rate and Depth each.
+  Behind the cabinet the right side runs a quarter turn ahead, except in the tremolo.
+  `mods_report`, `render_mods`
+- In the chain at their default places: phaser in front of the amp, chorus, flanger and
+  tremolo behind the cabinet in front of the delay. Parameters `chorus_on`, `chorus_rate`,
+  `chorus_depth` and likewise `phaser_`, `flanger_`, `trem_`. Off, every render of
+  `fingerprint_report` is the same as after M1. Loading a preset switches them off
+- Cost per host sample at 48 kHz: behind the cabinet 19 / 23 / 30 / 4 ns (chorus, flanger,
+  phaser, tremolo); in front of the amp about 46 / 54 / 64 / 15 ns. All four in front would
+  add about 0.9 % of a core to the chain's 2.0 %
+- Not heard, and not measured through the amp: the phaser lifts the signal by up to 4.8 dB
+  between its notches (make-up for the 50/50 mix), also into a high-gain amp; its mono sum
+  is about 2 LU under one side; at Depth 0 it is 1.5 LU under off
+- A reset pedal that is on fades in over 10 ms; `set_sample_rate` resets a pedal, which is
+  what M5 will do to one that changes sides
 
 ## How to resume (round 1)
 
