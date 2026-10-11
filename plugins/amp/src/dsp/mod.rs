@@ -1,5 +1,6 @@
 pub mod filters;
 pub mod oversample;
+pub mod pair;
 pub mod resample;
 pub mod shaper;
 

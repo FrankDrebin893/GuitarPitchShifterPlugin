@@ -1,6 +1,7 @@
 use super::model::{AmpModel, StageModel, MAX_STAGES};
 use crate::dsp::filters::{Biquad, BiquadCoeffs, OnePoleHp, OnePoleLp, ANTI_DENORMAL};
-use crate::dsp::shaper::{asym_clip, AsymClipper, FineClipper};
+use crate::dsp::pair::Pair;
+use crate::dsp::shaper::{asym_clip, asym_clip_pair, AsymClipper, FineClipper};
 use crate::dsp::{curve, db_to_gain, smoothing_coeff, Ramp};
 
 // Flat up to the corner
@@ -104,23 +105,64 @@ impl Stage {
         plain + self.fine_share.next() * (fine - plain)
     }
 
-    fn process(&mut self, input: f32) -> f32 {
+    /// What goes into the clipping for one sample, without the operating point, and the
+    /// operating point
+    #[inline(always)]
+    fn drive(&mut self, input: f32) -> (f32, f32) {
         let driven = self.coupling.process(input) * self.gain.next();
 
         // Where the samples before this one left the operating point. Not waiting for this
         // sample lets the processor work it out alongside the clipping, which is what the
         // stages cost most
         let bias = self.bias - self.bias_shift * self.overdrive / (1.0 + self.overdrive);
-        let clipped = self.clip(driven + bias) - asym_clip(bias, self.headroom[0], self.headroom[1]);
 
         // Peaks past the top of the curve charge the coupling capacitor, which pulls the
         // operating point down until it has drained again
         let excess = (driven - self.headroom[0]).max(0.0);
         let coeff = if excess > self.overdrive { self.attack } else { self.release };
         self.overdrive += coeff * (excess - self.overdrive) + ANTI_DENORMAL;
+        (driven, bias)
+    }
 
+    /// One sample. `process` does two at a time
+    fn process_sample(&mut self, input: f32) -> f32 {
+        let (driven, bias) = self.drive(input);
+        let clipped = self.clip(driven + bias) - asym_clip(bias, self.headroom[0], self.headroom[1]);
         // A gain stage inverts, so the next one clips the other half harder
         -self.lowpass.process(clipped)
+    }
+
+    /// The stage over a block: what `process_sample` gives for every sample of it, to the
+    /// bit, in less time. Two samples are worked on at once, so that their divisions and
+    /// square roots, which is much of what a stage costs, go to the processor in pairs
+    fn process(&mut self, block: &mut [f32]) {
+        let mut pairs = block.chunks_exact_mut(2);
+        for pair in &mut pairs {
+            let share = (self.fine_share.value(), self.fine_share.target());
+            let finer = share == (1.0, 1.0);
+            if !finer && share != (0.0, 0.0) {
+                // One clipper is taking over from the other
+                pair[0] = self.process_sample(pair[0]);
+                pair[1] = self.process_sample(pair[1]);
+                continue;
+            }
+
+            let (first, first_bias) = self.drive(pair[0]);
+            let (second, second_bias) = self.drive(pair[1]);
+            let rest = asym_clip_pair([first_bias, second_bias], self.headroom[0], self.headroom[1]);
+            let inputs = [first + first_bias, second + second_bias];
+            let clipped = if finer {
+                [self.fine.process(inputs[0]), self.fine.process(inputs[1])]
+            } else {
+                let clipped = self.clipper.process_pair(Pair::new(inputs[0] as f64, inputs[1] as f64));
+                [clipped.first() as f32, clipped.second() as f32]
+            };
+            pair[0] = -self.lowpass.process(clipped[0] - rest[0]);
+            pair[1] = -self.lowpass.process(clipped[1] - rest[1]);
+        }
+        for sample in pairs.into_remainder() {
+            *sample = self.process_sample(*sample);
+        }
     }
 }
 
@@ -231,9 +273,7 @@ impl Preamp {
             *sample = tight + self.bright.process(tight) * self.bright_gain.next();
         }
         for stage in &mut self.stages[..self.stage_count] {
-            for sample in block.iter_mut() {
-                *sample = stage.process(*sample);
-            }
+            stage.process(block);
         }
         for sample in block.iter_mut() {
             *sample = self.lowcut.process(self.fizz.process(*sample as f64)) as f32 * self.level.next();
@@ -394,6 +434,33 @@ mod tests {
             let loudest = levels.iter().cloned().fold(f32::MIN, f32::max);
             let quietest = levels.iter().cloned().fold(f32::MAX, f32::min);
             assert!(loudest - quietest < 9.0, "{:?} levels: {:?}", amp, levels);
+        }
+    }
+
+    #[test]
+    fn test_a_block_is_what_its_samples_give_one_by_one() {
+        // Chords, then silence, with the drive pedal switched on and off on the way: the
+        // stages work on two samples at a time where they can
+        let mut input = crate::test_util::power_chords(SAMPLE_RATE, 0.25);
+        input.iter_mut().for_each(|sample| *sample *= 4.0);
+        input.extend([0.0; 4801]);
+        for amp in Amp::ALL {
+            let run_in = |piece: usize| {
+                let mut preamp = Preamp::new();
+                preamp.configure(amp.model(), SAMPLE_RATE);
+                preamp.reset();
+                preamp.set_gain(amp.model(), 0.8, 0);
+                let mut output = input.clone();
+                for (index, third) in output.chunks_mut(input.len() / 3 + 1).enumerate() {
+                    preamp.set_driven(index == 1, 1920);
+                    third.chunks_mut(piece).for_each(|piece| preamp.process(piece));
+                }
+                output
+            };
+            let one_by_one = run_in(1);
+            assert!(one_by_one.iter().all(|sample| sample.is_finite()));
+            assert!(run_in(128) == one_by_one, "{amp:?} in blocks of 128");
+            assert!(run_in(37) == one_by_one, "{amp:?} in blocks of 37");
         }
     }
 }

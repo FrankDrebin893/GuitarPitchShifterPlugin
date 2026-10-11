@@ -1,4 +1,5 @@
 use crate::dsp::filters::{OnePoleHp, ANTI_DENORMAL};
+use crate::dsp::pair::Pair;
 use crate::dsp::shaper::AsymClipper;
 use crate::dsp::{curve, db_to_gain, lerp, Ramp};
 
@@ -129,16 +130,42 @@ impl Drive {
         if self.is_idle() {
             return;
         }
-        for sample in block.iter_mut() {
+        // Two samples at a time, for the clipper: see `AsymClipper::process_pair`
+        let mut pairs = block.chunks_exact_mut(2);
+        for pair in &mut pairs {
+            let (first_dry, second_dry) = (pair[0], pair[1]);
+            let first = (self.body.process(first_dry) * self.gain.next()) as f64;
+            let second = (self.body.process(second_dry) * self.gain.next()) as f64;
+            let clipped = self.clip_pair(Pair::new(first, second));
+            pair[0] = self.finish(first_dry, clipped.first() as f32);
+            pair[1] = self.finish(second_dry, clipped.second() as f32);
+        }
+        for sample in pairs.into_remainder() {
             let dry = *sample;
             let clipped = self.clipper.process(self.body.process(dry) * self.gain.next());
-            let coeff = self.tone_coeff.next();
-            self.tone_state[0] += coeff * (dry + clipped - self.tone_state[0]) + ANTI_DENORMAL;
-            self.tone_state[1] += coeff * (self.tone_state[0] - self.tone_state[1]) + ANTI_DENORMAL;
-            let wet = self.tone_state[1] * self.level.next();
+            *sample = self.finish(dry, clipped);
+        }
+    }
 
-            let mix = self.mix.next();
-            *sample = if mix >= 1.0 { wet } else { dry + mix * (wet - dry) };
+    /// Kept out of the loop in `process`: compiled into it, the same work takes half as
+    /// long again (`stage_report`: 72 against 48 ns per sample at 48 kHz)
+    #[inline(never)]
+    fn clip_pair(&mut self, driven: Pair) -> Pair {
+        self.clipper.process_pair(driven)
+    }
+
+    /// Everything behind the clipping, for one sample
+    fn finish(&mut self, dry: f32, clipped: f32) -> f32 {
+        let coeff = self.tone_coeff.next();
+        self.tone_state[0] += coeff * (dry + clipped - self.tone_state[0]) + ANTI_DENORMAL;
+        self.tone_state[1] += coeff * (self.tone_state[0] - self.tone_state[1]) + ANTI_DENORMAL;
+        let wet = self.tone_state[1] * self.level.next();
+
+        let mix = self.mix.next();
+        if mix >= 1.0 {
+            wet
+        } else {
+            dry + mix * (wet - dry)
         }
     }
 }
@@ -272,5 +299,21 @@ pub mod tests {
                 assert!(peak(&output) <= limit, "Peak {} at {} Hz", peak(&output), sample_rate);
             }
         }
+    }
+
+    #[test]
+    fn test_a_block_is_what_its_samples_give_one_by_one() {
+        let mut input = power_chords(SAMPLE_RATE, 0.25);
+        input.extend([0.0; 4801]);
+        let run_in = |piece: usize| {
+            let mut pedal = new_drive(SAMPLE_RATE, 0.8, 0.6, 0.7);
+            let mut output = input.clone();
+            output.chunks_mut(piece).for_each(|piece| pedal.process(piece));
+            output
+        };
+        let one_by_one = run_in(1);
+        assert!(one_by_one.iter().all(|sample| sample.is_finite()));
+        assert!(run_in(128) == one_by_one);
+        assert!(run_in(37) == one_by_one);
     }
 }

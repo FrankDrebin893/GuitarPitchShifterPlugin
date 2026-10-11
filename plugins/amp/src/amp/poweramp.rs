@@ -104,25 +104,38 @@ impl PowerAmp {
     }
 
     pub fn process(&mut self, block: &mut [f32]) {
-        // Off, and faded out: the stage as it is without the pedal, to the bit
+        // Off, and faded out: the stage as it is without the pedal, to the bit. The two
+        // have a loop each, so that the stage without the pedal does not wait for what
+        // only the pedal needs: every sample's headroom waits for the sample before
         let pushed = self.driven_sag > 0.0 && (self.driven_share.value() != 0.0 || self.driven_share.target() != 0.0);
-        for sample in block.iter_mut() {
-            let input = self.dc.process(*sample) as f64;
-            let shaped = self.presence.process(self.resonance.process(input)) as f32 * self.drive.next();
-
-            let mut headroom = 1.0 - self.sag * self.load;
-            if pushed {
-                let over = (self.load - self.driven_sag_from).max(0.0);
-                headroom = (headroom - self.driven_share.next() * self.driven_sag * over).max(MIN_HEADROOM);
+        if pushed {
+            for sample in block.iter_mut() {
+                *sample = self.process_sample(*sample, true);
             }
-            let output = headroom * self.clipper.process(shaped / headroom);
-
-            let level = output.abs();
-            let coeff = if level > self.load { self.attack } else { self.release };
-            self.load += coeff * (level - self.load) + ANTI_DENORMAL;
-
-            *sample = output * self.volume.next();
+        } else {
+            for sample in block.iter_mut() {
+                *sample = self.process_sample(*sample, false);
+            }
         }
+    }
+
+    #[inline(always)]
+    fn process_sample(&mut self, sample: f32, pushed: bool) -> f32 {
+        let input = self.dc.process(sample) as f64;
+        let shaped = self.presence.process(self.resonance.process(input)) as f32 * self.drive.next();
+
+        let mut headroom = 1.0 - self.sag * self.load;
+        if pushed {
+            let over = (self.load - self.driven_sag_from).max(0.0);
+            headroom = (headroom - self.driven_share.next() * self.driven_sag * over).max(MIN_HEADROOM);
+        }
+        let output = headroom * self.clipper.process(shaped / headroom);
+
+        let level = output.abs();
+        let coeff = if level > self.load { self.attack } else { self.release };
+        self.load += coeff * (level - self.load) + ANTI_DENORMAL;
+
+        output * self.volume.next()
     }
 }
 

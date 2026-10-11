@@ -1,3 +1,5 @@
+use super::pair::Pair;
+
 // Below this input step the antialiased shapers fall back to the plain curve, because the
 // difference quotient would divide rounding noise by almost nothing
 const MIN_STEP: f64 = 1e-6;
@@ -10,6 +12,16 @@ const POWER_CLIP_CORNER: f64 = 1.5;
 
 // Level where the output clip starts to round off peaks
 pub const OUTPUT_CLIP_KNEE: f32 = 0.75;
+
+/// `asym_clip` of two inputs at once: see `AsymClipper::process_pair`
+#[inline(always)]
+pub fn asym_clip_pair(inputs: [f32; 2], positive: f32, negative: f32) -> [f32; 2] {
+    let limits = |x: f32| if x >= 0.0 { positive } else { negative } as f64;
+    let inputs_wide = Pair::new(inputs[0] as f64, inputs[1] as f64);
+    let ratios = inputs_wide / Pair::new(limits(inputs[0]), limits(inputs[1]));
+    let outputs = inputs_wide / (Pair::both(1.0) + ratios * ratios).sqrt();
+    [outputs.first() as f32, outputs.second() as f32]
+}
 
 /// Gain stage curve: unit slope through zero, then bends towards `positive` above and
 /// `-negative` below. Smooth everywhere, also where the two halves meet
@@ -74,6 +86,40 @@ impl AsymLimits {
         // The inverse hyperbolic sine of `ratio`, with the root that is already there
         let arsinh = (ratio.abs() + root).ln().copysign(ratio);
         self.square[side] * (0.5 * (x * root + limit * arsinh) - x)
+    }
+
+    /// The limit on the side of each of two inputs, one over it, and its square
+    #[inline(always)]
+    fn sides(&self, inputs: Pair) -> (Pair, Pair, Pair) {
+        let (first, second) = ((inputs.first() < 0.0) as usize, (inputs.second() < 0.0) as usize);
+        let limits = [self.positive, self.negative];
+        (
+            Pair::new(limits[first], limits[second]),
+            Pair::new(self.inverse[first], self.inverse[second]),
+            Pair::new(self.square[first], self.square[second]),
+        )
+    }
+
+    /// `integral` of two inputs at once
+    #[inline(always)]
+    fn integral_pair(&self, inputs: Pair) -> Pair {
+        let (_, inverses, squares) = self.sides(inputs);
+        let ratios = inputs * inverses;
+        squares * ((Pair::both(1.0) + ratios * ratios).sqrt() - Pair::both(1.0))
+    }
+
+    /// `second_integral` of two inputs at once
+    #[inline(always)]
+    fn second_integral_pair(&self, inputs: Pair) -> Pair {
+        let (limits, inverses, squares) = self.sides(inputs);
+        let ratios = inputs * inverses;
+        let roots = (Pair::both(1.0) + ratios * ratios).sqrt();
+        let logarithms = ratios.abs() + roots;
+        let arsinhs = Pair::new(
+            logarithms.first().ln().copysign(ratios.first()),
+            logarithms.second().ln().copysign(ratios.second()),
+        );
+        squares * (Pair::both(0.5) * (inputs * roots + limits * arsinhs) - inputs)
     }
 }
 
@@ -213,6 +259,45 @@ impl AsymClipper {
         output
     }
 
+    /// Two samples at once: what two calls of `process` give, to the bit, in less time.
+    /// Much of what the clipper costs is square roots and divisions. Those of a sample do
+    /// not wait for the sample before, and the processor does two of either in the time
+    /// of one when they are handed to it as a pair. Where the input hardly moves, as in
+    /// silence, the two are done one by one: there the clipper works another way
+    #[inline(always)]
+    pub fn process_pair(&mut self, inputs: Pair) -> Pair {
+        // The input one and two samples earlier
+        let before = Pair::new(self.earlier_input, self.last_input);
+        let last_inputs = inputs.after(before);
+        let steps = inputs - last_inputs;
+        let spans = inputs - before;
+        let min_step = if self.second_order { MIN_STEP_2 } else { MIN_STEP };
+        let moving = |step: f64| step.abs() > min_step;
+        let all_moving = moving(steps.first())
+            && moving(steps.second())
+            && (!self.second_order || (moving(spans.first()) && moving(spans.second())));
+        if !all_moving {
+            return Pair::new(self.step(inputs.first()), self.step(inputs.second()));
+        }
+
+        let outputs = if self.second_order {
+            let seconds = self.limits.second_integral_pair(inputs);
+            let quotients = (seconds - seconds.after(Pair::both(self.last_integral))) / steps;
+            let last_quotients = quotients.after(Pair::both(self.last_quotient));
+            self.last_integral = seconds.second();
+            self.last_quotient = quotients.second();
+            self.earlier_input = inputs.first();
+            Pair::both(2.0) * (quotients - last_quotients) / spans
+        } else {
+            let integrals = self.limits.integral_pair(inputs);
+            let last_integrals = integrals.after(Pair::both(self.last_integral));
+            self.last_integral = integrals.second();
+            (integrals - last_integrals) / steps
+        };
+        self.last_input = inputs.second();
+        outputs
+    }
+
     fn first_order(&mut self, input: f64) -> f64 {
         let integral = self.limits.integral(input);
         let step = input - self.last_input;
@@ -305,8 +390,9 @@ impl FineClipper {
 
     pub fn process(&mut self, input: f32) -> f32 {
         let input = input as f64;
-        let halfway = self.clipper.step(0.5 * (self.clipper.last_input + input));
-        let there = self.clipper.step(input);
+        // The two steps as a pair: see `AsymClipper::process_pair`
+        let steps = self.clipper.process_pair(Pair::new(0.5 * (self.clipper.last_input + input), input));
+        let (halfway, there) = (steps.first(), steps.second());
         let output = 0.125 * (there + 3.0 * (halfway + self.history[1]) + self.history[0]);
         self.history = [halfway, there];
         output as f32
@@ -594,6 +680,59 @@ mod tests {
             } else if index > 100 {
                 taking_over.process(sample);
             }
+        }
+    }
+
+    /// Loud, quiet, standing still and turning around on the spot, around a stage's
+    /// operating point
+    fn signal_with_stillness() -> Vec<f32> {
+        let mut signal = sine(4186.0, 60.0, 176_400.0, 600);
+        signal.extend(sine(220.0, 0.3, 176_400.0, 600));
+        signal.extend(sine(1000.0, 3e-6, 176_400.0, 300));
+        signal.extend([0.0; 7]);
+        signal.extend([0.5, 0.5, 0.5, -0.2, 0.5, -0.2, 0.5, 0.5 + 4e-6, 0.5, 0.5 + 2e-5, 0.5, 1e-7, 0.0, -1e-7]);
+        signal.extend(sine(82.0, 8.0, 176_400.0, 601));
+        signal.iter().map(|sample| sample + 0.1).collect()
+    }
+
+    #[test]
+    fn test_clippers_give_two_samples_at_once_what_they_give_one_by_one() {
+        let signal = signal_with_stillness();
+        for second_order in [false, true] {
+            // Pairs that start on an even sample and pairs that start on an odd one
+            for lead in [0, 1] {
+                let mut single = AsymClipper::new();
+                single.set_limits(1.0, 1.4);
+                single.set_second_order(second_order);
+                single.reset(0.1);
+                let mut paired = single;
+                let expected: Vec<f32> = signal.iter().map(|&sample| single.process(sample)).collect();
+                let mut output: Vec<f32> = signal[..lead].iter().map(|&sample| paired.process(sample)).collect();
+                for pair in signal[lead..].chunks_exact(2) {
+                    let clipped = paired.process_pair(Pair::new(pair[0] as f64, pair[1] as f64));
+                    output.extend([clipped.first() as f32, clipped.second() as f32]);
+                }
+                assert!(output.iter().all(|sample| sample.is_finite()));
+                assert_eq!(output[..], expected[..output.len()], "Second order: {second_order}, lead {lead}");
+            }
+        }
+
+        // The finer one takes its two steps as a pair: the same as taking them one by one
+        let mut fine = fine_clipper(1.0, 1.4, 0.1);
+        let mut steps = second_order_clipper(1.0, 1.4, 0.1);
+        let mut history = [asym_curve(0.1f32 as f64, 1.0f32 as f64, 1.4f32 as f64); 2];
+        for &sample in &signal {
+            let input = sample as f64;
+            let halfway = steps.step(0.5 * (steps.last_input + input));
+            let there = steps.step(input);
+            let expected = 0.125 * (there + 3.0 * (halfway + history[1]) + history[0]);
+            history = [halfway, there];
+            assert_eq!(fine.process(sample), expected as f32);
+        }
+
+        for pair in signal.chunks_exact(2) {
+            let expected = [asym_clip(pair[0], 1.2, 0.9), asym_clip(pair[1], 1.2, 0.9)];
+            assert_eq!(asym_clip_pair([pair[0], pair[1]], 1.2, 0.9), expected);
         }
     }
 }
