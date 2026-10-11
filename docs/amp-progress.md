@@ -48,8 +48,11 @@ most useful next step by far, and it is Rasmus's. If he has listened and left no
 come first.
 
 Work that needs neither:
-- Backlog 5 (mic choices per cabinet: needs room on the Cab pedal, which is full), 8 (shared
-  `suite_common::dsp`: touches the drums)
+- Backlog 5 (mic choices per cabinet) needs room on the Cab pedal, which is full: it goes
+  with the layout decision above
+- Backlog 8 (shared `suite_common::dsp`) is set aside: the drums use f32 state-variable and
+  one-pole filters, the amp f64 biquads, so no filter is in use by both. Moving code would
+  put the drums at risk for nothing. Take it up when a third plugin needs the amp's filters
 - A logarithm of our own in the second-order clippers would save about 1.7 us per block but
   changes the last bits of the output: needs a decision
 - The report tests do not pin their thread, so timings on this machine come out in two
