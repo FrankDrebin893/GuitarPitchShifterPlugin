@@ -3,14 +3,14 @@
 Free audio plugins for guitar and drums, each drawn as a stompbox. VST3 and CLAP, for Windows,
 macOS and Linux. HØJT is Danish for loud, and for high.
 
-**[The page, with sound examples and downloads](https://frankdrebin893.github.io/hojt-audio/)** ·
+**[The page, with sound examples and downloads](https://hojte.net/hojt-audio/)** ·
 **[Latest release](https://github.com/FrankDrebin893/hojt-audio/releases/latest)**
 
-[![The Guitar Amp](site/img/guitar-amp.png)](https://frankdrebin893.github.io/hojt-audio/#guitar-amp)
+[![The Guitar Amp](site/img/guitar-amp.png)](https://hojte.net/hojt-audio/#guitar-amp)
 
 | | |
 |---|---|
-| [![The Drum Synth](site/img/drum-synth.png)](https://frankdrebin893.github.io/hojt-audio/#drum-synth) | [![The Pitch Shifter](site/img/pitch-shifter.png)](https://frankdrebin893.github.io/hojt-audio/#pitch-shifter) |
+| [![The Drum Synth](site/img/drum-synth.png)](https://hojte.net/hojt-audio/#drum-synth) | [![The Pitch Shifter](site/img/pitch-shifter.png)](https://hojte.net/hojt-audio/#pitch-shifter) |
 
 ## The plugins
 
@@ -30,7 +30,7 @@ high up the neck.
 
 ## Install
 
-Download the zip for your system from the [page](https://frankdrebin893.github.io/hojt-audio/)
+Download the zip for your system from the [page](https://hojte.net/hojt-audio/)
 or the [latest release](https://github.com/FrankDrebin893/hojt-audio/releases/latest), and copy
 the `.vst3` or the `.clap` to its folder:
 

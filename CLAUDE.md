@@ -502,7 +502,7 @@ name, `NAME`, `VST3_CLASS_ID` and `CLAP_ID`, and do not commit that.
 
 ## Releasing
 
-The page is https://frankdrebin893.github.io/hojt-audio/ and the downloads are GitHub releases.
+The page is https://hojte.net/hojt-audio/ and the downloads are GitHub releases.
 The code is GPL-3.0-or-later, which the VST3 bindings require of a VST3 binary that is handed
 out; the HØJT name and logo are kept out of it (`NOTICE.md`).
 
