@@ -21,6 +21,31 @@ pub const PAINT_ORANGE: Color32 = Color32::from_rgb(222, 86, 30);
 pub const PAINT_TEAL: Color32 = Color32::from_rgb(29, 130, 130);
 pub const PAINT_OXBLOOD: Color32 = Color32::from_rgb(124, 28, 32);
 
+/// Paint of the mini pedals of a rig, one each. The head keeps the plugin's paint
+pub const PAINT_GRANITE: Color32 = Color32::from_rgb(92, 94, 96);
+pub const PAINT_MOSS: Color32 = Color32::from_rgb(104, 120, 20);
+pub const PAINT_OCHRE: Color32 = Color32::from_rgb(176, 112, 16);
+pub const PAINT_VIOLET: Color32 = Color32::from_rgb(84, 48, 140);
+pub const PAINT_BARK: Color32 = Color32::from_rgb(116, 80, 44);
+pub const PAINT_SEA: Color32 = Color32::from_rgb(32, 72, 172);
+pub const PAINT_AURORA: Color32 = Color32::from_rgb(24, 128, 64);
+pub const PAINT_HEATHER: Color32 = Color32::from_rgb(148, 48, 104);
+pub const PAINT_PETROL: Color32 = Color32::from_rgb(14, 100, 108);
+pub const PAINT_FJORD: Color32 = Color32::from_rgb(40, 56, 84);
+/// Every mini pedal paint. A new one must pass the tests below
+pub const PEDAL_PAINTS: [Color32; 10] = [
+    PAINT_GRANITE,
+    PAINT_MOSS,
+    PAINT_OCHRE,
+    PAINT_VIOLET,
+    PAINT_BARK,
+    PAINT_SEA,
+    PAINT_AURORA,
+    PAINT_HEATHER,
+    PAINT_PETROL,
+    PAINT_FJORD,
+];
+
 pub const KNOB_SKIRT: Color32 = Color32::from_rgb(21, 19, 17);
 pub const KNOB_CAP: Color32 = Color32::from_rgb(38, 34, 30);
 pub const KNOB_CAP_TOP: Color32 = Color32::from_rgb(46, 42, 37);
@@ -43,6 +68,17 @@ pub const LED_OFF_DARK: Color32 = Color32::from_rgb(58, 12, 10);
 pub const CABLE: Color32 = Color32::from_rgb(74, 68, 61);
 
 pub const SHADOW: Color32 = Color32::from_black_alpha(80);
+
+/// `from` mixed with `to`: 0 is all `from`, 1 all `to`
+pub fn blend(from: Color32, to: Color32, share: f32) -> Color32 {
+    let channel = |from: u8, to: u8| (from as f32 + (to as f32 - from as f32) * share.clamp(0.0, 1.0)).round() as u8;
+    Color32::from_rgb(channel(from.r(), to.r()), channel(from.g(), to.g()), channel(from.b(), to.b()))
+}
+
+/// A darker tone of `paint` for the second coat of a pedal's art: 0 is the paint, 1 black
+pub fn shade(paint: Color32, depth: f32) -> Color32 {
+    blend(paint, Color32::BLACK, depth)
+}
 
 const DISPLAY: &str = "display";
 const MODEL: &str = "model";
@@ -104,4 +140,51 @@ pub fn spaced_text(
     let rect = anchor.anchor_size(pos, galley.size());
     painter.galley(rect.min, galley, color);
     rect
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Relative luminance of a colour, as contrast ratios are counted
+    fn luminance(color: Color32) -> f32 {
+        let linear = |channel: u8| {
+            let value = channel as f32 / 255.0;
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(color.r()) + 0.7152 * linear(color.g()) + 0.0722 * linear(color.b())
+    }
+
+    fn silk_contrast(paint: Color32) -> f32 {
+        (luminance(SILK) + 0.05) / (luminance(paint) + 0.05)
+    }
+
+    fn distance(a: Color32, b: Color32) -> f32 {
+        let square = |a: u8, b: u8| (a as f32 - b as f32).powi(2);
+        (square(a.r(), b.r()) + square(a.g(), b.g()) + square(a.b(), b.b())).sqrt()
+    }
+
+    #[test]
+    fn test_cream_print_reads_on_every_pedal_paint() {
+        // The orange of the Pitch Shifter is the lightest paint print is known to read on
+        let least = silk_contrast(PAINT_ORANGE);
+        for paint in PEDAL_PAINTS {
+            assert!(silk_contrast(paint) >= least, "{paint:?}: {} under {least}", silk_contrast(paint));
+        }
+    }
+
+    #[test]
+    fn test_pedal_paints_are_clearly_apart() {
+        let mut paints = PEDAL_PAINTS.to_vec();
+        paints.push(PAINT_OXBLOOD);
+        for (i, &a) in paints.iter().enumerate() {
+            for &b in &paints[i + 1..] {
+                assert!(distance(a, b) >= 45.0, "{a:?} and {b:?} are {} apart", distance(a, b));
+            }
+        }
+    }
 }

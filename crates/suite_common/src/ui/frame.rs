@@ -4,6 +4,7 @@ use nih_plug_egui::egui::{
     StrokeKind, Ui, Vec2,
 };
 
+use super::art::{self, Motif};
 use super::theme::*;
 use super::widgets::badge;
 
@@ -81,6 +82,16 @@ pub struct PedalStyle {
     pub band_y: f32,
 }
 
+/// What makes one mini pedal of a rig differ from the next
+#[derive(Clone, Copy)]
+pub struct MiniStyle {
+    /// Printed at the top, in capitals
+    pub title: &'static str,
+    pub paint: Color32,
+    /// Painted under the controls, in darker tones of the paint and a little cream
+    pub motif: Motif,
+}
+
 /// Draw the pedal and run `add_controls` on top of it.
 ///
 /// The closure gets the window's top left corner. Controls are placed relative to it.
@@ -115,25 +126,29 @@ pub fn head(ui: &Ui, rect: Rect, style: &PedalStyle) -> Rect {
     top
 }
 
-/// Small pedal of a rig, filling `rect`: an enclosure with its title printed at the top.
-/// No band, model number or logo: the head carries those. Returns the top face.
-pub fn mini_pedal(ui: &Ui, rect: Rect, paint: Color32, title: &str) -> Rect {
-    titled_box(ui.painter(), rect, paint, title, MINI_TITLE_SIZE)
+/// Small pedal of a rig, filling `rect`: an enclosure in its own paint with its art and
+/// its title printed at the top. No band, model number or logo: the head carries those.
+/// Returns the top face.
+pub fn mini_pedal(ui: &Ui, rect: Rect, style: &MiniStyle) -> Rect {
+    titled_box(ui.painter(), rect, style, MINI_TITLE_SIZE)
 }
 
 /// Mini pedal `SLIM_PEDAL_WIDTH` wide, for two knobs one above the other (`SLIM_KNOBS`).
 /// Its title is a little smaller, so seven letters fit. Returns the top face.
-pub fn slim_pedal(ui: &Ui, rect: Rect, paint: Color32, title: &str) -> Rect {
-    titled_box(ui.painter(), rect, paint, title, SLIM_TITLE_SIZE)
+pub fn slim_pedal(ui: &Ui, rect: Rect, style: &MiniStyle) -> Rect {
+    titled_box(ui.painter(), rect, style, SLIM_TITLE_SIZE)
 }
 
-fn titled_box(painter: &Painter, rect: Rect, paint: Color32, title: &str, title_size: f32) -> Rect {
-    let top = shell(painter, rect, paint, MINI_CORNER_RADIUS, MINI_SCREW_INSET, MINI_SCREW_SCALE);
+fn titled_box(painter: &Painter, rect: Rect, style: &MiniStyle, title_size: f32) -> Rect {
+    let top = painted_box(painter, rect, style.paint, MINI_CORNER_RADIUS);
+    // The art goes under the screws, the title and the controls
+    art::motif(painter, top, style.paint, style.motif);
+    screws(painter, top, MINI_SCREW_INSET, MINI_SCREW_SCALE);
     spaced_text(
         painter,
         Pos2::new(top.center().x, top.top() + MINI_TITLE_Y),
         Align2::CENTER_CENTER,
-        &title.to_uppercase(),
+        &style.title.to_uppercase(),
         display(title_size),
         SILK,
         0.16,
@@ -207,6 +222,13 @@ pub fn enclosure(painter: &Painter, rect: Rect, paint: Color32) -> Rect {
 }
 
 fn shell(painter: &Painter, rect: Rect, paint: Color32, radius: f32, screw_inset: f32, screw_scale: f32) -> Rect {
+    let top = painted_box(painter, rect, paint, radius);
+    screws(painter, top, screw_inset, screw_scale);
+    top
+}
+
+/// The box without its screws. Returns the top face
+fn painted_box(painter: &Painter, rect: Rect, paint: Color32, radius: f32) -> Rect {
     // The darker rectangle shows below the paint as the lower edge of the box
     painter.rect_filled(rect, radius, paint.gamma_multiply(0.72));
     let top = Rect::from_min_max(rect.min, rect.max - vec2(0.0, EDGE_HEIGHT));
@@ -217,7 +239,11 @@ fn shell(painter: &Painter, rect: Rect, paint: Color32, radius: f32, screw_inset
         Stroke::new(1.5, Color32::from_white_alpha(45)),
         StrokeKind::Inside,
     );
+    top
+}
 
+/// A screw in each corner of the top face `top`
+fn screws(painter: &Painter, top: Rect, screw_inset: f32, screw_scale: f32) {
     for (corner, slot_angle) in [
         (top.left_top() + vec2(screw_inset, screw_inset), 35.0_f32),
         (top.right_top() + vec2(-screw_inset, screw_inset), -50.0),
@@ -226,7 +252,6 @@ fn shell(painter: &Painter, rect: Rect, paint: Color32, radius: f32, screw_inset
     ] {
         screw(painter, corner, slot_angle.to_radians(), screw_scale);
     }
-    top
 }
 
 /// Everything printed on the top face `top`: jack captions, name band, model number, logo

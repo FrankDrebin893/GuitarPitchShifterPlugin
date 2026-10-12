@@ -1,11 +1,11 @@
 use nih_plug::prelude::*;
-use nih_plug_egui::egui::{vec2, Rect, Ui, Vec2};
+use nih_plug_egui::egui::{vec2, Color32, Rect, Ui, Vec2};
 use nih_plug_egui::{create_egui_editor, EguiState};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, PoisonError};
 use suite_common::ui::{
-    self, param_knob, param_switch, rig_led, signal_lamp, silk_label, small_footswitch, stepper, tuner_display,
-    Ornament, PedalStyle, Step, BENCH_MARGIN, SLIM_KNOBS, SLIM_KNOB_RADIUS, SLIM_LED, SLIM_SWITCH,
+    self, param_knob, param_switch, rig_led, signal_lamp, silk_label, small_footswitch, stepper, theme,
+    tuner_display, MiniStyle, Motif, Ornament, PedalStyle, Step, BENCH_MARGIN, SLIM_KNOBS, SLIM_KNOB_RADIUS, SLIM_LED, SLIM_SWITCH,
 };
 
 use crate::cab_stage::{CabLoader, CabStatus};
@@ -102,8 +102,13 @@ const CAB_NAME_CHARS: usize = 10;
 pub(crate) const GATE_SLOT: usize = 0;
 const GATE_LAMP: Vec2 = vec2(60.0, 164.0);
 
-/// One pedal of the board: its title, its switch and up to three knobs with their captions
-type Pedal<'a> = (&'a str, &'a BoolParam, &'a [(&'a FloatParam, &'a str)]);
+/// One pedal of the board: its look, its switch and up to three knobs with their captions
+type Pedal<'a> = (MiniStyle, &'a BoolParam, &'a [(&'a FloatParam, &'a str)]);
+
+/// Title, paint and art of a pedal: each has a paint and a piece of northern weather of its own
+const fn look(title: &'static str, paint: Color32, motif: Motif) -> MiniStyle {
+    MiniStyle { title, paint, motif }
+}
 
 /// What the pedals of the board are drawn from
 pub(crate) struct Pedals<'a> {
@@ -126,31 +131,31 @@ impl Pedals<'_> {
         let (params, setter) = (self.params, self.setter);
         let pedals: [Pedal; PEDAL_SLOTS] = [
             (
-                "Gate",
+                look("Gate", theme::PAINT_GRANITE, Motif::Sluice),
                 &params.gate_on,
                 &[(&params.in_gain, "Input"), (&params.gate_thresh, "Thresh"), (&params.gate_release, "Release")],
             ),
             (
-                "Drive",
+                look("Drive", theme::PAINT_OCHRE, Motif::Bonfire),
                 &params.drive_on,
                 &[(&params.drive_gain, "Drive"), (&params.drive_tone, "Tone"), (&params.drive_level, "Level")],
             ),
-            ("Cab", &params.cab_on, &[(&params.cab_mic, "Mic"), (&params.cab_res, "Res")]),
+            (look("Cab", theme::PAINT_BARK, Motif::Timber), &params.cab_on, &[(&params.cab_mic, "Mic"), (&params.cab_res, "Res")]),
             (
-                "Delay",
+                look("Delay", theme::PAINT_PETROL, Motif::Ridges),
                 &params.delay_on,
                 &[(&params.delay_time, "Time"), (&params.delay_feedback, "Repeat"), (&params.delay_mix, "Mix")],
             ),
-            ("Reverb", &params.reverb_on, &[(&params.reverb_decay, "Decay"), (&params.reverb_mix, "Mix")]),
-            ("Comp", &params.comp_on, &[(&params.comp_sustain, "Sustain"), (&params.comp_level, "Level")]),
-            ("Chorus", &params.chorus_on, &[(&params.chorus_rate, "Rate"), (&params.chorus_depth, "Depth")]),
-            ("Phaser", &params.phaser_on, &[(&params.phaser_rate, "Rate"), (&params.phaser_depth, "Depth")]),
-            ("Flanger", &params.flanger_on, &[(&params.flanger_rate, "Rate"), (&params.flanger_depth, "Depth")]),
-            ("Tremolo", &params.trem_on, &[(&params.trem_rate, "Rate"), (&params.trem_depth, "Depth")]),
+            (look("Reverb", theme::PAINT_FJORD, Motif::Fjord), &params.reverb_on, &[(&params.reverb_decay, "Decay"), (&params.reverb_mix, "Mix")]),
+            (look("Comp", theme::PAINT_MOSS, Motif::Isobars), &params.comp_on, &[(&params.comp_sustain, "Sustain"), (&params.comp_level, "Level")]),
+            (look("Chorus", theme::PAINT_SEA, Motif::Swell), &params.chorus_on, &[(&params.chorus_rate, "Rate"), (&params.chorus_depth, "Depth")]),
+            (look("Phaser", theme::PAINT_VIOLET, Motif::Moons), &params.phaser_on, &[(&params.phaser_rate, "Rate"), (&params.phaser_depth, "Depth")]),
+            (look("Flanger", theme::PAINT_AURORA, Motif::Aurora), &params.flanger_on, &[(&params.flanger_rate, "Rate"), (&params.flanger_depth, "Depth")]),
+            (look("Tremolo", theme::PAINT_HEATHER, Motif::Rain), &params.trem_on, &[(&params.trem_rate, "Rate"), (&params.trem_depth, "Depth")]),
         ];
-        let (title, on, knobs) = pedals[slot];
+        let (style, on, knobs) = pedals[slot];
         if Self::is_slim(slot) {
-            let face = ui::slim_pedal(ui, rect, STYLE.paint, title);
+            let face = ui::slim_pedal(ui, rect, &style);
             let top = face.center_top();
             for (&(param, caption), offset) in knobs.iter().zip(SLIM_KNOBS) {
                 param_knob(ui, setter, param, top + offset, SLIM_KNOB_RADIUS, caption, None);
@@ -158,7 +163,7 @@ impl Pedals<'_> {
             param_switch(ui, setter, on, top + SLIM_SWITCH, top + SLIM_LED);
             return face;
         }
-        let face = ui::mini_pedal(ui, rect, STYLE.paint, title);
+        let face = ui::mini_pedal(ui, rect, &style);
         let top = face.center_top();
 
         let (radius, places) = if knobs.len() > PAIR_KNOBS.len() || slot == CAB_SLOT {

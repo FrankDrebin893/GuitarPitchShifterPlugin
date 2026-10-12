@@ -273,7 +273,7 @@ Work that needs neither:
 | Chain | Fixed order, on/off per component, amp picked with a three-way selector |
 | Presets | Good defaults now. Preset browser on the backlog |
 | Look | Amp head over a pedalboard, one window |
-| Paint | Oxblood red, one colour for head and pedals |
+| Paint | Oxblood red for the head. Since 2026-10-12 each pedal has its own paint and art (northern weather and nature, `suite_common::ui::art`): Gate granite/sluice, Comp moss/isobars, Drive ochre/bonfire, Phaser violet/moons, Cab bark/spruces, Chorus sea blue/swell, Flanger green/northern lights, Tremolo heather/rain, Delay petrol/ridges, Reverb navy/fjord |
 
 No real makers' names, trademarks, graphics or circuit names anywhere: code, comments, docs,
 commit messages.

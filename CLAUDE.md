@@ -50,7 +50,8 @@ xcopy /E /I /Y "target\bundled\HojtGuitarAmp.vst3" "C:\Program Files\Common File
 Every plugin is drawn as a painted stompbox. All of it is vector, drawn with egui's painter in
 `crates/suite_common/src/ui/`; there are no image files.
 
-- `theme.rs` - Colours, the three embedded fonts (`install`), text helpers. One paint colour per plugin
+- `theme.rs` - Colours, the three embedded fonts (`install`), text helpers. One paint colour per plugin,
+  one per mini pedal of a rig (`PEDAL_PAINTS`), and `shade` for darker tones of a paint
 - `widgets.rs` - `param_knob` (fluted knob, name, value on label tape), `footswitch`, `led`,
   `small_footswitch`, `rig_led` and `param_switch` (the switch and LED of a rig, bound to an on/off
   parameter), `stepper` (label tape with a chrome button at each end, for picking one of many),
@@ -60,7 +61,8 @@ Every plugin is drawn as a painted stompbox. All of it is vector, drawn with egu
 - `frame.rs` - `pedal`: enclosure, screws, jack captions, tilted name band, model number, logo.
   A plugin describes itself with a `PedalStyle`. For a window with several enclosures: `rig`
   (the bare bench), `head` (wide enclosure with everything a pedal has printed on it) and
-  `mini_pedal` (small enclosure with only a title)
+  `mini_pedal` (small enclosure with only a title), each mini pedal described by a `MiniStyle`
+- `art.rs` - `Motif`: what is painted on a mini pedal under its controls
 
 Controls are placed at fixed positions relative to the window's top left corner. Knobs: drag up and
 down, Shift for fine steps, double-click for the default.
@@ -76,6 +78,7 @@ controls, portrait) or `plugins/drums/src/editor.rs` (many controls, landscape) 
   Taken: orange (Pitch Shifter), teal (Drum Synth), oxblood red (Guitar Amp). A new one must be clearly different from those
   and dark enough for cream print to read on it
 - **Print on the paint is always `SILK` (cream).** Black is only for knobs, label tape and the logo plate.
+  The one other thing on paint is the second coat of a mini pedal's art, in `shade`s of its own paint.
   `BRAND_ORANGE` is only the pointer in the logo
 - **Fonts, by role:** `display` (Bebas Neue) for every caption, in capitals; `model` (Bowlby One SC)
   only for the name on the band; `mono` (IBM Plex Mono) only for values on label tape
@@ -99,10 +102,18 @@ controls, portrait) or `plugins/drums/src/editor.rs` (many controls, landscape) 
 - **Rigs:** a plugin made of several components (the Guitar Amp) is the one exception to one
   pedal per plugin. Its window is a `rig`: one `head` across the top, which carries the name band,
   model number and logo, and from left to right in signal order a row of `mini_pedal`s below it.
-  All of them have the plugin's one paint colour. On a head and on mini pedals the switches are
+  The head has the plugin's paint; each mini pedal has a paint of its own. On a head and on mini pedals the switches are
   `small_footswitch` and the LEDs `rig_led` (an unlit `led` disappears on dark paint), beside or
   above the switch. A mini pedal holds two knobs of radius 24 side by side or three of radius 17
   in a triangle. Everything else in this guide applies
+- **Pedal art:** every mini pedal has its own `PAINT_*` and its own `Motif`, all on one theme
+  per rig (the Guitar Amp: northern weather and nature). Two coats and a print: a large motif
+  in darker tones of the pedal's paint (`theme::shade`) that may run under the controls, with
+  no fine detail under a caption, and a few `SILK` lines (2 px) and dots only in the clear
+  paint beside the controls. The art keeps 5 px of plain paint to the edge of the face. No
+  letters, numbers or cream triangles in it, and nothing that moves. A new paint goes in
+  `PEDAL_PAINTS`, where tests hold it to cream print reading on it and to being clearly apart
+  from the others; a new motif is drawn in `art.rs` for the layout of its pedal
 - **Slim pedals:** a pedal of a rig with two knobs can be a `slim_pedal`, 110 px wide: the
   LED where a trio's upper left knob is, the two radius-17 knobs upper right and lower left
   (`SLIM_LED`, `SLIM_KNOBS`), the switch where every pedal has it. Its title is size 21, so
@@ -271,7 +282,7 @@ gain). They share the six dials.
 - `src/tuner.rs` - Tuner: pitch detector on the mono input, `TunerReading` (one atomic shared
   with the editor), `Note`
 - `src/editor.rs` - egui GUI: oxblood head (1590 x 694 window) with the preset stepper or the tuner
-  display top centre; draws each of the ten pedals
+  display top centre; draws each of the ten pedals, each in its own paint with its own art
 - `src/board.rs` - The row of pedals under the head in the chain's order, the amp's marker,
   and dragging a pedal to another place
 

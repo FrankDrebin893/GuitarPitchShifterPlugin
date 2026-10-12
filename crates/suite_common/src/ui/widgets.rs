@@ -327,12 +327,6 @@ fn meter_lamps(painter: &Painter, rect: Rect, cents: Option<f32>) {
     }
 }
 
-/// A colour between two others, `share` of the way from the first to the second
-fn blend(from: Color32, to: Color32, share: f32) -> Color32 {
-    let channel = |from: u8, to: u8| (from as f32 + (to as f32 - from as f32) * share.clamp(0.0, 1.0)).round() as u8;
-    Color32::from_rgb(channel(from.r(), to.r()), channel(from.g(), to.g()), channel(from.b(), to.b()))
-}
-
 /// Small chrome push button with an arrow head engraved in its cap. `side` is -1 for the
 /// arrow pointing left, 1 for right
 fn push_button(painter: &Painter, center: Pos2, side: f32, pressed: bool) {
