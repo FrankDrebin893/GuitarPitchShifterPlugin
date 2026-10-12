@@ -1,0 +1,521 @@
+/* Colours and fonts are the plugins' own: crates/suite_common/src/ui/theme.rs */
+@font-face {
+  font-family: "Bebas Neue";
+  src: url("fonts/BebasNeue-Regular.ttf") format("truetype");
+  font-display: swap;
+}
+@font-face {
+  font-family: "Bowlby One SC";
+  src: url("fonts/BowlbyOneSC-Regular.ttf") format("truetype");
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("fonts/IBMPlexMono-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-display: swap;
+}
+
+:root {
+  --bench: #121110;
+  --panel: #1c1a18;
+  --tape: #141210;
+  --tape-text: #f4efe4;
+  --silk: #eadfc8;
+  --silk-dim: #b9af9b;
+  --ink: #2a2622;
+  --line: #3a3530;
+  --brand-orange: #e2581e;
+  --paint-orange: #de561e;
+  --paint-teal: #1d8282;
+  --paint-oxblood: #7c1c20;
+  --led-on: #ff3b24;
+
+  --display: "Bebas Neue", "Arial Narrow", Impact, sans-serif;
+  --model: "Bowlby One SC", "Arial Black", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --body: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bench);
+  color: var(--silk);
+  font-family: var(--body);
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+a {
+  color: var(--silk);
+  text-underline-offset: 3px;
+}
+a:hover {
+  color: #fff;
+}
+:focus-visible {
+  outline: 2px solid var(--silk);
+  outline-offset: 3px;
+}
+
+.wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* Top */
+
+.top {
+  padding: 56px 0 40px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--panel);
+  text-decoration: none;
+}
+.badge-inner {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 22px 4px;
+  border: 2px solid var(--silk);
+  border-radius: 6px;
+  font-family: var(--display);
+  font-size: 54px;
+  line-height: 1;
+  letter-spacing: 0.1em;
+  color: var(--silk);
+}
+.badge svg {
+  width: 44px;
+  height: 54px;
+  margin-top: -4px;
+}
+
+.top h1 {
+  margin: 34px 0 10px;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(46px, 8vw, 88px);
+  line-height: 0.95;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.top p {
+  max-width: 40em;
+  margin: 0;
+  font-size: 19px;
+  color: var(--silk);
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin: 26px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.facts li,
+.tape {
+  padding: 5px 12px 4px;
+  border-radius: 3px;
+  background: var(--tape);
+  border: 1px solid var(--line);
+  color: var(--tape-text);
+  font-family: var(--mono);
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+.jump {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 40px;
+}
+.jump a {
+  display: block;
+  padding: 16px 18px 12px;
+  border-radius: 8px;
+  color: var(--silk);
+  text-decoration: none;
+  font-family: var(--display);
+  font-size: 30px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+.jump small {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--tape-text);
+}
+.jump a:hover {
+  outline: 2px solid var(--silk);
+  outline-offset: 2px;
+}
+
+/* The paint only ever carries large print: ink on the cream band, or cream on oxblood */
+.orange {
+  --paint: var(--paint-orange);
+  --on-paint: #000;
+}
+.teal {
+  --paint: var(--paint-teal);
+  --on-paint: #000;
+}
+.oxblood {
+  --paint: var(--paint-oxblood);
+  --on-paint: var(--silk);
+}
+.jump a {
+  background: var(--paint);
+  color: var(--on-paint);
+}
+.jump a small {
+  color: var(--on-paint);
+}
+
+/* One plugin */
+
+.plugin {
+  padding: 72px 0 24px;
+}
+
+.paint {
+  position: relative;
+  padding: 26px 0 30px;
+  background: var(--paint);
+}
+.band {
+  display: inline-block;
+  margin: 0;
+  padding: 6px 26px 2px;
+  background: var(--silk);
+  color: var(--ink);
+  font-family: var(--model);
+  font-weight: 400;
+  font-size: clamp(34px, 6.4vw, 62px);
+  line-height: 1.15;
+  transform: rotate(-2deg);
+  transform-origin: left center;
+}
+
+.caption {
+  margin: 22px 0 0;
+  font-family: var(--display);
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--silk-dim);
+}
+.caption b {
+  font-weight: 400;
+  color: var(--silk);
+}
+
+.shot {
+  margin: 26px 0 0;
+}
+.shot img {
+  border-radius: 6px;
+}
+/* A phone shows the wide window at a size that can be read, and scrolls it sideways */
+.shot.wide {
+  overflow-x: auto;
+}
+.shot.wide img {
+  min-width: 720px;
+}
+.shot.narrow img {
+  width: min(100%, 400px);
+}
+
+.cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 48px;
+  margin-top: 34px;
+}
+.cols.with-shot {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.cols.with-shot .shot {
+  margin: 0;
+}
+
+.plugin h3 {
+  margin: 34px 0 12px;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 26px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.plugin h3:first-child {
+  margin-top: 0;
+}
+.plugin p {
+  margin: 0 0 14px;
+}
+.plugin ul.points {
+  margin: 0 0 14px;
+  padding-left: 1.1em;
+}
+.plugin ul.points li {
+  margin-bottom: 6px;
+}
+
+/* Demos: a strip of label tape each */
+
+.demos {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.demos li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 4px;
+  background: var(--tape);
+  border: 1px solid var(--line);
+}
+.demos span {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--tape-text);
+}
+.demos audio {
+  width: 100%;
+  height: 36px;
+}
+.plugin p.note {
+  margin-top: 16px;
+  font-size: 14px;
+  color: var(--silk-dim);
+}
+
+/* Downloads */
+
+.downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.button {
+  display: inline-block;
+  padding: 12px 22px 8px;
+  border-radius: 6px;
+  background: var(--silk);
+  color: var(--ink);
+  text-decoration: none;
+  font-family: var(--display);
+  font-size: 26px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  box-shadow: 0 4px 0 var(--paint, var(--line));
+}
+.button:hover {
+  background: #fff;
+  color: var(--ink);
+}
+.button:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 var(--paint, var(--line));
+}
+.button small {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+/* Controls */
+
+details {
+  margin-top: 34px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+summary {
+  padding: 14px 0 10px;
+  cursor: pointer;
+  font-family: var(--display);
+  font-size: 24px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.scroll {
+  overflow-x: auto;
+  margin-bottom: 18px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+th,
+td {
+  padding: 8px 14px 8px 0;
+  border-top: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  border-top: 0;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--silk-dim);
+}
+td.v,
+code {
+  font-family: var(--mono);
+  font-size: 14px;
+  white-space: nowrap;
+}
+td:first-child {
+  white-space: nowrap;
+}
+code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--tape-text);
+}
+
+/* Install */
+
+.install {
+  margin-top: 72px;
+  padding: 56px 0 64px;
+  background: var(--panel);
+}
+.install h2,
+.bottom h2 {
+  margin: 0 0 20px;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(40px, 6vw, 60px);
+  line-height: 1;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.install ol {
+  max-width: 44em;
+  margin: 0 0 30px;
+  padding-left: 1.3em;
+}
+.install li {
+  margin-bottom: 8px;
+}
+.install h3 {
+  margin: 32px 0 8px;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 26px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.install p {
+  max-width: 44em;
+  margin: 0 0 12px;
+}
+pre {
+  max-width: 100%;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border-radius: 4px;
+  background: var(--tape);
+  border: 1px solid var(--line);
+  color: var(--tape-text);
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Bottom */
+
+.bottom {
+  padding: 48px 0 72px;
+  color: var(--silk-dim);
+  font-size: 15px;
+}
+.bottom p {
+  max-width: 46em;
+  margin: 0 0 10px;
+}
+.bottom nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin-bottom: 22px;
+  font-family: var(--display);
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 820px) {
+  .top {
+    padding-top: 36px;
+  }
+  .jump {
+    grid-template-columns: 1fr;
+  }
+  .cols,
+  .cols.with-shot {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 30px;
+  }
+  .cols.with-shot .shot img {
+    margin: 0 auto;
+  }
+  .plugin {
+    padding-top: 52px;
+  }
+  .badge-inner {
+    font-size: 42px;
+  }
+  .badge svg {
+    width: 34px;
+    height: 42px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}

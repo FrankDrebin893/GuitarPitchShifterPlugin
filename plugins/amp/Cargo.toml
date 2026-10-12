@@ -3,7 +3,7 @@ name = "amp"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license-file.workspace = true
+license.workspace = true
 
 [lib]
 crate-type = ["cdylib", "lib"]

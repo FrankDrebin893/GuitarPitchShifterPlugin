@@ -6,7 +6,7 @@ members = ["xtask", "crates/*", "plugins/*"]
 version = "0.1.0"
 edition = "2021"
 authors = ["Rasmus Højte"]
-license-file = "LICENSE"
+license = "GPL-3.0-or-later"
 
 [workspace.dependencies]
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95" }

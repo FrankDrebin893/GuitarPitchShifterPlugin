@@ -11,6 +11,10 @@ A suite of VST3/CLAP plugins built with Rust and the nih-plug framework. The bra
 - `crates/suite_common/assets/fonts/` - Embedded fonts (SIL OFL) with their licence files
 - `xtask/` - nih-plug bundler
 - `bundler.toml` - Bundle name per plugin package
+- `site/` - The public page (plain HTML and CSS, no build step), published by GitHub Pages
+- `scripts/package.sh` - Packs the bundles into the zips of a release
+- `.github/workflows/` - `ci.yml` (tests), `release.yml` (builds and publishes a release),
+  `pages.yml` (publishes `site/`)
 
 Each plugin keeps DSP in its own module(s), separate from `lib.rs` (plugin entry point, parameters, nih-plug integration) and `editor.rs` (egui GUI).
 
@@ -495,6 +499,29 @@ The version number lives in `Cargo.toml` (`[workspace.package]`) and is what hos
 
 Only to compare two builds side by side in the DAW: temporarily give one of them another bundle
 name, `NAME`, `VST3_CLASS_ID` and `CLAP_ID`, and do not commit that.
+
+## Releasing
+
+The page is https://frankdrebin893.github.io/hojt-audio/ and the downloads are GitHub releases.
+The code is GPL-3.0-or-later, which the VST3 bindings require of a VST3 binary that is handed
+out; the HØJT name and logo are kept out of it (`NOTICE.md`).
+
+1. Set the version in `Cargo.toml` (`[workspace.package]`) and run `cargo check --workspace` so
+   `Cargo.lock` follows
+2. Add a `## <version>` section to `CHANGELOG.md`: it becomes the text of the release
+3. Commit, then tag `v<version>` and push the tag. `release.yml` tests, builds for Windows,
+   macOS (Intel and Apple Silicon in one binary, signed ad hoc) and Linux, and publishes the zips
+
+- The zips are named `<BundleName>-<windows|macos|linux>.zip`, without a version: the page
+  links to `releases/latest/download/<name>`, so these names never change
+- To see the zips without releasing, run the Release workflow by hand (Actions tab) and take
+  them from the run's artifacts
+- `Cargo.lock` is committed so a release is built from the crates that were tested
+- The page uses the plugins' colours (`ui/theme.rs`) and fonts (copies in `site/fonts/`). Body
+  text never sits on the paint: cream on orange or teal is too weak at that size
+- Screenshots in `site/img/` are the standalone windows at their own size. Sound examples in
+  `site/audio/` are MP3s (`ffmpeg -codec:a libmp3lame -q:a 4`) of files from the `render_*`
+  tests. Redo both when a plugin's look or sound has changed
 
 ## Testing
 
