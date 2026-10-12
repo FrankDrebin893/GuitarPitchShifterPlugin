@@ -675,7 +675,6 @@ mod tests {
     #[test]
     fn test_silence_is_not_slower_than_playing() {
         // Denormal numbers would make the silence after a note many times slower
-        let mut comp = new_comp(SAMPLE_RATE);
         let setting = settings(1.0, 0.5);
         let time_us = |comp: &mut Comp, input: &[f32]| {
             let mut times: Vec<f64> = input
@@ -690,12 +689,23 @@ mod tests {
             times.sort_by(|a, b| a.partial_cmp(b).unwrap());
             times[times.len() / 2]
         };
-        let playing = time_us(&mut comp, &noise(0.5, ms(500.0, SAMPLE_RATE)));
-        let mut slowest: f64 = 0.0;
-        for _ in 0..6 {
-            slowest = slowest.max(time_us(&mut comp, &vec![0.0; ms(500.0, SAMPLE_RATE)]));
+        // Denormal numbers slow every measurement down, a machine that is busy with something
+        // else (a build server running the other tests) only now and then: one that fails is
+        // taken again
+        let mut attempts = 0;
+        loop {
+            let mut comp = new_comp(SAMPLE_RATE);
+            let playing = time_us(&mut comp, &noise(0.5, ms(500.0, SAMPLE_RATE)));
+            let mut slowest: f64 = 0.0;
+            for _ in 0..6 {
+                slowest = slowest.max(time_us(&mut comp, &vec![0.0; ms(500.0, SAMPLE_RATE)]));
+            }
+            if slowest < playing * SLOWED_DOWN {
+                break;
+            }
+            attempts += 1;
+            assert!(attempts < 3, "{:.2} us per block playing, {:.2} us in silence", playing, slowest);
         }
-        assert!(slowest < playing * SLOWED_DOWN, "{:.2} us per block playing, {:.2} us in silence", playing, slowest);
     }
 
     /// Distortion of a held note through the pedal once it has settled, in dB

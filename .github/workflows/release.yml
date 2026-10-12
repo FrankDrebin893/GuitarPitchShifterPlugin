@@ -1,0 +1,107 @@
+name: Release
+
+# A tag vX.Y.Z builds the plugins for the three systems and publishes them as a GitHub release.
+# Run by hand, or from a pull request that touches the packaging, it only builds: the zips are
+# then under the run's artifacts.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/package.sh
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows, os: windows-latest }
+          - { name: macos, os: macos-latest }
+          - { name: linux, os: ubuntu-latest }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libgl-dev libjack-dev libx11-xcb-dev libxcb1-dev libxcb-dri2-0-dev libxcb-icccm4-dev libxcursor-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Test the amp, optimised
+        run: cargo test -p amp --release --locked
+
+      - name: Bundle
+        if: runner.os != 'macOS'
+        run: cargo xtask bundle -p pitch_shifter -p drums -p amp --release
+
+      # One binary for Intel and Apple Silicon. The bundler signs it ad hoc
+      - name: Bundle (universal)
+        if: runner.os == 'macOS'
+        run: cargo xtask bundle-universal -p pitch_shifter -p drums -p amp --release
+
+      - name: Package
+        shell: bash
+        run: bash scripts/package.sh ${{ matrix.name }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugins-${{ matrix.name }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    # Only a pushed tag publishes. A run by hand builds, also when it is started on a tag
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Release notes from the changelog
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! grep -q "^version = \"$version\"" Cargo.toml; then
+            echo "Tag $GITHUB_REF_NAME does not match the version in Cargo.toml" >&2
+            exit 1
+          fi
+          awk -v v="$version" '
+            /^## / { on = ($2 == v); next }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "CHANGELOG.md has no section for $version" >&2
+            exit 1
+          fi
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          gh release create "$GITHUB_REF_NAME" dist/*.zip \
+            --title "HØJT Audio ${GITHUB_REF_NAME#v}" \
+            --notes-file notes.md

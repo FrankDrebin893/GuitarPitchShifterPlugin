@@ -1,92 +1,72 @@
-# Audio Plugin Suite
+# HØJT Audio
 
-A suite of VST3/CLAP plugins built with Rust and the [nih-plug](https://github.com/robbert-vdh/nih-plug) framework.
+Free audio plugins for guitar and drums, each drawn as a stompbox. VST3 and CLAP, for Windows,
+macOS and Linux. HØJT is Danish for loud, and for high.
 
-| Plugin | Type | Location |
-|--------|------|----------|
-| Guitar Pitch Shifter | Effect | `plugins/pitch_shifter` |
-| Drum Synth | Instrument (early skeleton) | `plugins/drums` |
+**[The page, with sound examples and downloads](https://frankdrebin893.github.io/hojt-audio/)** ·
+**[Latest release](https://github.com/FrankDrebin893/hojt-audio/releases/latest)**
 
-Shared code (vendor string, dial widget, colour theme) lives in `crates/suite_common`.
+[![The Guitar Amp](site/img/guitar-amp.png)](https://frankdrebin893.github.io/hojt-audio/#guitar-amp)
 
-## Guitar Pitch Shifter
+| | |
+|---|---|
+| [![The Drum Synth](site/img/drum-synth.png)](https://frankdrebin893.github.io/hojt-audio/#drum-synth) | [![The Pitch Shifter](site/img/pitch-shifter.png)](https://frankdrebin893.github.io/hojt-audio/#pitch-shifter) |
 
-Shifts your guitar audio by semitones (-12 to +12) with minimal latency, making it suitable for live playing. Drop your tuning without retuning your guitar, or shift up for capo effects.
+## The plugins
 
-### How It Works
+**Guitar Amp** (`plugins/amp`). A whole rig: three amps of our own design, each with its own
+cabinet (Klar: clean, Brøl: crunch, Torden: high gain), and ten pedals that can be dragged into
+another order: gate, compressor, overdrive, phaser, chorus, flanger, tremolo, cabinet, delay and
+reverb. It plays your own cabinet impulse responses, has presets and a tuner, and adds 0.1 to
+0.3 ms of latency.
 
-The pitch shifter uses **variable-rate playback with waveform-matched splices**:
+**Drum Synth** (`plugins/drums`). A full drum kit with no samples: every sound is made in the
+plugin. Three kits (Rock, Jazz, Metal), General MIDI drum map, and velocity that changes the
+sound and not only the level.
 
-1. **Circular buffer** - Incoming audio is written to a ring buffer
-2. **Variable-rate reading** - Audio is read back at a different rate based on the pitch shift (rate = 2^(semitones/12)), with cubic interpolation between samples
-3. **Splice only when needed** - The read position slowly drifts away from (or towards) the write position. It only jumps when it has drifted as far as it may
-4. **Waveform-matched jumps** - Each jump lands where the waveform lines up with itself, normally exactly one pitch period away, and is bridged by a short crossfade. A sustained note therefore continues without a seam
+**Pitch Shifter** (`plugins/pitch_shifter`). Shifts a guitar by -12 to +12 semitones for live
+playing. The delay follows the note being played: about 12 ms on the low E string, under 3 ms
+high up the neck.
 
-Between splices the output is a plain resampled copy of the input, and at 0 semitones the signal passes through untouched.
+## Install
 
-The delay follows the note being played: about one pitch period at most (12 ms on the low E string, under 3 ms high up the neck), not a fixed amount.
+Download the zip for your system from the [page](https://frankdrebin893.github.io/hojt-audio/)
+or the [latest release](https://github.com/FrankDrebin893/hojt-audio/releases/latest), and copy
+the `.vst3` or the `.clap` to its folder:
 
-### Parameters
+| System | VST3 | CLAP |
+|--------|------|------|
+| Windows | `C:\Program Files\Common Files\VST3` | `C:\Program Files\Common Files\CLAP` |
+| macOS | `~/Library/Audio/Plug-Ins/VST3` | `~/Library/Audio/Plug-Ins/CLAP` |
+| Linux | `~/.vst3` | `~/.clap` |
 
-| Parameter | Range | Default | Description |
-|-----------|-------|---------|-------------|
-| Semitones | -12 to +12 | 0 | Pitch shift in semitones |
-| Max Latency | 2-50 ms | 15 ms | Upper limit for the delay, and the longest waveform period that can be spliced cleanly |
-| Smoothness | 0.5-10 ms | 2 ms | Crossfade duration at each splice |
+On macOS, run `xattr -dr com.apple.quarantine <the file you copied>` once afterwards. The macOS
+and Linux builds come from the build server and have not been tried in a DAW yet.
 
-Tips:
+## Build from source
 
-- Single notes need Max Latency to cover one period of the lowest note: about 12 ms for low E, 14 ms for drop D. Lower settings still work but the low strings get rougher.
-- Chords have a much longer combined period (about 24 ms for a power chord on the low E string). Raising Max Latency to 25-30 ms makes chords noticeably cleaner. Single notes keep their short delay either way.
-
-## Drum Synth
-
-A fully synthesized drum instrument: every sound is generated in the plugin, so there are no sample files to install or locate. It takes MIDI in and follows the General MIDI drum map.
-
-This is an early skeleton. Only the kick is implemented so far, on MIDI note 36 (C1), with a single Gain control (-30 to +6 dB).
-
-## Building
-
-Requires [Rust](https://rustup.rs/) to be installed.
+Requires [Rust](https://rustup.rs/). On Linux also the packages listed in
+[.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 ```bash
-# Build release VST3 and CLAP bundles
+# VST3 and CLAP bundles in target/bundled
 cargo xtask bundle pitch_shifter --release
 cargo xtask bundle drums --release
+cargo xtask bundle amp --release
 
-# Run all tests
+# Tests
 cargo test --workspace
+
+# A plugin's window as a program, without a DAW and without sound
+cargo run -p amp --features standalone -- --backend dummy
 ```
 
-Output will be in `target/bundled/`.
+The plugins are written in Rust on [NIH-plug](https://github.com/robbert-vdh/nih-plug).
+[CLAUDE.md](CLAUDE.md) describes how each one works, its parameters and the tools for working
+on its sound.
 
-## Installing
+## Licence
 
-Bundle names: `GuitarPitchShifterPlugin_v10.vst3`, `DrumSynth_v1.vst3`. The examples below use the pitch shifter; do the same for the others.
-
-### Windows
-
-Copy the VST3 bundle to your system VST3 folder (requires administrator privileges):
-
-```cmd
-xcopy /E /I /Y "target\bundled\GuitarPitchShifterPlugin_v10.vst3" "C:\Program Files\Common Files\VST3\GuitarPitchShifterPlugin_v10.vst3"
-```
-
-### macOS
-
-```bash
-cp -r target/bundled/GuitarPitchShifterPlugin_v10.vst3 ~/Library/Audio/Plug-Ins/VST3/
-```
-
-### Linux
-
-```bash
-cp -r target/bundled/GuitarPitchShifterPlugin_v10.vst3 ~/.vst3/
-```
-
-Then rescan plugins in your DAW.
-
-
-## License
-
-Copyright (c) 2026 Rasmus Højte. All rights reserved. The source is public for reference only; see [LICENSE](LICENSE). Third-party dependencies keep their own licenses.
+Copyright (c) 2026 Rasmus Højte. Free software under the
+[GNU General Public License](LICENSE), version 3 or later. The name HØJT and its logo are not
+part of that licence, and third-party components keep their own: see [NOTICE.md](NOTICE.md).

@@ -1,5 +1,5 @@
 /target
-Cargo.lock
 build.bat
 nul
 .claude/
+/dist

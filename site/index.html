@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HØJT Audio: free guitar and drum plugins</title>
+<meta name="description" content="Three free audio plugins: a guitar amp with ten pedals, a drum kit with no samples and a low-latency pitch shifter. VST3 and CLAP for Windows, macOS and Linux.">
+<meta property="og:title" content="HØJT Audio: free guitar and drum plugins">
+<meta property="og:description" content="A guitar amp with ten pedals, a drum kit with no samples and a low-latency pitch shifter. Free, VST3 and CLAP.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://frankdrebin893.github.io/hojt-audio/img/guitar-amp.png">
+<meta name="theme-color" content="#121110">
+<link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="badge" href="#top" aria-label="HØJT">
+      <span class="badge-inner" aria-hidden="true">H<svg viewBox="0 0 44 54"><circle cx="22" cy="27" r="16" fill="none" stroke="#eadfc8" stroke-width="5.6"/><line x1="6.7" y1="48.8" x2="37.3" y2="5.2" stroke="#e2581e" stroke-width="4.6"/></svg>JT</span>
+    </a>
+    <h1 id="top">Free plugins for guitar and drums</h1>
+    <p>HØJT is Danish for loud, and for high. Three plugins, each drawn as a stompbox: an amp
+      with a board of pedals, a drum kit and a pitch shifter. No sign-up, no ads, no samples to
+      install.</p>
+    <ul class="facts">
+      <li>Free</li>
+      <li>VST3 + CLAP</li>
+      <li>Windows / macOS / Linux</li>
+      <li>Open source, GPL-3.0</li>
+    </ul>
+    <nav class="jump" aria-label="Plugins">
+      <a class="oxblood" href="#guitar-amp">Guitar Amp<small>GA-3 / effect</small></a>
+      <a class="teal" href="#drum-synth">Drum Synth<small>DS-2 / instrument</small></a>
+      <a class="orange" href="#pitch-shifter">Pitch Shifter<small>PS-10 / effect</small></a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<!-- Guitar Amp -->
+<section class="plugin oxblood" id="guitar-amp">
+  <div class="paint"><div class="wrap"><h2 class="band">Guitar Amp</h2></div></div>
+  <div class="wrap">
+    <p class="caption"><b>GA-3</b> / Effect / mono or stereo in, stereo out</p>
+    <figure class="shot wide">
+      <img src="img/guitar-amp.png" width="1590" height="694" alt="The Guitar Amp window: an oxblood red amp head with six dials above a row of ten small pedals, each in its own colour">
+    </figure>
+
+    <div class="cols">
+      <div>
+        <h3>What it is</h3>
+        <p>A whole guitar rig in one window: three amps, each with its own cabinet, and ten
+          pedals around them. Plug a guitar straight into the audio interface and play.</p>
+        <ul class="points">
+          <li><b>Klar</b> is clean and glassy, <b>Brøl</b> a mid-forward crunch, <b>Torden</b> a
+            tight modern high gain. Each remembers its own six dials</li>
+          <li>Gate, compressor, overdrive, phaser, chorus, flanger, tremolo, cabinet, delay and
+            reverb. Drag a pedal by its name to move it in the chain</li>
+          <li>Play through your own cabinet impulse responses: drop WAV files in
+            <code>Documents/Hojt Audio/Cabinets</code></li>
+          <li>Seventeen presets and a tuner on the head</li>
+          <li>0.1 to 0.3 ms of latency, so it can be played live</li>
+        </ul>
+        <p>Everything is our own design. It does not copy any real amp or pedal.</p>
+
+        <h3>Download</h3>
+        <div class="downloads">
+          <a class="button" href="https://github.com/FrankDrebin893/hojt-audio/releases/latest/download/HojtGuitarAmp-windows.zip">Windows<small>VST3 + CLAP, 64-bit</small></a>
+          <a class="button" href="https://github.com/FrankDrebin893/hojt-audio/releases/latest/download/HojtGuitarAmp-macos.zip">macOS<small>Intel + Apple Silicon</small></a>
+          <a class="button" href="https://github.com/FrankDrebin893/hojt-audio/releases/latest/download/HojtGuitarAmp-linux.zip">Linux<small>x86-64</small></a>
+        </div>
+        <p class="note">The macOS and Linux builds have not been tried in a DAW yet.
+          <a href="#install">How to install</a></p>
+      </div>
+
+      <div>
+        <h3>Listen</h3>
+        <ul class="demos">
+          <li><span>Guitar, straight in</span><audio controls preload="none" src="audio/amp-dry.mp3"></audio></li>
+          <li><span>Klar, clean</span><audio controls preload="none" src="audio/amp-klar.mp3"></audio></li>
+          <li><span>Brøl, crunch</span><audio controls preload="none" src="audio/amp-brol.mp3"></audio></li>
+          <li><span>Torden, high gain</span><audio controls preload="none" src="audio/amp-torden.mp3"></audio></li>
+          <li><span>Torden, lead with delay</span><audio controls preload="none" src="audio/amp-torden-lead.mp3"></audio></li>
+          <li><span>Preset Tåge: clean, long delay and reverb</span><audio controls preload="none" src="audio/amp-preset-taage.mp3"></audio></li>
+        </ul>
+        <p class="note">The guitar in these clips is made by a program, not played, so the amp is
+          all you hear change.</p>
+      </div>
+    </div>
+
+    <details>
+      <summary>Controls</summary>
+      <div class="scroll">
+      <table>
+        <tr><th>Control</th><th>Range</th><th>What it does</th></tr>
+        <tr><td>On</td><td class="v">on / off</td><td>Bypasses the whole rig, without a click</td></tr>
+        <tr><td>Tuner</td><td class="v">on / off</td><td>Silent tuning, 48 Hz to 1420 Hz against A = 440 Hz</td></tr>
+        <tr><td>Input</td><td class="v">-24 to +24 dB</td><td>Brings the guitar to the level the amps expect</td></tr>
+        <tr><td>Amp</td><td class="v">Klar / Brøl / Torden</td><td>The amp and its cabinet</td></tr>
+        <tr><td>Gain, Bass, Mid, Treble, Presence, Master</td><td class="v">0.0 to 10.0</td><td>The amp's six dials</td></tr>
+        <tr><td>Output</td><td class="v">-30 to +6 dB</td><td>Output level. A lamp shows when it clips</td></tr>
+        <tr><td>Gate: Threshold, Release</td><td class="v">-80 to -20 dB, 20 to 500 ms</td><td>Noise gate on the input. A lamp shows when it is open</td></tr>
+        <tr><td>Comp: Sustain, Level</td><td class="v">0.0 to 10.0</td><td>Compressor. Level 5 is as loud as the pedal off</td></tr>
+        <tr><td>Drive: Gain, Tone, Level</td><td class="v">0.0 to 10.0</td><td>Overdrive in front of the amp</td></tr>
+        <tr><td>Phaser, Chorus, Flanger, Tremolo: Rate, Depth</td><td class="v">0.05 to 12 Hz, 0 to 100 %</td><td>Modulation, in front of the amp or behind the cabinet</td></tr>
+        <tr><td>Cab: Mic, Resonance</td><td class="v">0.0 to 10.0</td><td>Darker to brighter microphone position; less or more low thump. Steps through your own cabinet files</td></tr>
+        <tr><td>Delay: Time, Feedback, Mix</td><td class="v">20 to 1000 ms, 0 to 90 %, 0 to 100 %</td><td>Stereo delay</td></tr>
+        <tr><td>Reverb: Decay, Mix</td><td class="v">0.3 to 6.0 s, 0 to 100 %</td><td>Stereo reverb</td></tr>
+      </table>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- Drum Synth -->
+<section class="plugin teal" id="drum-synth">
+  <div class="paint"><div class="wrap"><h2 class="band">Drum Synth</h2></div></div>
+  <div class="wrap">
+    <p class="caption"><b>DS-2</b> / Instrument / MIDI in, stereo out</p>
+
+    <div class="cols with-shot">
+      <figure class="shot">
+        <img src="img/drum-synth.png" width="660" height="600" alt="The Drum Synth window: a teal pedal with ten knobs and a footswitch for each of the three kits">
+      </figure>
+      <div>
+        <h3>What it is</h3>
+        <p>A full drum kit with no samples. Every hit is made in the plugin as it is played, so
+          there is nothing to install or to go missing, and no two hits are quite the same.</p>
+        <ul class="points">
+          <li>Three kits: <b>Rock</b>, <b>Jazz</b> and <b>Metal</b>, each with its own room</li>
+          <li>Kick, snare, side stick, six toms, hi-hat, two crashes, ride and bell, china, splash</li>
+          <li>General MIDI drum map: works with any drum pattern or e-kit</li>
+          <li>Playing harder changes the sound, not only the level</li>
+        </ul>
+
+        <h3>Listen</h3>
+        <ul class="demos">
+          <li><span>Rock kit</span><audio controls preload="none" src="audio/drums-rock.mp3"></audio></li>
+          <li><span>Jazz kit</span><audio controls preload="none" src="audio/drums-jazz.mp3"></audio></li>
+          <li><span>Metal kit</span><audio controls preload="none" src="audio/drums-metal.mp3"></audio></li>
+        </ul>
+
+        <h3>Download</h3>
+        <div class="downloads">
+          <a class="button" href="https://github.com/FrankDrebin893/hojt-audio/releases/latest/download/HojtDrumSynth-windows.zip">Windows<small>VST3 + CLAP, 64-bit</small></a>
+          <a class="button" href="https://github.com/FrankDrebin893/hojt-audio/releases/latest/download/HojtDrumSynth-macos.zip">macOS<small>Intel + Apple Silicon</small></a>
+          <a class="button" href="https://github.com/FrankDrebin893/hojt-audio/releases/latest/download/HojtDrumSynth-linux.zip">Linux<small>x86-64</small></a>
+        </div>
+        <p class="note">The macOS and Linux builds have not been tried in a DAW yet.
+          <a href="#install">How to install</a></p>
+      </div>
+    </div>
+
+    <details>
+      <summary>Controls and MIDI notes</summary>
+      <div class="scroll">
+      <table>
+        <tr><th>Control</th><th>Range</th><th>What it does</th></tr>
+        <tr><td>Kit</td><td class="v">Rock / Jazz / Metal</td><td>The sound of every piece and of the room</td></tr>
+        <tr><td>Gain</td><td class="v">-30 to +6 dB</td><td>Output level</td></tr>
+        <tr><td>Room</td><td class="v">0 to 100 %</td><td>Amount of room reverb</td></tr>
+        <tr><td>Tune</td><td class="v">-6 to +6 st</td><td>Pitch of kick, snare and toms</td></tr>
+        <tr><td>Damping</td><td class="v">0 to 100 %</td><td>Shortens the ring of drums and cymbals</td></tr>
+        <tr><td>Kick, Snare, Toms, Hi-Hat, Cymbals</td><td class="v">-30 to +6 dB</td><td>Level of each group</td></tr>
+      </table>
+      </div>
+      <div class="scroll">
+      <table>
+        <tr><th>MIDI note</th><th>Plays</th><th>MIDI note</th><th>Plays</th></tr>
+        <tr><td class="v">35, 36</td><td>Kick</td><td class="v">42 / 44 / 46</td><td>Hi-hat closed / pedal / open</td></tr>
+        <tr><td class="v">38, 40</td><td>Snare</td><td class="v">49, 57</td><td>Crash 1, Crash 2</td></tr>
+        <tr><td class="v">37</td><td>Side stick</td><td class="v">51, 59 / 53</td><td>Ride / Ride bell</td></tr>
+        <tr><td class="v">41, 43, 45, 47, 48, 50</td><td>Toms, low to high</td><td class="v">52, 55</td><td>China, Splash</td></tr>
+      </table>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- Pitch Shifter -->
+<section class="plugin orange" id="pitch-shifter">
+  <div class="paint"><div class="wrap"><h2 class="band">Pitch Shifter</h2></div></div>
+  <div class="wrap">
+    <p class="caption"><b>PS-10</b> / Effect / in, out</p>
+
+    <div class="cols with-shot">
+      <figure class="shot narrow">
+        <img src="img/pitch-shifter.png" width="400" height="560" alt="The Pitch Shifter window: an orange pedal with one large knob, two small ones and a footswitch">
+      </figure>
+      <div>
+        <h3>What it is</h3>
+        <p>Tune the guitar down without touching the pegs, or up like a capo. It shifts by up
+          to an octave either way and is made to be played through live.</p>
+        <ul class="points">
+          <li>-12 to +12 semitones</li>
+          <li>The delay follows the note you play: about 12 ms on the low E string, under 3 ms
+            high up the neck</li>
+          <li>At 0 semitones the signal passes through untouched, to the bit</li>
+          <li>Single notes are cleanest. For chords, turn Max Latency up to 25 or 30 ms</li>
+        </ul>
+
+        <h3>Listen</h3>
+        <ul class="demos">
+          <li><span>Notes, as played</span><audio controls preload="none" src="audio/pitch-notes-original.mp3"></audio></li>
+          <li><span>Notes, 2 semitones down</span><audio controls preload="none" src="audio/pitch-notes-down2.mp3"></audio></li>
+          <li><span>Notes, 7 semitones up</span><audio controls preload="none" src="audio/pitch-notes-up7.mp3"></audio></li>
+          <li><span>Chords, as played</span><audio controls preload="none" src="audio/pitch-chord-original.mp3"></audio></li>
+          <li><span>Chords, 2 semitones down</span><audio controls preload="none" src="audio/pitch-chord-down2.mp3"></audio></li>
+        </ul>
+
+        <h3>Download</h3>
+        <div class="downloads">
+          <a class="button" href="https://github.com/FrankDrebin893/hojt-audio/releases/latest/download/HojtPitchShifter-windows.zip">Windows<small>VST3 + CLAP, 64-bit</small></a>
+          <a class="button" href="https://github.com/FrankDrebin893/hojt-audio/releases/latest/download/HojtPitchShifter-macos.zip">macOS<small>Intel + Apple Silicon</small></a>
+          <a class="button" href="https://github.com/FrankDrebin893/hojt-audio/releases/latest/download/HojtPitchShifter-linux.zip">Linux<small>x86-64</small></a>
+        </div>
+        <p class="note">The macOS and Linux builds have not been tried in a DAW yet.
+          <a href="#install">How to install</a></p>
+      </div>
+    </div>
+
+    <details>
+      <summary>Controls</summary>
+      <div class="scroll">
+      <table>
+        <tr><th>Control</th><th>Range</th><th>What it does</th></tr>
+        <tr><td>Semitones</td><td class="v">-12 to +12</td><td>How far to shift</td></tr>
+        <tr><td>Max Latency</td><td class="v">2 to 50 ms</td><td>The longest the delay may get. Low E needs 12 ms, chords are cleaner at 25 to 30 ms</td></tr>
+        <tr><td>Smoothness</td><td class="v">0.5 to 10 ms</td><td>Length of the crossfade where the sound is joined</td></tr>
+        <tr><td>Bypass</td><td class="v">on / off</td><td>The footswitch. Switches without a click</td></tr>
+      </table>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- Install -->
+<section class="install" id="install">
+  <div class="wrap">
+    <h2>Install</h2>
+    <ol>
+      <li>Download the zip for your system and unpack it.</li>
+      <li>Copy <b>one</b> of the two plugin files to its folder below: <code>.vst3</code> for most
+        DAWs (Reaper, Ableton Live, Cubase, FL Studio, Studio One), or <code>.clap</code> where
+        the DAW supports it (Reaper, Bitwig, FL Studio, Studio One). Create the folder if it is
+        not there.</li>
+      <li>Let the DAW scan for plugins. They are listed under <b>Hojt Audio</b>.</li>
+    </ol>
+    <div class="scroll">
+    <table>
+      <tr><th>System</th><th>VST3</th><th>CLAP</th></tr>
+      <tr><td>Windows</td><td><code>C:\Program Files\Common Files\VST3</code></td><td><code>C:\Program Files\Common Files\CLAP</code></td></tr>
+      <tr><td>macOS</td><td><code>~/Library/Audio/Plug-Ins/VST3</code></td><td><code>~/Library/Audio/Plug-Ins/CLAP</code></td></tr>
+      <tr><td>Linux</td><td><code>~/.vst3</code></td><td><code>~/.clap</code></td></tr>
+    </table>
+    </div>
+
+    <h3>macOS: one more step</h3>
+    <p>macOS stops plugins that were downloaded and do not come from a registered developer.
+      After copying, open Terminal and run this once for each plugin you installed, with the
+      name of the file you copied:</p>
+<pre>xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/HojtGuitarAmp.vst3</pre>
+
+    <h3>Updating</h3>
+    <p>Copy the new file over the old one. Projects that use the plugin open with their
+      settings as they were.</p>
+
+    <h3>Something wrong?</h3>
+    <p>Tell us which plugin, system and DAW in an
+      <a href="https://github.com/FrankDrebin893/hojt-audio/issues">issue on GitHub</a>.
+      The macOS and Linux builds come straight from the build server and have not been tried in
+      a DAW yet, so reports from there are especially welcome.</p>
+  </div>
+</section>
+
+</main>
+
+<footer class="bottom">
+  <div class="wrap">
+    <nav aria-label="Project">
+      <a href="https://github.com/FrankDrebin893/hojt-audio">Source</a>
+      <a href="https://github.com/FrankDrebin893/hojt-audio/releases">All releases</a>
+      <a href="https://github.com/FrankDrebin893/hojt-audio/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/FrankDrebin893/hojt-audio/issues">Report a problem</a>
+    </nav>
+    <p>© 2026 Rasmus Højte. The plugins are free software under the
+      <a href="https://github.com/FrankDrebin893/hojt-audio/blob/main/LICENSE">GNU General Public License, version 3 or later</a>.
+      The name HØJT and its logo are not part of that licence:
+      <a href="https://github.com/FrankDrebin893/hojt-audio/blob/main/NOTICE.md">notice</a>.</p>
+    <p>Built with <a href="https://github.com/robbert-vdh/nih-plug">NIH-plug</a>. Fonts, each
+      under the SIL Open Font License: <a href="fonts/BebasNeue-OFL.txt">Bebas Neue</a>,
+      <a href="fonts/BowlbyOneSC-OFL.txt">Bowlby One SC</a> and
+      <a href="fonts/IBMPlexMono-OFL.txt">IBM Plex Mono</a>. VST is a registered trademark of Steinberg
+      Media Technologies GmbH.</p>
+  </div>
+</footer>
+
+</body>
+</html>
