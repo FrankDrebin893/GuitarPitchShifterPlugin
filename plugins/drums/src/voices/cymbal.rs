@@ -3,31 +3,38 @@ use std::f32::consts::{PI, TAU};
 use super::Hit;
 use crate::dsp::{decay_coeff, Noise, OnePole, Svf};
 
-pub const MAX_MODES: usize = 64;
+// A multiple of `BATCH`
+pub const MAX_MODES: usize = 256;
+// Modes are computed this many at a time, so the loop compiles to vector instructions
+const BATCH: usize = 8;
 
 // A full-velocity stroke excites modes up to about this frequency, a soft one far less:
 // the softer the stroke, the longer and duller the contact between stick and metal
-const STRIKE_CUTOFF_MIN_HZ: f32 = 1500.0;
+const STRIKE_CUTOFF_MIN_HZ: f32 = 4000.0;
 const STRIKE_CUTOFF_RANGE_HZ: f32 = 16000.0;
 // Random level difference per mode from hit to hit
 const MODE_VARIATION: f32 = 0.15;
-// Mode frequencies thin out towards the top, where the noise wash takes over
-const MODE_SPREAD_EXPONENT: f32 = 1.4;
+// Soft hits have a darker wash: share of the wash's top that the softest hit keeps
+const WASH_SOFT_TOP: f32 = 0.7;
 const WASH_Q: f32 = 0.7;
 // The voice is switched off after this many time constants (-60 dB)
 const TAIL_TIME_CONSTANTS: f32 = 7.0;
 
 pub struct CymbalPreset {
-    /// Number of resonant modes, at most `MAX_MODES`. Few modes sound like a bell.
+    /// Number of resonant modes, at most `MAX_MODES`, spread evenly from `low_hz` to
+    /// `high_hz` as in a thin plate. Few modes sound like a bell; it takes one every 100 Hz
+    /// or closer for the top to be heard as a sizzle and not as separate tones.
     pub modes: usize,
     pub low_hz: f32,
     pub high_hz: f32,
+    /// Modes below this are quieter the lower they are: the hum under the cymbal
+    pub body_hz: f32,
     /// Level of the highest mode relative to the lowest
     pub tilt: f32,
     pub decay_low_ms: f32,
     pub decay_high_ms: f32,
     pub mode_level: f32,
-    /// Sustained noise that fills in between the modes
+    /// Sustained noise: the air on top of the modes
     pub wash_level: f32,
     pub wash_hp_hz: f32,
     /// Top of the noise at full velocity, soft hits are darker
@@ -55,8 +62,10 @@ pub struct Cymbal {
     // the state, so no two hits are the same and repeated hits build up naturally.
     a1: [f32; MAX_MODES],
     a2: [f32; MAX_MODES],
-    y1: [f32; MAX_MODES],
-    y2: [f32; MAX_MODES],
+    // The last two outputs of every mode. `newest` says which of the two is y[n-1]: each
+    // sample overwrites the older one, so nothing is copied.
+    state: [[f32; MAX_MODES]; 2],
+    newest: usize,
     modes: usize,
     mode_scale: f32,
     wash_hp: Svf,
@@ -89,8 +98,8 @@ impl Cymbal {
             weight,
             a1: [0.0; MAX_MODES],
             a2: [0.0; MAX_MODES],
-            y1: [0.0; MAX_MODES],
-            y2: [0.0; MAX_MODES],
+            state: [[0.0; MAX_MODES]; 2],
+            newest: 0,
             modes: 0,
             mode_scale: 0.0,
             wash_hp: Svf::new(),
@@ -111,8 +120,7 @@ impl Cymbal {
     }
 
     pub fn reset(&mut self) {
-        self.y1 = [0.0; MAX_MODES];
-        self.y2 = [0.0; MAX_MODES];
+        self.state = [[0.0; MAX_MODES]; 2];
         self.wash_hp.reset();
         self.wash_lp.reset();
         self.wash_env = 0.0;
@@ -132,8 +140,7 @@ impl Cymbal {
 
         if modes != self.modes {
             // Another kit's cymbal: the old ringing does not belong to these modes
-            self.y1 = [0.0; MAX_MODES];
-            self.y2 = [0.0; MAX_MODES];
+            self.state = [[0.0; MAX_MODES]; 2];
             self.modes = modes;
         }
         self.mode_scale = preset.mode_level / (modes as f32).sqrt();
@@ -142,7 +149,7 @@ impl Cymbal {
 
         for i in 0..modes {
             let position = (i as f32 + self.jitter[i]) / modes as f32;
-            let freq = preset.low_hz + (preset.high_hz - preset.low_hz) * position.powf(MODE_SPREAD_EXPONENT);
+            let freq = preset.low_hz + (preset.high_hz - preset.low_hz) * position;
             let decay_ms =
                 preset.decay_low_ms * (preset.decay_high_ms / preset.decay_low_ms).powf(position) * hit.decay;
             let radius = decay_coeff(decay_ms, sample_rate);
@@ -156,18 +163,21 @@ impl Cymbal {
                 continue;
             }
             let reach = 1.0 / (1.0 + (freq / strike_cutoff).powi(2)).sqrt();
+            let body = freq / (freq * freq + preset.body_hz * preset.body_hz).sqrt();
             let level = amplitude
                 * self.weight[i]
                 * (1.0 + (preset.tilt - 1.0) * position)
                 * reach
+                * body
                 * (1.0 + MODE_VARIATION * self.noise.next());
             let phase = self.noise.next() * PI;
-            self.y1[i] += level * phase.sin();
-            self.y2[i] += level * (phase - omega).sin();
+            self.state[self.newest][i] += level * phase.sin();
+            self.state[1 - self.newest][i] += level * (phase - omega).sin();
         }
 
         self.wash_hp.set(preset.wash_hp_hz, WASH_Q, sample_rate);
-        self.wash_lp.set(preset.wash_lp_hz * (0.4 + 0.6 * hit.velocity), sample_rate);
+        self.wash_lp
+            .set(preset.wash_lp_hz * (WASH_SOFT_TOP + (1.0 - WASH_SOFT_TOP) * hit.velocity), sample_rate);
         self.wash_coeff = decay_coeff(preset.wash_decay_ms * hit.decay, sample_rate);
         self.attack_coeff = decay_coeff(preset.attack_ms, sample_rate);
         self.wash_level = preset.wash_level;
@@ -189,13 +199,23 @@ impl Cymbal {
             return 0.0;
         }
 
-        let mut ringing = 0.0;
-        for i in 0..self.modes {
-            let y = self.a1[i] * self.y1[i] - self.a2[i] * self.y2[i];
-            self.y2[i] = self.y1[i];
-            self.y1[i] = y;
-            ringing += y;
+        // Modes past `self.modes` in the last batch are at rest and stay there
+        let count = self.modes.next_multiple_of(BATCH);
+        let [first, second] = &mut self.state;
+        let (previous, next) = if self.newest == 0 { (&*first, second) } else { (&*second, first) };
+        let mut sums = [0.0; BATCH];
+        let batches = next[..count]
+            .chunks_exact_mut(BATCH)
+            .zip(previous[..count].chunks_exact(BATCH))
+            .zip(self.a1[..count].chunks_exact(BATCH).zip(self.a2[..count].chunks_exact(BATCH)));
+        for ((next, previous), (a1, a2)) in batches {
+            for k in 0..BATCH {
+                next[k] = a1[k] * previous[k] - a2[k] * next[k];
+                sums[k] += next[k];
+            }
         }
+        self.newest = 1 - self.newest;
+        let ringing: f32 = sums.iter().sum();
 
         let hiss = self.wash_lp.process(self.wash_hp.process(self.noise.next()).high);
         let wash = hiss * (self.wash_env * self.wash_level + self.attack_env * self.attack_level);

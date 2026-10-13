@@ -3,6 +3,15 @@
 Each release has a `## <version>` section here. The release workflow uses it as the text of the
 GitHub release.
 
+## Unreleased
+
+### Drum Synth
+
+- Cymbals and hi-hats are crisp: four times as many resonances, so the top is a sizzle and no
+  longer a swirl of separate tones, and the low hum under the tail is gone
+- The snare has its crack: louder and brighter wires, a fuller stick attack, and as loud in the
+  kit as the kick and the toms
+
 ## 0.1.0
 
 First public release. VST3 and CLAP for Windows, macOS and Linux. The macOS and Linux builds

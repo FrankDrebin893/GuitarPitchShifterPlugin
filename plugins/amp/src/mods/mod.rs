@@ -670,14 +670,24 @@ pub(crate) mod tests {
         // Denormal numbers in what rings out would make it many times slower
         let on = P::settings(true, P::defaults_rate(), 1.0);
         for (sample_rate, stereo) in PLACES {
-            let mut pedal = P::at(sample_rate);
-            let playing = time_ns(&mut pedal, &on, &noise(0.5, seconds(0.25, sample_rate)), stereo);
             let silence = vec![0.0; seconds(0.3, sample_rate)];
-            let mut slowest: f64 = 0.0;
-            for _ in 0..3 {
-                slowest = slowest.max(time_ns(&mut pedal, &on, &silence, stereo));
-            }
-            assert!(slowest < playing * SLOWED_DOWN, "{}: {:.1} ns per sample playing, {:.1} ns in silence", P::NAME, playing, slowest);
+            // Denormal numbers slow every measurement down, a machine that is busy with something
+            // else (a build server running the other tests) only now and then: one that fails is
+            // taken again
+            let mut attempts = 0;
+            let mut pedal = loop {
+                let mut pedal = P::at(sample_rate);
+                let playing = time_ns(&mut pedal, &on, &noise(0.5, seconds(0.25, sample_rate)), stereo);
+                let mut slowest: f64 = 0.0;
+                for _ in 0..3 {
+                    slowest = slowest.max(time_ns(&mut pedal, &on, &silence, stereo));
+                }
+                if slowest < playing * SLOWED_DOWN {
+                    break pedal;
+                }
+                attempts += 1;
+                assert!(attempts < 3, "{}: {:.1} ns per sample playing, {:.1} ns in silence", P::NAME, playing, slowest);
+            };
 
             assert!(pedal.idle(), "{}", P::NAME);
             for channel in run(&mut pedal, &on, &silence, stereo, BLOCK) {
