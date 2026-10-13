@@ -1,5 +1,9 @@
 //! Measurements shared by the tests
 
+use std::f32::consts::TAU;
+
+use crate::dsp::Svf;
+
 pub fn peak(samples: &[f32]) -> f32 {
     samples.iter().fold(0.0f32, |max, s| max.max(s.abs()))
 }
@@ -14,6 +18,70 @@ pub fn brightness(samples: &[f32]) -> f32 {
     let energy: f32 = samples.iter().map(|s| s * s).sum();
     let diff_energy: f32 = samples.windows(2).map(|w| (w[1] - w[0]) * (w[1] - w[0])).sum();
     diff_energy / energy.max(1e-12)
+}
+
+/// The part of the signal between two frequencies, 24 dB per octave on each side.
+/// A `high_hz` at or above Nyquist leaves the top open.
+pub fn band(samples: &[f32], sample_rate: f32, low_hz: f32, high_hz: f32) -> Vec<f32> {
+    const Q: f32 = 0.707;
+    let mut output = samples.to_vec();
+    for _ in 0..2 {
+        let mut highpass = Svf::new();
+        highpass.set(low_hz, Q, sample_rate);
+        for sample in &mut output {
+            *sample = highpass.process(*sample).high;
+        }
+        if high_hz < sample_rate * 0.45 {
+            let mut lowpass = Svf::new();
+            lowpass.set(high_hz, Q, sample_rate);
+            for sample in &mut output {
+                let split = lowpass.process(*sample);
+                *sample -= split.band / Q + split.high;
+            }
+        }
+    }
+    output
+}
+
+pub fn band_rms(samples: &[f32], sample_rate: f32, low_hz: f32, high_hz: f32) -> f32 {
+    rms(&band(samples, sample_rate, low_hz, high_hz))
+}
+
+/// How evenly the energy between two frequencies is spread, looked at 100 Hz at a time:
+/// near 1 for noise, near 0 for a few sines with nothing between them.
+pub fn spectrum_fill(samples: &[f32], sample_rate: f32, low_hz: f32, high_hz: f32) -> f32 {
+    const SLOT_HZ: f32 = 100.0;
+    let len = samples.len();
+    let windowed: Vec<f64> = samples
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| s as f64 * (0.5 - 0.5 * (TAU as f64 * i as f64 / len as f64).cos()))
+        .collect();
+    // One sine's power at one frequency (Goertzel)
+    let power_at = |freq_hz: f32| {
+        let coeff = 2.0 * (TAU as f64 * freq_hz as f64 / sample_rate as f64).cos();
+        let (mut s1, mut s2) = (0.0f64, 0.0f64);
+        for &x in &windowed {
+            let s0 = x + coeff * s1 - s2;
+            s2 = s1;
+            s1 = s0;
+        }
+        s1 * s1 + s2 * s2 - coeff * s1 * s2
+    };
+
+    let step_hz = sample_rate / len as f32;
+    let slots = ((high_hz - low_hz) / SLOT_HZ) as usize;
+    let powers: Vec<f64> = (0..slots)
+        .map(|slot| {
+            let start = low_hz + slot as f32 * SLOT_HZ;
+            let points = (SLOT_HZ / step_hz).max(1.0) as usize;
+            (0..points).map(|point| power_at(start + point as f32 * step_hz)).sum::<f64>() / points as f64
+        })
+        .collect();
+
+    let mean = powers.iter().sum::<f64>() / slots as f64;
+    let log_mean = powers.iter().map(|p| p.max(1e-30).ln()).sum::<f64>() / slots as f64;
+    (log_mean.exp() / mean.max(1e-30)) as f32
 }
 
 /// Time of the last sample that is within `db` (negative) of the peak

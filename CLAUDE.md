@@ -216,11 +216,15 @@ How the voices work:
 
 1. Kick: sine body with a pitch sweep, one shell mode, band-passed noise click for the beater, saturation
 2. Snare and toms: inharmonic membrane modes (`dsp::Modes`) sharing a pitch bend, plus noise for the
-   snare wires and the stick. The side stick is the snare voice with short, high modes and no wires
-3. Cymbals: a bank of up to 64 two-pole resonators at fixed inharmonic frequencies, plus a band-limited
-   noise wash. A hit adds a sine of random phase to each resonator, so repeated hits build up instead
-   of restarting. One `Cymbal` serves closed, pedal and open hi-hat: the closed presets have a short
-   decay, which is what chokes the open sound
+   snare wires and the stick. The snare's head and wires go through one saturation (`SnarePreset.drive`)
+   in front of the hit's level, so a soft hit is as dense as a hard one. The side stick is the snare
+   voice with short, high modes and no wires
+3. Cymbals: a bank of up to 256 two-pole resonators at fixed inharmonic frequencies, spread evenly
+   from `low_hz` to `high_hz`, plus a band-limited noise wash for the air on top. It takes a mode
+   every 100 Hz or closer for the top to be a sizzle: fewer are heard as separate tones that swirl.
+   Modes under `body_hz` are turned down, or the tail is a low hum. A hit adds a sine of random phase
+   to each resonator, so repeated hits build up instead of restarting. One `Cymbal` serves closed,
+   pedal and open hi-hat: the closed presets have a short decay, which is what chokes the open sound
 4. Velocity changes the sound, not only the level: pitch bend depth, overtone level, noise brightness
 5. Every hit varies slightly in pitch and overtone levels (each voice has its own noise generator)
 6. Drums have two voices each (`VoicePair`): a new hit takes the idle one and the previous fades in 3 ms
@@ -554,7 +558,9 @@ placement and the room.
 Two ignored tests are tools for working on the drum sound:
 
 ```bash
-# Table of peak, level, decay time and brightness per piece and kit. Compare before/after a change.
+# Table per piece, kit and velocity: peak, level, level of the first 50 ms, level over 4 kHz, decay
+# time, brightness; for cymbals the low hum in the tail and how evenly 4 to 12 kHz is filled
+# (1 is noise, 0 a few tones). Last line: cost of every cymbal ringing. Compare before/after a change.
 cargo test -p drums --release kit_report -- --ignored --nocapture
 
 # WAV files in target/renders for listening: per kit, every piece at three velocities and a groove.

@@ -26,7 +26,7 @@ const TOM_PANS: [f32; TOM_COUNT] = [0.5, 0.35, 0.15, -0.05, -0.2, -0.35];
 
 // Balance between the pieces with all level controls at 0 dB
 const KICK_GAIN: f32 = 0.5;
-const SNARE_GAIN: f32 = 0.42;
+const SNARE_GAIN: f32 = 0.52;
 const TOM_GAIN: f32 = 0.45;
 const HAT_GAIN: f32 = 0.26;
 const CYMBAL_GAIN: f32 = 0.26;
@@ -264,7 +264,9 @@ fn pan_gains(pan: f32) -> (f32, f32) {
 mod tests {
     use super::*;
     use crate::dsp::BUS_CLIP_KNEE;
-    use crate::test_util::{brightness, decay_time_s, peak, rms, zero_crossing_freq};
+    use crate::test_util::{
+        band_rms, brightness, decay_time_s, peak, rms, spectrum_fill, zero_crossing_freq,
+    };
 
     const SAMPLE_RATE: f32 = 44100.0;
 
@@ -297,6 +299,8 @@ mod tests {
         ("china", 52),
         ("splash", 55),
     ];
+    // Index into `PIECES` of the first cymbal
+    const FIRST_CYMBAL_PIECE: usize = 9;
 
     /// Dry kit, so measurements are of the voices and not the room
     fn dry_kit(kit: Kit, sample_rate: f32) -> DrumKit {
@@ -564,21 +568,69 @@ mod tests {
     #[test]
     #[ignore]
     fn kit_report() {
-        for kit in Kit::ALL {
-            println!("\n{:?}", kit);
-            println!("{:<16}{:>8}{:>8}{:>12}{:>12}", "piece", "peak", "rms", "decay (s)", "brightness");
-            for (name, note) in PIECES {
-                let output = render_note(kit, note, 1.0, 12.0);
+        // rms and brightness are of the first 200 ms, crack is the level of the first 50 ms,
+        // >4k the level above 4 kHz in the first 200 ms. For cymbals: low tail is the share
+        // of the energy under 1 kHz from half a second on, fill how evenly 4 to 12 kHz is
+        // filled (1 is noise, 0 a few sines)
+        for velocity in [0.6, 1.0] {
+            for kit in Kit::ALL {
+                println!("\n{:?}, velocity {}", kit, velocity);
                 println!(
-                    "{:<16}{:>8.3}{:>8.3}{:>12.2}{:>12.3}",
-                    name,
-                    peak(&output),
-                    rms(seconds(&output, 0.0, 0.2)),
-                    decay_time_s(&output, SAMPLE_RATE, -40.0),
-                    brightness(seconds(&output, 0.0, 0.2)),
+                    "{:<16}{:>8}{:>8}{:>8}{:>8}{:>11}{:>12}{:>10}{:>7}",
+                    "piece", "peak", "rms", "crack", ">4k", "decay (s)", "brightness", "low tail", "fill"
                 );
+                for (index, (name, note)) in PIECES.into_iter().enumerate() {
+                    let output = render_note(kit, note, velocity, 12.0);
+                    let start = seconds(&output, 0.0, 0.2);
+                    print!(
+                        "{:<16}{:>8.3}{:>8.3}{:>8.3}{:>8.3}{:>11.2}{:>12.3}",
+                        name,
+                        peak(&output),
+                        rms(start),
+                        rms(seconds(&output, 0.0, 0.05)),
+                        band_rms(start, SAMPLE_RATE, 4000.0, SAMPLE_RATE),
+                        decay_time_s(&output, SAMPLE_RATE, -40.0),
+                        brightness(start),
+                    );
+                    if index >= FIRST_CYMBAL_PIECE {
+                        let tail = seconds(&output, 0.5, 1.5);
+                        let low = band_rms(tail, SAMPLE_RATE, 20.0, 1000.0) / rms(tail).max(1e-9);
+                        let fill = spectrum_fill(seconds(&output, 0.1, 0.3), SAMPLE_RATE, 4000.0, 12000.0);
+                        print!("{:>10.3}{:>7.2}", low * low, fill);
+                    }
+                    println!();
+                }
             }
         }
+
+        // Cost of the cymbals, the only voices with more than a handful of oscillators
+        let mut drums = dry_kit(Kit::Rock, 48000.0);
+        let ring_all = |drums: &mut DrumKit| {
+            for note in [46, 49, 57, 51, 53, 52, 55] {
+                drums.note_on(note, 1.0);
+            }
+        };
+        ring_all(&mut drums);
+        let frames = 48000;
+        let started = std::time::Instant::now();
+        let mut sum = 0.0;
+        for _ in 0..frames {
+            sum += drums.process().0;
+        }
+        let per_frame_ns = started.elapsed().as_nanos() as f64 / frames as f64;
+        let hits = 1000;
+        let started = std::time::Instant::now();
+        for _ in 0..hits {
+            drums.note_on(CRASH, 0.8);
+        }
+        let per_hit_us = started.elapsed().as_nanos() as f64 / hits as f64 / 1000.0;
+        println!(
+            "\nEvery cymbal ringing at 48 kHz: {:.0} ns per frame ({:.1} % of a core), one crash hit {:.1} us ({})",
+            per_frame_ns,
+            per_frame_ns * 48000.0 / 1e7,
+            per_hit_us,
+            sum.is_finite()
+        );
     }
 
     /// Writes WAV files to target/renders for listening:

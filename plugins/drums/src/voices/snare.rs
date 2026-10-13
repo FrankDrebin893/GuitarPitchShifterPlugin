@@ -1,5 +1,5 @@
 use super::{Hit, Voice};
-use crate::dsp::{decay_coeff, semitones_to_ratio, Modes, Noise, OnePole, Svf, SILENCE_THRESHOLD};
+use crate::dsp::{decay_coeff, semitones_to_ratio, soft_clip, Modes, Noise, OnePole, Svf, SILENCE_THRESHOLD};
 
 const MODES: usize = 6;
 // Vibration modes of a circular membrane, relative to the fundamental
@@ -12,7 +12,9 @@ const STICK_LEVELS: [f32; MODES] = [0.6, 1.0, 0.6, 0.3, 0.0, 0.0];
 const STICK_DECAYS_MS: [f32; MODES] = [18.0, 12.0, 8.0, 5.0, 1.0, 1.0];
 
 const BEND_MS: f32 = 12.0;
-const ATTACK_MS: f32 = 3.0;
+const ATTACK_MS: f32 = 6.0;
+// Soft hits have darker wires: share of the wires' top that the softest hit keeps
+const WIRE_SOFT_TOP: f32 = 0.5;
 const WIRE_Q: f32 = 0.6;
 // Makes up for the level the band-pass takes out of the noise
 const WIRE_GAIN: f32 = 2.5;
@@ -33,6 +35,8 @@ pub struct SnarePreset {
     pub wire_lp_hz: f32,
     /// Stick transient
     pub attack_level: f32,
+    /// Saturation of head and wires together, 1.0 is nearly clean
+    pub drive: f32,
 }
 
 /// Synthesized snare drum: membrane modes plus snare wires (filtered noise) and a stick transient
@@ -54,6 +58,8 @@ pub struct Snare {
     body_level: f32,
     wire_level: f32,
     attack_level: f32,
+    drive: f32,
+    drive_norm: f32,
 }
 
 impl Snare {
@@ -75,6 +81,8 @@ impl Snare {
             body_level: 0.0,
             wire_level: 0.0,
             attack_level: 0.0,
+            drive: 1.0,
+            drive_norm: 1.0,
         }
     }
 
@@ -96,12 +104,16 @@ impl Snare {
         self.bend = semitones_to_ratio(preset.bend_semitones * hit.velocity) - 1.0;
         self.wire_filter.set(preset.wire_hz, WIRE_Q, sample_rate);
         // Soft hits are darker
-        self.wire_lp.set(preset.wire_lp_hz * (0.4 + 0.6 * hit.velocity), sample_rate);
+        self.wire_lp
+            .set(preset.wire_lp_hz * (WIRE_SOFT_TOP + (1.0 - WIRE_SOFT_TOP) * hit.velocity), sample_rate);
         self.wire_coeff = decay_coeff(preset.wire_decay_ms * hit.decay, sample_rate);
 
         self.body_level = preset.body_level;
-        self.wire_level = preset.wire_level * WIRE_GAIN * (1.0 + 0.1 * self.noise.next());
+        // Harder hits rattle the wires more against the head
+        self.wire_level =
+            preset.wire_level * WIRE_GAIN * (0.6 + 0.4 * hit.velocity) * (1.0 + 0.1 * self.noise.next());
         self.attack_level = preset.attack_level * (0.4 + 0.6 * hit.velocity);
+        self.set_drive(preset.drive);
         self.strike(hit);
     }
 
@@ -122,7 +134,13 @@ impl Snare {
         self.body_level = 0.5;
         self.wire_level = 0.0;
         self.attack_level = 0.5;
+        self.set_drive(1.0);
         self.strike(hit);
+    }
+
+    fn set_drive(&mut self, drive: f32) {
+        self.drive = drive;
+        self.drive_norm = 1.0 / drive.tanh();
     }
 
     fn strike(&mut self, hit: &Hit) {
@@ -162,16 +180,18 @@ impl Voice for Snare {
         }
 
         let body = self.modes.process(1.0 + self.bend * self.pitch_env);
-        // The band around the wire frequency is the wires, everything above it the stick
-        let noise = self.wire_filter.process(self.noise.next());
-        let wires = self.wire_lp.process(noise.band) * self.wire_env * self.wire_level;
-        let attack = noise.high * self.attack_env * self.attack_level;
+        // The band around the wire frequency is the wires, the noise as it is the stick
+        let noise = self.noise.next();
+        let wires = self.wire_lp.process(self.wire_filter.process(noise).band) * self.wire_env * self.wire_level;
+        let attack = noise * self.attack_env * self.attack_level;
 
         self.pitch_env *= self.pitch_coeff;
         self.wire_env *= self.wire_coeff;
         self.attack_env *= self.attack_coeff;
 
-        (body * self.body_level + wires + attack) * self.level
+        // Head and wires through one saturation, so the wires belong to the drum. It comes
+        // before the level: a soft hit is as dense as a hard one, only quieter.
+        (soft_clip((body * self.body_level + wires) * self.drive) * self.drive_norm + attack) * self.level
     }
 }
 
