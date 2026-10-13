@@ -13,6 +13,7 @@ const STICK_DECAYS_MS: [f32; MODES] = [18.0, 12.0, 8.0, 5.0, 1.0, 1.0];
 
 const BEND_MS: f32 = 12.0;
 const ATTACK_MS: f32 = 6.0;
+const SIDE_STICK_ATTACK_MS: f32 = 3.0;
 // Soft hits have darker wires: share of the wires' top that the softest hit keeps
 const WIRE_SOFT_TOP: f32 = 0.5;
 const WIRE_Q: f32 = 0.6;
@@ -60,6 +61,8 @@ pub struct Snare {
     attack_level: f32,
     drive: f32,
     drive_norm: f32,
+    // The side stick is clean, and its click only the noise above the wire frequency
+    side_stick: bool,
 }
 
 impl Snare {
@@ -83,6 +86,7 @@ impl Snare {
             attack_level: 0.0,
             drive: 1.0,
             drive_norm: 1.0,
+            side_stick: false,
         }
     }
 
@@ -113,8 +117,10 @@ impl Snare {
         self.wire_level =
             preset.wire_level * WIRE_GAIN * (0.6 + 0.4 * hit.velocity) * (1.0 + 0.1 * self.noise.next());
         self.attack_level = preset.attack_level * (0.4 + 0.6 * hit.velocity);
-        self.set_drive(preset.drive);
-        self.strike(hit);
+        self.drive = preset.drive;
+        self.drive_norm = 1.0 / preset.drive.tanh();
+        self.side_stick = false;
+        self.strike(hit, ATTACK_MS);
     }
 
     pub fn trigger_side_stick(&mut self, hit: &Hit) {
@@ -131,21 +137,16 @@ impl Snare {
         self.wire_lp.set(9000.0, sample_rate);
         self.wire_coeff = 0.0;
 
-        self.body_level = 0.5;
+        self.body_level = 0.4;
         self.wire_level = 0.0;
-        self.attack_level = 0.5;
-        self.set_drive(1.0);
-        self.strike(hit);
+        self.attack_level = 0.4;
+        self.side_stick = true;
+        self.strike(hit, SIDE_STICK_ATTACK_MS);
     }
 
-    fn set_drive(&mut self, drive: f32) {
-        self.drive = drive;
-        self.drive_norm = 1.0 / drive.tanh();
-    }
-
-    fn strike(&mut self, hit: &Hit) {
+    fn strike(&mut self, hit: &Hit, attack_ms: f32) {
         self.pitch_coeff = decay_coeff(BEND_MS, self.sample_rate);
-        self.attack_coeff = decay_coeff(ATTACK_MS, self.sample_rate);
+        self.attack_coeff = decay_coeff(attack_ms, self.sample_rate);
         self.level = hit.amplitude();
 
         self.modes.strike();
@@ -182,8 +183,10 @@ impl Voice for Snare {
         let body = self.modes.process(1.0 + self.bend * self.pitch_env);
         // The band around the wire frequency is the wires, the noise as it is the stick
         let noise = self.noise.next();
-        let wires = self.wire_lp.process(self.wire_filter.process(noise).band) * self.wire_env * self.wire_level;
-        let attack = noise * self.attack_env * self.attack_level;
+        let split = self.wire_filter.process(noise);
+        let wires = self.wire_lp.process(split.band) * self.wire_env * self.wire_level;
+        let stick = if self.side_stick { split.high } else { noise };
+        let attack = stick * self.attack_env * self.attack_level;
 
         self.pitch_env *= self.pitch_coeff;
         self.wire_env *= self.wire_coeff;
@@ -191,7 +194,11 @@ impl Voice for Snare {
 
         // Head and wires through one saturation, so the wires belong to the drum. It comes
         // before the level: a soft hit is as dense as a hard one, only quieter.
-        (soft_clip((body * self.body_level + wires) * self.drive) * self.drive_norm + attack) * self.level
+        let drum = body * self.body_level + wires;
+        if self.side_stick {
+            return (drum + attack) * self.level;
+        }
+        (soft_clip(drum * self.drive) * self.drive_norm + attack) * self.level
     }
 }
 

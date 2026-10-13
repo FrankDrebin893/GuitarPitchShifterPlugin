@@ -21,7 +21,8 @@ pub fn brightness(samples: &[f32]) -> f32 {
 }
 
 /// The part of the signal between two frequencies, 24 dB per octave on each side.
-/// A `high_hz` at or above Nyquist leaves the top open.
+/// A `high_hz` at or above Nyquist leaves the top open; one just under it is cut at 0.45
+/// of the sample rate, the highest the filter goes.
 pub fn band(samples: &[f32], sample_rate: f32, low_hz: f32, high_hz: f32) -> Vec<f32> {
     const Q: f32 = 0.707;
     let mut output = samples.to_vec();
@@ -31,7 +32,7 @@ pub fn band(samples: &[f32], sample_rate: f32, low_hz: f32, high_hz: f32) -> Vec
         for sample in &mut output {
             *sample = highpass.process(*sample).high;
         }
-        if high_hz < sample_rate * 0.45 {
+        if high_hz < sample_rate * 0.5 {
             let mut lowpass = Svf::new();
             lowpass.set(high_hz, Q, sample_rate);
             for sample in &mut output {
@@ -103,4 +104,24 @@ pub fn zero_crossing_freq(samples: &[f32], sample_rate: f32) -> f32 {
         return 0.0;
     }
     (crossings.len() - 1) as f32 * sample_rate / (crossings[crossings.len() - 1] - crossings[0])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dsp::Noise;
+
+    #[test]
+    fn test_band_cuts_the_top_unless_it_is_left_open() {
+        let sample_rate = 44100.0;
+        let mut noise = Noise::new(1);
+        let samples: Vec<f32> = (0..44100).map(|_| noise.next()).collect();
+
+        let open = band_rms(&samples, sample_rate, 100.0, sample_rate);
+        let nearly_open = band_rms(&samples, sample_rate, 100.0, 21000.0);
+        let half = band_rms(&samples, sample_rate, 100.0, 5000.0);
+
+        assert!(nearly_open < open * 0.99, "{} vs {}", nearly_open, open);
+        assert!(half < open * 0.6 && half > open * 0.35, "{} vs {}", half, open);
+    }
 }
