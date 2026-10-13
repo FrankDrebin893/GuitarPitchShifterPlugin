@@ -13,7 +13,8 @@ pub mod metal;
 /// Envelopes under this are finished (-90 dB)
 const ENV_FLOOR: f32 = 0.00003;
 
-// An engine whose output has been under this for this long is put to rest
+// An engine whose output has been under this for this long is put to rest. The output is
+// behind the level controls, which go no lower than -30 dB: what is cut is 90 dB down or more
 const REST_LEVEL: f32 = 1e-6;
 const REST_S: f32 = 0.1;
 

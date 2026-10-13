@@ -166,7 +166,7 @@ impl Plugin for BassSynthPlugin {
         ..AudioIOLayout::const_default()
     }];
 
-    // Controllers too: all notes off and all sound off let go of the string
+    // Controllers too: all notes off lets go of the string, all sound off stops it
     const MIDI_INPUT: MidiConfig = MidiConfig::MidiCCs;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
 
@@ -217,11 +217,8 @@ impl Plugin for BassSynthPlugin {
                 match event {
                     NoteEvent::NoteOn { note, velocity, .. } => self.bass.note_on(note, velocity),
                     NoteEvent::NoteOff { note, .. } => self.bass.note_off(note),
-                    NoteEvent::MidiCC { cc, .. }
-                        if cc == control_change::ALL_NOTES_OFF || cc == control_change::ALL_SOUND_OFF =>
-                    {
-                        self.bass.release()
-                    }
+                    NoteEvent::MidiCC { cc, .. } if cc == control_change::ALL_NOTES_OFF => self.bass.release(),
+                    NoteEvent::MidiCC { cc, .. } if cc == control_change::ALL_SOUND_OFF => self.bass.reset(),
                     _ => {}
                 }
 

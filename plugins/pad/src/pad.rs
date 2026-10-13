@@ -216,6 +216,7 @@ impl ShimmerPad {
         self.reset();
     }
 
+    /// Silence at once: voices, chorus, hall and shimmer. Allocates nothing
     pub fn reset(&mut self) {
         self.voices = [Voice::default(); VOICES];
         self.control = 0;
@@ -573,6 +574,18 @@ mod tests {
         pad.release();
         let (left, _) = render(&mut pad, SAMPLE_RATE, 1.5);
         assert!(peak(&left[60000..]) < 0.0005);
+    }
+
+    #[test]
+    fn test_reset_stops_voices_and_tails_at_once() {
+        let mut pad = pad(&PadSettings::default(), SAMPLE_RATE);
+        for note in [48, 55, 60] {
+            pad.note_on(note, 0.8);
+        }
+        render(&mut pad, SAMPLE_RATE, 3.0);
+        pad.reset();
+        let (left, right) = render(&mut pad, SAMPLE_RATE, 0.5);
+        assert!(left.iter().chain(&right).all(|&sample| sample == 0.0));
     }
 
     #[test]

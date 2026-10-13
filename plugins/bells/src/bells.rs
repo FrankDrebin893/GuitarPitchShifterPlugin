@@ -76,6 +76,8 @@ struct Bell {
     velocity: f32,
     decay: f32,
     pan: f32,
+    // Which strike this was, counted from the first
+    strike: u64,
 }
 
 /// Soft glassy bells: twelve voices of two-operator FM with an octave partial, into a
@@ -84,7 +86,7 @@ pub struct GlassBells {
     sample_rate: f32,
     settings: BellSettings,
     bells: [Bell; VOICES],
-    next_bell: usize,
+    strikes: u64,
     attack_step: f32,
     glass_decay: f32,
 
@@ -112,7 +114,7 @@ impl GlassBells {
             sample_rate: 44100.0,
             settings: BellSettings::default(),
             bells: [Bell::default(); VOICES],
-            next_bell: 0,
+            strikes: 0,
             attack_step: 1.0,
             glass_decay: 0.0,
             echo_left: Vec::new(),
@@ -158,6 +160,7 @@ impl GlassBells {
         self.reset();
     }
 
+    /// Silence at once: bells, echoes and hall. Allocates nothing
     pub fn reset(&mut self) {
         self.bells = [Bell::default(); VOICES];
         self.echo_left.fill(0.0);
@@ -196,7 +199,13 @@ impl GlassBells {
         // Lower bells ring longer
         let decay_s = self.settings.decay_s / 4.6 * (440.0 / freq_hz).powf(0.35);
 
-        self.bells[self.next_bell] = Bell {
+        // A bell that has rung out, or else the one struck longest ago
+        let index = (0..VOICES)
+            .find(|&index| self.bells[index].env <= ENV_FLOOR)
+            .or_else(|| (0..VOICES).min_by_key(|&index| self.bells[index].strike))
+            .unwrap_or(0);
+        self.strikes += 1;
+        self.bells[index] = Bell {
             freq_hz,
             carrier: 0.0,
             modulator: 0.0,
@@ -208,8 +217,8 @@ impl GlassBells {
             decay: (-1.0 / (decay_s * self.sample_rate)).exp(),
             // Each note has its own place between the speakers
             pan: 0.5 + 0.35 * (note as f32 * 2.1).sin(),
+            strike: self.strikes,
         };
-        self.next_bell = (self.next_bell + 1) % VOICES;
     }
 
     /// One stereo frame, before Volume
@@ -365,6 +374,38 @@ mod tests {
         bells.note_on(84, 0.8);
         assert_eq!(bells.bells[0].freq_hz, note_hz(84.0));
         assert_eq!(bells.bells[1].freq_hz, note_hz(61.0));
+    }
+
+    #[test]
+    fn test_a_new_bell_takes_one_that_has_rung_out_before_one_that_rings() {
+        // Eleven long bells around one short one, which is done first
+        let mut bells = bells(&BellSettings { decay_s: 8.0, ..plain() }, SAMPLE_RATE);
+        for note in 60..65 {
+            bells.note_on(note, 0.8);
+        }
+        bells.set(&BellSettings { decay_s: DECAY_MIN_S, ..plain() });
+        bells.note_on(96, 0.8);
+        bells.set(&BellSettings { decay_s: 8.0, ..plain() });
+        for note in 66..72 {
+            bells.note_on(note, 0.8);
+        }
+        render(&mut bells, SAMPLE_RATE, 1.5);
+        assert!(bells.bells[5].env <= ENV_FLOOR);
+        assert_eq!(bells.bells.iter().filter(|bell| bell.env > ENV_FLOOR).count(), 11);
+
+        bells.note_on(84, 0.8);
+        assert_eq!(bells.bells[5].freq_hz, note_hz(84.0));
+        assert_eq!(bells.bells.iter().filter(|bell| bell.env > ENV_FLOOR).count(), 12);
+    }
+
+    #[test]
+    fn test_reset_stops_bells_and_tails_at_once() {
+        let mut bells = bells(&BellSettings::default(), SAMPLE_RATE);
+        bells.note_on(69, 0.8);
+        render(&mut bells, SAMPLE_RATE, 1.0);
+        bells.reset();
+        let (left, right) = render(&mut bells, SAMPLE_RATE, 0.5);
+        assert!(left.iter().chain(&right).all(|&sample| sample == 0.0));
     }
 
     #[test]

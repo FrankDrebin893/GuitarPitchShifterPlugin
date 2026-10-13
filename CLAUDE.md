@@ -313,8 +313,10 @@ How it behaves:
 - Slide at 0 ms plucks every note. Above 0, a note that starts while another is held slides
   to it without a new pluck, in the Slide time
 - Tone is the low-pass behind the string on Groove, and behind the drive on Metal
-- Letting go of the key damps the string (70 ms on Metal, 120 ms on Groove). All notes off and
-  all sound off do the same
+- Letting go of the key damps the string (70 ms on Metal, 120 ms on Groove), and so does all
+  notes off. All sound off stops it at once
+- A note that is ringing keeps the string it was plucked with when the voice changes; what
+  stands behind the string changes at once. Sustain reaches the ringing note
 - Notes are within 1 cent from 44.1 to 192 kHz (`bass_report`)
 - `lib.rs` takes every default from `BassSettings::default`, which is Metal's settings
 
@@ -347,6 +349,7 @@ How it behaves:
   depend on the host's block size
 - Shimmer reads the hall's tail back an octave up and feeds it into the hall again
 - The two footswitches fade their effect in and out in 20 ms; off is the same as the knob at 0
+- All notes off lets go of every key; all sound off stops voices and tails at once
 
 | Parameter (id) | Range | Default | Description |
 |----------------|-------|---------|-------------|
@@ -380,7 +383,8 @@ How it behaves:
 - Decay is the time the A above middle C takes to fall by 40 dB; lower bells ring longer
 - Each note has its own place between the speakers. The delay takes the bells in on the left
   and bounces them right and back, each bounce a little darker
-- A thirteenth bell takes the place of the oldest
+- A new bell takes a voice that has rung out, or else the one struck longest ago
+- All sound off stops bells and tails at once
 - The delay time glides when its knob is turned. The footswitches fade in 10 ms; with Delay
   off the echoes are out of the hall as well
 

@@ -116,6 +116,8 @@ pub struct Bass {
 
     note: Option<u8>,
     held: bool,
+    // The voice the ringing string was plucked with
+    string_voice: Voice,
 
     sub_phase: f32,
     sub_env: f32,
@@ -158,6 +160,7 @@ impl Bass {
             glide: 1.0,
             note: None,
             held: false,
+            string_voice: Voice::Metal,
             sub_phase: 0.0,
             sub_env: 0.0,
             sub_attack: 1.0,
@@ -211,18 +214,28 @@ impl Bass {
         }
     }
 
-    /// Once per block
+    /// Once per block. A ringing note keeps the string it was plucked with: another voice
+    /// changes what stands behind the string at once, and the string at the next pluck.
     pub fn set(&mut self, settings: &BassSettings) {
         if *settings == self.settings {
             return;
         }
         let voice_changed = settings.voice != self.settings.voice;
+        let decay_changed = voice_changed || settings.sustain_s != self.settings.sustain_s;
         self.settings = *settings;
         self.set_voice_filters();
         if voice_changed {
             // The other voice's filters start from rest
             for filter in [&mut self.drive_lp, &mut self.tone, &mut self.dc] {
                 filter.reset();
+            }
+        }
+        if decay_changed && self.note.is_some() {
+            // The note that is ringing follows Sustain too, held or let go
+            let held = self.held;
+            self.set_feedback(self.sample_rate / (self.target_delay + self.filter_delay));
+            if !held {
+                self.feedback = self.feedback_released;
             }
         }
     }
@@ -243,7 +256,9 @@ impl Bass {
                 self.drive_lp.set(tone_hz, 0.8, rate);
                 self.dc.set(25.0, 0.7, rate);
                 // A picked string's top follows Brightness while it rings
-                self.loop_lp = 0.3 + 0.62 * self.settings.brightness;
+                if self.string_voice == Voice::Metal {
+                    self.loop_lp = 0.3 + 0.62 * self.settings.brightness;
+                }
             }
             Voice::Groove => {
                 self.tone.set(tone_hz, 0.75, rate);
@@ -369,6 +384,7 @@ impl Bass {
         self.delay = self.loop_delay(freq_hz);
         self.target_delay = self.delay;
         self.set_feedback(freq_hz);
+        self.string_voice = self.settings.voice;
         self.loop_state = 0.0;
         self.sub_env = level;
         self.sub_attack = 0.0;
@@ -505,6 +521,56 @@ mod tests {
             bass.note_off(33);
             let released = render(&mut bass, SAMPLE_RATE, 0.7);
             assert!(rms(&released[24000..]) < 0.002, "{:?} released: {}", voice, rms(&released[24000..]));
+        }
+    }
+
+    #[test]
+    fn test_sustain_reaches_the_note_that_is_ringing() {
+        // Without the sine under the string, which has its own decay
+        let string_alone = BassSettings {
+            sub: 0.0,
+            ..Voice::Groove.settings()
+        };
+        let level_after = |sustain_s: f32| {
+            let mut bass = bass(Voice::Groove, SAMPLE_RATE);
+            bass.set(&string_alone);
+            bass.note_on(33, 0.9);
+            render(&mut bass, SAMPLE_RATE, 0.2);
+            bass.set(&BassSettings { sustain_s, ..string_alone });
+            rms(&render(&mut bass, SAMPLE_RATE, 1.0)[38400..])
+        };
+        assert!(level_after(SUSTAIN_MIN_S) < level_after(SUSTAIN_MAX_S) * 0.3);
+
+        // And one that was let go stays let go
+        let mut bass = bass(Voice::Groove, SAMPLE_RATE);
+        bass.note_on(33, 0.9);
+        render(&mut bass, SAMPLE_RATE, 0.2);
+        bass.note_off(33);
+        bass.set(&BassSettings {
+            sustain_s: SUSTAIN_MAX_S,
+            ..Voice::Groove.settings()
+        });
+        assert!(rms(&render(&mut bass, SAMPLE_RATE, 0.7)[24000..]) < 0.002);
+    }
+
+    #[test]
+    fn test_a_ringing_note_keeps_its_string_and_its_pitch_when_the_voice_changes() {
+        for (from, to) in [(Voice::Metal, Voice::Groove), (Voice::Groove, Voice::Metal)] {
+            let mut bass = bass(from, SAMPLE_RATE);
+            bass.note_on(33, 0.9);
+            render(&mut bass, SAMPLE_RATE, 0.2);
+            let loop_lp = bass.loop_lp;
+            bass.set(&to.settings());
+            assert_eq!(bass.loop_lp, loop_lp, "{:?} to {:?}", from, to);
+
+            let found = pitch(&render(&mut bass, SAMPLE_RATE, 0.5)[4800..], SAMPLE_RATE);
+            let cents = 1200.0 * (found / note_hz(33.0)).log2();
+            assert!(cents.abs() < 6.0, "{:?} to {:?}: {} cents off", from, to, cents);
+
+            // The next pluck is the new voice's
+            bass.note_off(33);
+            bass.note_on(33, 0.9);
+            assert_ne!(bass.loop_lp, loop_lp);
         }
     }
 

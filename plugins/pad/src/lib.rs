@@ -194,7 +194,7 @@ impl Plugin for ShimmerPadPlugin {
         ..AudioIOLayout::const_default()
     }];
 
-    // Controllers too: all notes off and all sound off let go of every key
+    // Controllers too: all notes off lets go of every key, all sound off stops voices and tails
     const MIDI_INPUT: MidiConfig = MidiConfig::MidiCCs;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
 
@@ -246,11 +246,8 @@ impl Plugin for ShimmerPadPlugin {
                 match event {
                     NoteEvent::NoteOn { note, velocity, .. } => self.pad.note_on(note, velocity),
                     NoteEvent::NoteOff { note, .. } => self.pad.note_off(note),
-                    NoteEvent::MidiCC { cc, .. }
-                        if cc == control_change::ALL_NOTES_OFF || cc == control_change::ALL_SOUND_OFF =>
-                    {
-                        self.pad.release()
-                    }
+                    NoteEvent::MidiCC { cc, .. } if cc == control_change::ALL_NOTES_OFF => self.pad.release(),
+                    NoteEvent::MidiCC { cc, .. } if cc == control_change::ALL_SOUND_OFF => self.pad.reset(),
                     _ => {}
                 }
 

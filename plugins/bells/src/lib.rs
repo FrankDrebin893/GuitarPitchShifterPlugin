@@ -187,7 +187,9 @@ impl Plugin for GlassBellsPlugin {
         ..AudioIOLayout::const_default()
     }];
 
-    const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
+    // Controllers too: all sound off stops bells and tails. A bell rings out by itself, so
+    // all notes off has nothing to let go of
+    const MIDI_INPUT: MidiConfig = MidiConfig::MidiCCs;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
 
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
@@ -235,8 +237,10 @@ impl Plugin for GlassBellsPlugin {
                     break;
                 }
 
-                if let NoteEvent::NoteOn { note, velocity, .. } = event {
-                    self.bells.note_on(note, velocity);
+                match event {
+                    NoteEvent::NoteOn { note, velocity, .. } => self.bells.note_on(note, velocity),
+                    NoteEvent::MidiCC { cc, .. } if cc == control_change::ALL_SOUND_OFF => self.bells.reset(),
+                    _ => {}
                 }
 
                 next_event = context.next_event();
