@@ -48,12 +48,12 @@ jobs:
 
       - name: Bundle
         if: runner.os != 'macOS'
-        run: cargo xtask bundle -p pitch_shifter -p drums -p amp --release
+        run: cargo xtask bundle -p pitch_shifter -p drums -p amp -p bass -p bells -p pad --release
 
       # One binary for Intel and Apple Silicon. The bundler signs it ad hoc
       - name: Bundle (universal)
         if: runner.os == 'macOS'
-        run: cargo xtask bundle-universal -p pitch_shifter -p drums -p amp --release
+        run: cargo xtask bundle-universal -p pitch_shifter -p drums -p amp -p bass -p bells -p pad --release
 
       - name: Package
         shell: bash

@@ -25,3 +25,5 @@ suite_common = { workspace = true }
 
 [dev-dependencies]
 hound = "3.5"
+# Reads a drum part for render_wavs. In tests only: no plugin ships with it
+midly = { version = "0.5", default-features = false, features = ["std", "alloc"] }

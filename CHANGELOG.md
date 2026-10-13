@@ -5,7 +5,24 @@ GitHub release.
 
 ## Unreleased
 
+### Bass Synth, Shimmer Pad, Glass Bells
+
+Three new instruments, each a pedal of its own:
+
+- Bass Synth: a plucked string bass with two voices. Metal is picked, with clean lows under a
+  distorted band of mids; Groove is played with a finger, warm, and slides between notes
+  that overlap
+- Shimmer Pad: a slow ambient pad of detuned saws and breath, with a chorus and a large hall
+  whose tail comes back an octave up
+- Glass Bells: soft glassy bells with a ping-pong delay and a hall
+
 ### Drum Synth
+
+- The Metal kit is a new instrument: a clicking kick, a cracking snare, cymbals of square
+  waves and noise, its own room and a saturated bus. It replaces the Metal kit there was;
+  projects set to Metal play the new one
+- A fourth kit, Groove: warm and soft, with a round kick, ghost notes that are darker and
+  shorter than the backbeat, dark cymbals and a shaker (notes 69, 70 and 82)
 
 - Cymbals and hi-hats are crisp: four times as many resonances, so the top is a sizzle and no
   longer a swirl of separate tones, and the low hum under the tail is gone

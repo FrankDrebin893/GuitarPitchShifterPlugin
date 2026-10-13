@@ -1,0 +1,311 @@
+desc:Claude Groove Kit (warm soft drum synth, GM map)
+//tags: instrument synthesizer drums
+//author: Claude
+// Warm, soft neo-soul / lo-fi drum kit. Responds to General MIDI drum notes on any channel:
+// 35/36 kick, 37 side stick, 38/40 snare, 42 closed hat, 44 pedal hat, 46 open hat,
+// 49/57 crash, 51/59 ride, 53 ride bell, 41/43/45/47/48/50 toms, 70/82 shaker.
+// Because the notes are GM-mapped you can swap this for any drum sampler and keep the MIDI.
+
+in_pin:none
+out_pin:left
+out_pin:right
+
+slider1:0<-30,12,0.1>Master (dB)
+slider2:0<-30,12,0.1>Kick (dB)
+slider3:0<-30,12,0.1>Snare / side stick (dB)
+slider4:-2<-30,12,0.1>Hats (dB)
+slider5:-6<-30,12,0.1>Ride / crash (dB)
+slider6:-7<-30,12,0.1>Shaker (dB)
+slider7:-2<-30,12,0.1>Toms (dB)
+slider8:22<0,100,1>Room (%)
+slider9:40<0,100,1>Warmth (%)
+slider10:20<0,100,1>Tape drive (%)
+
+@init
+function db2g(d) ( 10^(d/20) );
+function tanh_(x) local(e) ( x = max(-12, min(12, x)); e = exp(2*x); (e-1)/(e+1) );
+function coef(tau) ( exp(-1/(max(tau, 0.00001)*srate)) );
+
+// Zero-delay-feedback state variable filter
+function svf_set(f, q) instance(g, k, a1, a2, a3) (
+  g = tan($pi * min(f, srate*0.45) / srate);
+  k = 1/q;
+  a1 = 1/(1 + g*(g + k));
+  a2 = g*a1;
+  a3 = g*a2;
+);
+function svf(v0) instance(ic1eq, ic2eq, a1, a2, a3, k, lp, bp, hp) local(v1, v2, v3) (
+  v3 = v0 - ic2eq;
+  v1 = a1*ic1eq + a2*v3;
+  v2 = ic2eq + a2*ic1eq + a3*v3;
+  ic1eq = 2*v1 - ic1eq;
+  ic2eq = 2*v2 - ic2eq;
+  lp = v2; bp = v1; hp = v0 - k*v1 - v2;
+  hp;
+);
+
+// Inharmonic square cluster used as the metallic source for hats and cymbals
+function metal_set(base) instance(f1, f2, f3, f4, f5, f6) (
+  f1 = base; f2 = base*1.4827; f3 = base*1.8003; f4 = base*2.5460; f5 = base*2.6303; f6 = base*3.8967;
+);
+function metal() instance(p1, p2, p3, p4, p5, p6, f1, f2, f3, f4, f5, f6) (
+  p1 += f1/srate; p1 -= floor(p1);
+  p2 += f2/srate; p2 -= floor(p2);
+  p3 += f3/srate; p3 -= floor(p3);
+  p4 += f4/srate; p4 -= floor(p4);
+  p5 += f5/srate; p5 -= floor(p5);
+  p6 += f6/srate; p6 -= floor(p6);
+  ((p1 < 0.5) + (p2 < 0.5) + (p3 < 0.5) + (p4 < 0.5) + (p5 < 0.5) + (p6 < 0.5) - 3) / 3;
+);
+
+// Toms: pitched sine with a small pitch drop and a bit of skin noise
+function tom_trig(f0, v, pan) instance(f, env, penv, nenv, on, ph, pn) (
+  f = f0; env = v; penv = 1; nenv = v; on = 1; ph = 0; pn = pan;
+);
+function tom_tick() instance(f, env, penv, nenv, on, ph, out) local(ff) (
+  on ? (
+    ff = f * (1 + 0.35*penv);
+    ph += ff/srate; ph -= floor(ph);
+    out = sin(2*$pi*ph) * env + (rand(2) - 1)*nenv*0.08;
+    env *= tom_adec; penv *= tom_pdec; nenv *= tom_ndec;
+    env < 0.00003 ? on = 0;
+  ) : out = 0;
+  out;
+);
+
+// Freeverb-style room
+function comb_init(b, len) instance(buf, size, pos, filt) ( buf = b; size = len; pos = 0; filt = 0; );
+function comb(x, fb, damp) instance(buf, size, pos, filt) local(o) (
+  o = buf[pos];
+  filt = o*(1 - damp) + filt*damp;
+  buf[pos] = x + filt*fb;
+  pos += 1; pos >= size ? pos = 0;
+  o;
+);
+function ap_init(b, len) instance(buf, size, pos) ( buf = b; size = len; pos = 0; );
+function ap(x) instance(buf, size, pos) local(o, bo) (
+  bo = buf[pos];
+  o = bo - x;
+  buf[pos] = x + bo*0.5;
+  pos += 1; pos >= size ? pos = 0;
+  o;
+);
+
+rs = srate/44100;
+rvb = 100000;
+memset(rvb, 0, 60000);
+cL1.comb_init(rvb +     0, floor(1116*rs*0.8));
+cL2.comb_init(rvb +  4000, floor(1188*rs*0.8));
+cL3.comb_init(rvb +  8000, floor(1277*rs*0.8));
+cL4.comb_init(rvb + 12000, floor(1356*rs*0.8));
+cR1.comb_init(rvb + 16000, floor(1139*rs*0.8));
+cR2.comb_init(rvb + 20000, floor(1211*rs*0.8));
+cR3.comb_init(rvb + 24000, floor(1300*rs*0.8));
+cR4.comb_init(rvb + 28000, floor(1379*rs*0.8));
+aL1.ap_init(rvb + 32000, floor(556*rs));
+aL2.ap_init(rvb + 36000, floor(441*rs));
+aR1.ap_init(rvb + 40000, floor(579*rs));
+aR2.ap_init(rvb + 44000, floor(464*rs));
+
+evq = 200000; nev = 0; evi = 0; spos = 0;
+
+k_lp.svf_set(1600, 0.7);
+sn_bp.svf_set(2600, 0.6);
+sn_lp.svf_set(6000, 0.7);
+sn_snap.svf_set(4200, 0.9);
+ss_bp.svf_set(2400, 2.0);
+hat_hp.svf_set(5200, 0.7);
+hat_bp.svf_set(7200, 0.8);
+ride_hp.svf_set(2800, 0.7);
+ride_bp.svf_set(4800, 1.3);
+cr_hp.svf_set(1900, 0.7);
+cr_lp.svf_set(8500, 0.7);
+sh_bp.svf_set(6800, 1.3);
+sh_hp.svf_set(4200, 0.7);
+out_hpL.svf_set(30, 0.7);
+out_hpR.svf_set(30, 0.7);
+
+hat_m.metal_set(380);
+ride_m.metal_set(460);
+cr_m.metal_set(330);
+
+k_adec = coef(0.17); k_pdec = coef(0.032); k_cdec = coef(0.0025);
+s_bdec = coef(0.07); s_pdec = coef(0.018); s_cdec = coef(0.004);
+ss_dec1 = coef(0.028); ss_dec2 = coef(0.012); ss_ndec = coef(0.006);
+tom_adec = coef(0.3); tom_pdec = coef(0.05); tom_ndec = coef(0.01);
+r_dec = coef(0.9); r_pdec = coef(0.045); r_bdec = coef(0.5);
+sh_dec = coef(0.045);
+
+function trigger(n, vel) local(v) (
+  v = (vel/127)^1.3;
+  (n == 35 || n == 36) ? (
+    k_env = v; k_penv = 1; k_cenv = v; k_ph = 0; k_on = 1;
+  ) : (n == 38 || n == 40) ? (
+    s_benv = v; s_penv = 1; s_cenv = v; s_nenv = v; s_ph1 = 0; s_ph2 = 0; s_on = 1;
+    s_v = v;
+    s_ndec = coef(0.06 + 0.12*v);
+  ) : n == 37 ? (
+    ss_env1 = v; ss_env2 = v; ss_nenv = v; ss_ph1 = 0; ss_ph2 = 0;
+  ) : n == 41 ? ( t1.tom_trig(82, v, 0.35);
+  ) : n == 43 ? ( t2.tom_trig(98, v, 0.25);
+  ) : n == 45 ? ( t3.tom_trig(118, v, 0.05);
+  ) : n == 47 ? ( t4.tom_trig(136, v, -0.1);
+  ) : n == 48 ? ( t5.tom_trig(158, v, -0.2);
+  ) : n == 50 ? ( t6.tom_trig(182, v, -0.3);
+  ) : n == 42 ? ( h_env = v; h_dec = coef(0.022 + 0.025*v); h_v = v;
+  ) : n == 44 ? ( h_env = v*0.5; h_dec = coef(0.016); h_v = v*0.6;
+  ) : n == 46 ? ( h_env = v; h_dec = coef(0.32); h_v = v;
+  ) : (n == 51 || n == 59) ? ( r_env = v*0.7; r_ping = v;
+  ) : n == 53 ? ( r_env = v*0.4; r_ping = v*0.4; r_bell = v;
+  ) : (n == 49 || n == 57 || n == 55) ? ( c_env = v; c_att = 0; c_dec = coef(n == 55 ? 0.35 : 1.3);
+  ) : (n == 70 || n == 82 || n == 69) ? ( sh_env = v; sh_att = 0;
+  );
+);
+
+@slider
+g_master = db2g(slider1);
+g_kick = db2g(slider2);
+g_snare = db2g(slider3);
+g_hat = db2g(slider4);
+g_cym = db2g(slider5);
+g_shk = db2g(slider6);
+g_tom = db2g(slider7);
+room = slider8/100;
+warm = slider9/100;
+drive = slider10/100;
+pg = 0.5 + 2.5*drive;
+pgn = 1/tanh_(pg);
+wcut = 18000 * (3500/18000)^warm;
+tone_L.svf_set(wcut, 0.6);
+tone_R.svf_set(wcut, 0.6);
+
+@block
+nev = 0; evi = 0; spos = 0;
+while (midirecv(ofs, m1, m2, m3)) (
+  ((m1 & 0xF0) == 0x90 && m3 > 0) ? (
+    evq[nev*3] = ofs; evq[nev*3+1] = m2; evq[nev*3+2] = m3; nev += 1;
+  );
+  midisend(ofs, m1, m2, m3);
+);
+
+@sample
+while (evi < nev && evq[evi*3] <= spos) (
+  trigger(evq[evi*3+1], evq[evi*3+2]);
+  evi += 1;
+);
+spos += 1;
+
+noise = rand(2) - 1;
+L = 0; R = 0; send = 0;
+
+// ---- kick: round sine with a soft felt beater
+kick = 0;
+k_on ? (
+  kf = 52 + 62*k_penv;
+  k_ph += kf/srate; k_ph -= floor(k_ph);
+  kb = sin(2*$pi*k_ph) * k_env;
+  k_lp.svf(noise);
+  kc = k_lp.lp * k_cenv * 0.9;
+  kick = tanh_(kb*1.3 + kc) * g_kick;
+  k_env *= k_adec; k_penv *= k_pdec; k_cenv *= k_cdec;
+  k_env < 0.00003 ? k_on = 0;
+);
+L += kick; R += kick; send += kick*0.08;
+
+// ---- snare: warm body, softer wires; ghost notes come out darker and shorter
+snare = 0;
+s_on ? (
+  s_ph1 += (178 + 30*s_penv)/srate; s_ph1 -= floor(s_ph1);
+  s_ph2 += (318 + 25*s_penv)/srate; s_ph2 -= floor(s_ph2);
+  sbody = (sin(2*$pi*s_ph1)*0.9 + sin(2*$pi*s_ph2)*0.35) * s_benv;
+  sn_bp.svf(noise);
+  sn_lp.svf(noise);
+  swires = (sn_bp.bp*(0.35 + 0.65*s_v) + sn_lp.lp*0.45) * s_nenv;
+  sn_snap.svf(noise);
+  ssnap = sn_snap.bp * s_cenv * 1.4;
+  snare = tanh_((sbody*1.3 + swires*1.1 + ssnap*s_v) * 1.1) * g_snare;
+  s_benv *= s_bdec; s_penv *= s_pdec; s_cenv *= s_cdec; s_nenv *= s_ndec;
+  s_nenv < 0.00003 && s_benv < 0.00003 ? s_on = 0;
+);
+// side stick: woody click
+(ss_env1 > 0.00003 || ss_nenv > 0.00003) ? (
+  ss_ph1 += 510/srate; ss_ph1 -= floor(ss_ph1);
+  ss_ph2 += 1630/srate; ss_ph2 -= floor(ss_ph2);
+  ss_bp.svf(noise);
+  snare += (sin(2*$pi*ss_ph1)*0.55*ss_env1 + sin(2*$pi*ss_ph2)*0.3*ss_env2 + ss_bp.bp*1.3*ss_nenv) * g_snare * 0.95;
+  ss_env1 *= ss_dec1; ss_env2 *= ss_dec2; ss_nenv *= ss_ndec;
+);
+L += snare*0.97; R += snare; send += snare*0.5;
+
+// ---- toms
+tom = 0;
+x = t1.tom_tick(); L += x*g_tom*(0.5 - 0.5*t1.pn); R += x*g_tom*(0.5 + 0.5*t1.pn); tom += x;
+x = t2.tom_tick(); L += x*g_tom*(0.5 - 0.5*t2.pn); R += x*g_tom*(0.5 + 0.5*t2.pn); tom += x;
+x = t3.tom_tick(); L += x*g_tom*(0.5 - 0.5*t3.pn); R += x*g_tom*(0.5 + 0.5*t3.pn); tom += x;
+x = t4.tom_tick(); L += x*g_tom*(0.5 - 0.5*t4.pn); R += x*g_tom*(0.5 + 0.5*t4.pn); tom += x;
+x = t5.tom_tick(); L += x*g_tom*(0.5 - 0.5*t5.pn); R += x*g_tom*(0.5 + 0.5*t5.pn); tom += x;
+x = t6.tom_tick(); L += x*g_tom*(0.5 - 0.5*t6.pn); R += x*g_tom*(0.5 + 0.5*t6.pn); tom += x;
+send += tom*g_tom*0.4;
+
+// ---- hi-hat (slightly left)
+hat = 0;
+h_env > 0.00003 ? (
+  hsrc = hat_m.metal()*0.5 + noise*0.6;
+  hh = hat_hp.svf(hsrc);
+  hat_bp.svf(hh);
+  hat = (hh*0.35*h_v + hat_bp.bp*0.9) * h_env * g_hat;
+  h_env *= h_dec;
+);
+L += hat*0.75; R += hat*0.45; send += hat*0.12;
+
+// ---- ride (right)
+ride = 0;
+(r_env > 0.00003 || r_ping > 0.00003 || r_bell > 0.00003) ? (
+  rsrc = ride_m.metal()*0.7 + noise*0.3;
+  rh = ride_hp.svf(rsrc);
+  ride_bp.svf(rh);
+  rb1 += 740/srate; rb1 -= floor(rb1);
+  rb2 += 1119/srate; rb2 -= floor(rb2);
+  bell = (sin(2*$pi*rb1) + 0.6*sin(2*$pi*rb2)) * r_bell;
+  ride = ((ride_bp.bp*0.6 + rh*0.15) * r_env + ride_bp.bp*r_ping*0.8 + bell*0.25) * g_cym;
+  r_env *= r_dec; r_ping *= r_pdec; r_bell *= r_bdec;
+);
+L += ride*0.4; R += ride*0.8; send += ride*0.15;
+
+// ---- crash (dark, left of centre)
+crash = 0;
+c_env > 0.00003 ? (
+  c_att < 1 ? c_att = min(1, c_att + 1/(0.003*srate));
+  csrc = cr_m.metal()*0.45 + noise*0.7;
+  cr_lp.svf(cr_hp.svf(csrc));
+  crash = cr_lp.lp * c_env * c_att * g_cym * 0.9;
+  c_env *= c_dec;
+);
+L += crash*0.8; R += crash*0.5; send += crash*0.2;
+
+// ---- shaker (right)
+shk = 0;
+sh_env > 0.00003 ? (
+  sh_att < 1 ? sh_att = min(1, sh_att + 1/(0.010*srate));
+  sh_bp.svf(noise);
+  shk = (sh_bp.bp*0.8 + sh_hp.svf(noise)*0.25) * sh_env * sh_att * g_shk;
+  sh_att >= 1 ? sh_env *= sh_dec;
+);
+L += shk*0.35; R += shk*0.75; send += shk*0.2;
+
+// ---- room
+room > 0 ? (
+  rin = send * 0.18;
+  rl = cL1.comb(rin, 0.78, 0.45) + cL2.comb(rin, 0.78, 0.45) + cL3.comb(rin, 0.78, 0.45) + cL4.comb(rin, 0.78, 0.45);
+  rr = cR1.comb(rin, 0.78, 0.45) + cR2.comb(rin, 0.78, 0.45) + cR3.comb(rin, 0.78, 0.45) + cR4.comb(rin, 0.78, 0.45);
+  rl = aL2.ap(aL1.ap(rl));
+  rr = aR2.ap(aR1.ap(rr));
+  L += rl*room; R += rr*room;
+);
+
+// ---- tape-style saturation and warmth filter
+L = tanh_(out_hpL.svf(L) * pg) * pgn;
+R = tanh_(out_hpR.svf(R) * pg) * pgn;
+tone_L.svf(L); tone_R.svf(R);
+spl0 = tone_L.lp * g_master * 0.7;
+spl1 = tone_R.lp * g_master * 0.7;

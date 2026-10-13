@@ -1,0 +1,152 @@
+desc:Claude Metal Bass (picked string + drive)
+//tags: instrument synthesizer bass
+//author: Claude
+// Monophonic plucked-string bass (Karplus-Strong) with a sine sub layer and a parallel
+// drive stage (clean lows + distorted mids), roughly the classic modern prog-metal bass chain.
+
+in_pin:none
+out_pin:left
+out_pin:right
+
+slider1:-2<-30,12,0.1>Volume (dB)
+slider2:50<0,100,1>Drive (%)
+slider3:55<0,100,1>Brightness (%)
+slider4:45<0,100,1>Sub (%)
+slider5:0<-24,24,1>Transpose (semitones)
+slider6:3.5<0.5,8,0.1>Sustain (s)
+
+@init
+function db2g(d) ( 10^(d/20) );
+function tanh_(x) local(e) ( x = max(-12, min(12, x)); e = exp(2*x); (e-1)/(e+1) );
+function coef(tau) ( exp(-1/(max(tau, 0.00001)*srate)) );
+function svf_set(f, q) instance(g, k, a1, a2, a3) (
+  g = tan($pi * min(f, srate*0.45) / srate);
+  k = 1/q;
+  a1 = 1/(1 + g*(g + k));
+  a2 = g*a1;
+  a3 = g*a2;
+);
+function svf(v0) instance(ic1eq, ic2eq, a1, a2, a3, k, lp, bp, hp) local(v1, v2, v3) (
+  v3 = v0 - ic2eq;
+  v1 = a1*ic1eq + a2*v3;
+  v2 = ic2eq + a2*ic1eq + a3*v3;
+  ic1eq = 2*v1 - ic1eq;
+  ic2eq = 2*v2 - ic2eq;
+  lp = v2; bp = v1; hp = v0 - k*v1 - v2;
+  hp;
+);
+
+dl = 0; dlsize = 16384;
+tmp = 20000;
+memset(dl, 0, dlsize);
+wp = 0; lpst = 0;
+cur_note = -1; gate = 0; freq = 55; dly = 800;
+fb_on = 0.99; fb_off = 0.5; fb = 0.99;
+sub_env = 0; sub_ph = 0;
+evq = 200000; nev = 0; evi = 0; spos = 0;
+
+split_lo.svf_set(260, 0.6);
+pre_hp.svf_set(120, 0.7);
+post_lp.svf_set(3200, 0.8);
+mid_pk.svf_set(900, 1.0);
+dc.svf_set(25, 0.7);
+
+function pluck(n, vel) local(v, period, i, x, lpn, pick, idx) (
+  v = (vel/127)^1.2;
+  freq = 440 * 2^((n + slider5 - 69)/12);
+  period = srate/freq;
+  lpc = 0.3 + 0.62*bright;
+  dly = period - (1 - lpc)/lpc;
+  fb_on = 10^(-3/(sustain*freq));
+  fb_off = 10^(-3/(0.07*freq));
+  fb = fb_on;
+  // excitation: low-passed noise burst with a pick-position comb
+  lpn = 0;
+  i = 0;
+  loop(ceil(period) + 2,
+    x = rand(2) - 1;
+    lpn += (x - lpn) * (0.18 + 0.55*bright);
+    tmp[i] = lpn;
+    i += 1;
+  );
+  pick = max(1, floor(period*0.18));
+  i = 0;
+  loop(ceil(period) + 2,
+    x = tmp[i] - (i >= pick ? tmp[i - pick] : 0);
+    idx = wp - 1 - i; idx < 0 ? idx += dlsize;
+    dl[idx] = x * v * 1.6;
+    i += 1;
+  );
+  lpst = 0;
+  sub_env = v; sub_att = 0;
+  att_env = v;
+  cur_note = n; gate = 1;
+);
+
+@slider
+g_vol = db2g(slider1);
+drive = slider2/100;
+bright = slider3/100;
+subamt = slider4/100;
+sustain = slider6;
+lpc = 0.3 + 0.62*bright;
+sub_dec = coef(1.4);
+sub_rel = coef(0.035);
+att_dec = coef(0.012);
+dgain = 1 + drive*14;
+dmix = 0.25 + drive*0.9;
+
+@block
+nev = 0; evi = 0; spos = 0;
+while (midirecv(ofs, m1, m2, m3)) (
+  st = m1 & 0xF0;
+  (st == 0x90 && m3 > 0) ? (
+    evq[nev*3] = ofs; evq[nev*3+1] = m2; evq[nev*3+2] = m3; nev += 1;
+  ) : (st == 0x80 || (st == 0x90 && m3 == 0)) ? (
+    evq[nev*3] = ofs; evq[nev*3+1] = m2; evq[nev*3+2] = 0; nev += 1;
+  ) : (st == 0xB0 && (m2 == 123 || m2 == 120)) ? (
+    evq[nev*3] = ofs; evq[nev*3+1] = -1; evq[nev*3+2] = 0; nev += 1;
+  );
+  midisend(ofs, m1, m2, m3);
+);
+
+@sample
+while (evi < nev && evq[evi*3] <= spos) (
+  en = evq[evi*3+1]; ev = evq[evi*3+2];
+  ev > 0 ? pluck(en, ev) : (
+    (en == cur_note || en < 0) ? ( gate = 0; fb = fb_off; );
+  );
+  evi += 1;
+);
+spos += 1;
+
+// string
+rp = wp - dly; rp < 0 ? rp += dlsize;
+i0 = floor(rp); fr = rp - i0; i1 = i0 + 1; i1 >= dlsize ? i1 -= dlsize;
+s = dl[i0]*(1 - fr) + dl[i1]*fr;
+lpst += (s - lpst) * lpc;
+dl[wp] = lpst * fb;
+wp += 1; wp >= dlsize ? wp = 0;
+
+// sub
+sub_ph += freq/srate; sub_ph -= floor(sub_ph);
+sub_att < 1 ? sub_att = min(1, sub_att + 1/(0.004*srate));
+sub = sin(2*$pi*sub_ph) * sub_env * sub_att;
+sub_env *= gate ? sub_dec : sub_rel;
+
+raw = s + sub*subamt*0.9;
+
+// parallel drive: clean lows + distorted upper band
+split_lo.svf(raw);
+low = split_lo.lp;
+hi = pre_hp.svf(raw);
+d = tanh_(hi * dgain);
+post_lp.svf(d);
+d = post_lp.lp;
+mid_pk.svf(d);
+d = d + mid_pk.bp*0.6;
+out = low*1.1 + d*dmix*0.5;
+out = dc.svf(out);
+out = tanh_(out*1.2) * g_vol * 0.8;
+spl0 = out;
+spl1 = out;

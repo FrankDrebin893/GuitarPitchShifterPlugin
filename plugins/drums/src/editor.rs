@@ -21,7 +21,8 @@ const STYLE: PedalStyle = PedalStyle {
 };
 
 // One footswitch per kit, with its horizontal position
-const KIT_SWITCHES: [(Kit, &str, f32); 3] = [(Kit::Rock, "Rock", 200.0), (Kit::Jazz, "Jazz", 330.0), (Kit::Metal, "Metal", 460.0)];
+const KIT_SWITCHES: [(Kit, &str, f32); 4] =
+    [(Kit::Rock, "Rock", 125.0), (Kit::Jazz, "Jazz", 250.0), (Kit::Metal, "Metal", 375.0), (Kit::Groove, "Groove", 500.0)];
 
 pub fn default_state() -> Arc<EguiState> {
     EguiState::from_size(WINDOW_WIDTH, WINDOW_HEIGHT)

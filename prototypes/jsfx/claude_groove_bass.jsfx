@@ -1,0 +1,169 @@
+desc:Claude Groove Bass (warm finger bass with slides)
+//tags: instrument synthesizer bass
+//author: Claude
+// Monophonic finger-style electric bass: a Karplus-Strong string excited by a soft finger pluck,
+// a sine sub layer, a warm tone filter and light tube drive.
+// Overlapping (legato) notes slide to the new pitch without re-plucking, like a fretted slide.
+// Short, quiet notes read as ghost / dead notes.
+
+in_pin:none
+out_pin:left
+out_pin:right
+
+slider1:-3<-30,12,0.1>Volume (dB)
+slider2:35<0,100,1>Brightness (%)
+slider3:1100<300,4000,1>Tone (Hz)
+slider4:25<0,100,1>Sub (%)
+slider5:15<0,100,1>Drive (%)
+slider6:3<0.5,8,0.1>Sustain (s)
+slider7:60<5,300,1>Slide time (ms)
+slider8:0<-24,24,1>Transpose (semitones)
+
+@init
+function db2g(d) ( 10^(d/20) );
+function tanh_(x) local(e) ( x = max(-12, min(12, x)); e = exp(2*x); (e-1)/(e+1) );
+function coef(tau) ( exp(-1/(max(tau, 0.00001)*srate)) );
+function svf_set(f, q) instance(g, k, a1, a2, a3) (
+  g = tan($pi * min(f, srate*0.45) / srate);
+  k = 1/q;
+  a1 = 1/(1 + g*(g + k));
+  a2 = g*a1;
+  a3 = g*a2;
+);
+function svf(v0) instance(ic1eq, ic2eq, a1, a2, a3, k, lp, bp, hp) local(v1, v2, v3) (
+  v3 = v0 - ic2eq;
+  v1 = a1*ic1eq + a2*v3;
+  v2 = ic2eq + a2*ic1eq + a3*v3;
+  ic1eq = 2*v1 - ic1eq;
+  ic2eq = 2*v2 - ic2eq;
+  lp = v2; bp = v1; hp = v0 - k*v1 - v2;
+  hp;
+);
+
+dl = 0; dlsize = 16384;
+tmp = 20000;
+tmp2 = 40000;
+memset(dl, 0, dlsize);
+wp = 0; lpst = 0; lpc = 0.4;
+cur_note = -1; gate = 0; freq = 55; dly = 800; tgt_dly = 800;
+fb = 0.99; fb_on = 0.99; fb_off = 0.5;
+sub_env = 0; sub_ph = 0; sub_att = 1;
+evq = 200000; nev = 0; evi = 0; spos = 0;
+dc.svf_set(28, 0.7);
+
+function note_freq(n) ( 440 * 2^((n + slider8 - 69)/12) );
+
+function pluck(n, vel) local(v, period, i, x, a, N, mean, c, lpn, idx) (
+  v = vel/127;
+  freq = note_freq(n);
+  period = srate/freq;
+  lpc = 0.18 + 0.6*bright*(0.55 + 0.45*v);
+  dly = tgt_dly = period - (1 - lpc)/lpc;
+  fb_on = 10^(-3/(sustain*freq));
+  fb_off = 10^(-3/(0.12*freq));
+  fb = fb_on;
+  N = ceil(period);
+  // finger pluck: triangle displacement (apex at 20%) with a touch of noise
+  mean = 0;
+  i = 0;
+  loop(N,
+    x = i/N;
+    a = x < 0.2 ? x/0.2 : (1 - x)/0.8;
+    tmp[i] = a + (rand(2) - 1)*0.1;
+    mean += tmp[i];
+    i += 1;
+  );
+  mean /= N;
+  // circular smoothing, softer for quiet notes
+  c = 0.12 + 0.55*v*(0.4 + 0.6*bright);
+  lpn = 0;
+  loop(2,
+    i = 0;
+    loop(N,
+      lpn += ((tmp[i] - mean) - lpn)*c;
+      tmp2[i] = lpn;
+      i += 1;
+    );
+  );
+  i = 0;
+  loop(N,
+    idx = wp - N + i; idx < 0 ? idx += dlsize;
+    dl[idx] = tmp2[i] * v * 1.5;
+    i += 1;
+  );
+  lpst = 0;
+  sub_env = v; sub_att = 0;
+  cur_note = n; gate = 1;
+);
+
+function slide_to(n) (
+  tgt_dly = srate/note_freq(n) - (1 - lpc)/lpc;
+  fb_on = 10^(-3/(sustain*note_freq(n)));
+  fb_off = 10^(-3/(0.12*note_freq(n)));
+  fb = fb_on;
+  cur_note = n; gate = 1;
+);
+
+@slider
+g_vol = db2g(slider1);
+bright = slider2/100;
+tone.svf_set(slider3, 0.75);
+subamt = slider4/100;
+drive = slider5/100;
+dg = 1 + drive*3;
+sustain = slider6;
+glide_c = 1 - exp(-1/(max(slider7, 1)*0.001/3*srate));
+sub_dec = coef(1.2);
+sub_rel = coef(0.03);
+
+@block
+nev = 0; evi = 0; spos = 0;
+while (midirecv(ofs, m1, m2, m3)) (
+  st = m1 & 0xF0;
+  (st == 0x90 && m3 > 0) ? (
+    evq[nev*3] = ofs; evq[nev*3+1] = m2; evq[nev*3+2] = m3; nev += 1;
+  ) : (st == 0x80 || (st == 0x90 && m3 == 0)) ? (
+    evq[nev*3] = ofs; evq[nev*3+1] = m2; evq[nev*3+2] = 0; nev += 1;
+  ) : (st == 0xB0 && (m2 == 123 || m2 == 120)) ? (
+    evq[nev*3] = ofs; evq[nev*3+1] = -1; evq[nev*3+2] = 0; nev += 1;
+  );
+  midisend(ofs, m1, m2, m3);
+);
+
+@sample
+while (evi < nev && evq[evi*3] <= spos) (
+  en = evq[evi*3+1]; ev = evq[evi*3+2];
+  ev > 0 ? (
+    (gate && cur_note >= 0 && en != cur_note) ? slide_to(en) : pluck(en, ev);
+  ) : (
+    (en == cur_note || en < 0) ? ( gate = 0; fb = fb_off; );
+  );
+  evi += 1;
+);
+spos += 1;
+
+// glide the loop length toward the target (only moves during slides)
+dly += (tgt_dly - dly) * glide_c;
+freq = srate / (dly + (1 - lpc)/lpc);
+
+// string
+rp = wp - dly; rp < 0 ? rp += dlsize;
+i0 = floor(rp); fr = rp - i0; i1 = i0 + 1; i1 >= dlsize ? i1 -= dlsize;
+s = dl[i0]*(1 - fr) + dl[i1]*fr;
+lpst += (s - lpst) * lpc;
+dl[wp] = lpst * fb;
+wp += 1; wp >= dlsize ? wp = 0;
+
+// sub
+sub_ph += freq/srate; sub_ph -= floor(sub_ph);
+sub_att < 1 ? sub_att = min(1, sub_att + 1/(0.006*srate));
+sub = sin(2*$pi*sub_ph) * sub_env * sub_att;
+sub_env *= gate ? sub_dec : sub_rel;
+
+raw = s + sub*subamt*0.8;
+tone.svf(raw);
+y = tanh_(tone.lp * dg) / dg * (1 + drive);
+y = dc.svf(y);
+out = y * g_vol * 0.9;
+spl0 = out;
+spl1 = out;

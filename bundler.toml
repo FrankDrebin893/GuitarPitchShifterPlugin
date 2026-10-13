@@ -6,3 +6,12 @@ name = "HojtGuitarAmp"
 
 [drums]
 name = "HojtDrumSynth"
+
+[bass]
+name = "HojtBassSynth"
+
+[bells]
+name = "HojtGlassBells"
+
+[pad]
+name = "HojtShimmerPad"

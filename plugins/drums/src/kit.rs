@@ -10,10 +10,12 @@ pub enum Kit {
     Rock,
     Jazz,
     Metal,
+    // New kits go at the end: a project remembers its kit by its place here
+    Groove,
 }
 
 impl Kit {
-    pub const ALL: [Kit; 3] = [Kit::Rock, Kit::Jazz, Kit::Metal];
+    pub const ALL: [Kit; 4] = [Kit::Rock, Kit::Jazz, Kit::Metal, Kit::Groove];
 }
 
 pub struct CymbalSet {
@@ -29,8 +31,8 @@ pub struct CymbalSet {
     pub splash: CymbalPreset,
 }
 
-/// Everything that makes one kit sound different from another. All decay times are time
-/// constants: the sound is 60 dB down after about seven of them.
+/// Everything that makes one kit of the modal voices sound different from another. All decay
+/// times are time constants: the sound is 60 dB down after about seven of them.
 pub struct KitPreset {
     pub kick: KickPreset,
     pub snare: SnarePreset,
@@ -43,11 +45,12 @@ pub struct KitPreset {
 }
 
 impl KitPreset {
-    pub fn new(kit: Kit) -> Self {
+    /// Metal and Groove have none: they are instruments of their own (`engines`)
+    pub fn new(kit: Kit) -> Option<Self> {
         match kit {
-            Kit::Rock => rock(),
-            Kit::Jazz => jazz(),
-            Kit::Metal => metal(),
+            Kit::Rock => Some(rock()),
+            Kit::Jazz => Some(jazz()),
+            Kit::Metal | Kit::Groove => None,
         }
     }
 }
@@ -140,51 +143,6 @@ fn jazz() -> KitPreset {
         }),
         room_decay_s: 0.8,
         room_level: 1.2,
-    }
-}
-
-/// Tight and cutting: short clicky kick, cracking snare, punchy toms, bright cymbals, dry
-fn metal() -> KitPreset {
-    KitPreset {
-        kick: KickPreset {
-            freq_hz: 56.0,
-            sweep_semitones: 26.0,
-            sweep_ms: 9.0,
-            decay_ms: 60.0,
-            shell_level: 0.08,
-            click_level: 0.9,
-            click_freq_hz: 4200.0,
-            click_ms: 2.5,
-            drive: 2.4,
-        },
-        snare: SnarePreset {
-            freq_hz: 240.0,
-            bend_semitones: 2.0,
-            body_decay_ms: 50.0,
-            body_level: 0.85,
-            ring: 0.45,
-            wire_level: 1.0,
-            wire_decay_ms: 85.0,
-            wire_hz: 4500.0,
-            wire_lp_hz: 14000.0,
-            attack_level: 0.7,
-            drive: 2.2,
-        },
-        toms: TomPreset {
-            freqs_hz: [64.0, 76.0, 90.0, 108.0, 130.0, 154.0],
-            bend_semitones: 4.0,
-            decay_ms: 120.0,
-            ring: 0.4,
-            attack_level: 0.6,
-        },
-        cymbals: cymbals(&CymbalCharacter {
-            brightness: 1.5,
-            sustain: 0.85,
-            wash: 0.9,
-            attack: 1.3,
-        }),
-        room_decay_s: 0.35,
-        room_level: 0.7,
     }
 }
 

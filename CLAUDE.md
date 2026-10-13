@@ -5,14 +5,23 @@ A suite of VST3/CLAP plugins built with Rust and the nih-plug framework. The bra
 ## Layout
 
 - `plugins/pitch_shifter/` - Real-time guitar pitch shifter (effect)
-- `plugins/drums/` - Synthesized drum instrument (full kit, Rock/Jazz/Metal)
+- `plugins/drums/` - Synthesized drum instrument (full kit, Rock/Jazz/Metal/Groove)
+- `plugins/bass/` - Plucked string bass (instrument), picked or played with a finger
+- `plugins/pad/` - Slow ambient pad with a chorus and a shimmering hall (instrument)
+- `plugins/bells/` - Soft glassy bells with a ping-pong delay and a hall (instrument)
 - `plugins/amp/` - Guitar amp simulator (effect). Its decisions, known problems and backlog are in `docs/amp-progress.md`
-- `crates/suite_common/` - Shared code: `VENDOR` and `BRAND` constants, `ui` module (the pedal look, see Look below)
+- `crates/suite_common/` - Shared code: `VENDOR` and `BRAND` constants, `ui` module (the pedal look, see Look below),
+  `dsp` (filter, noise and the `Hall` reverb of the newer instruments), `measure` (what their tests measure with)
+- `prototypes/jsfx/` - The REAPER scripts that Metal, Groove, bass, pad and bells were written as
+  first: the reference for those ports, not built or shipped. Its `README.md` says where a port differs
 - `crates/suite_common/assets/fonts/` - Embedded fonts (SIL OFL) with their licence files
 - `xtask/` - nih-plug bundler
 - `bundler.toml` - Bundle name per plugin package
 - `site/` - The public page (plain HTML and CSS, no build step), published by GitHub Pages
+- `site-sources/` - What is played in a sound example of the page when it is our own playing
+  (DI recordings, MIDI drum parts); not published. See its `README.md`
 - `scripts/package.sh` - Packs the bundles into the zips of a release
+- `scripts/site-audio.sh` - Makes the page's sound examples from the render tests
 - `.github/workflows/` - `ci.yml` (tests), `release.yml` (builds and publishes a release),
   `pages.yml` (publishes `site/`)
 
@@ -25,6 +34,9 @@ Each plugin keeps DSP in its own module(s), separate from `lib.rs` (plugin entry
 cargo xtask bundle pitch_shifter --release
 cargo xtask bundle drums --release
 cargo xtask bundle amp --release
+cargo xtask bundle bass --release
+cargo xtask bundle pad --release
+cargo xtask bundle bells --release
 
 # Quick compile check
 cargo check --workspace
@@ -36,6 +48,9 @@ cargo test --workspace
 cargo run -p pitch_shifter --features standalone -- --backend dummy
 cargo run -p drums --features standalone -- --backend dummy
 cargo run -p amp --features standalone -- --backend dummy
+cargo run -p bass --features standalone -- --backend dummy
+cargo run -p pad --features standalone -- --backend dummy
+cargo run -p bells --features standalone -- --backend dummy
 ```
 
 Output location: `target/bundled/<BundleName>.vst3`
@@ -47,6 +62,9 @@ Copy VST3 to system folder (requires admin):
 xcopy /E /I /Y "target\bundled\HojtPitchShifter.vst3" "C:\Program Files\Common Files\VST3\HojtPitchShifter.vst3"
 xcopy /E /I /Y "target\bundled\HojtDrumSynth.vst3" "C:\Program Files\Common Files\VST3\HojtDrumSynth.vst3"
 xcopy /E /I /Y "target\bundled\HojtGuitarAmp.vst3" "C:\Program Files\Common Files\VST3\HojtGuitarAmp.vst3"
+xcopy /E /I /Y "target\bundled\HojtBassSynth.vst3" "C:\Program Files\Common Files\VST3\HojtBassSynth.vst3"
+xcopy /E /I /Y "target\bundled\HojtShimmerPad.vst3" "C:\Program Files\Common Files\VST3\HojtShimmerPad.vst3"
+xcopy /E /I /Y "target\bundled\HojtGlassBells.vst3" "C:\Program Files\Common Files\VST3\HojtGlassBells.vst3"
 ```
 
 ## Look
@@ -79,8 +97,9 @@ controls, portrait) or `plugins/drums/src/editor.rs` (many controls, landscape) 
 - **One pedal per plugin.** The whole window is one enclosure from `ui::pedal`. No panels, tabs,
   menus or default egui widgets on top of it
 - **Paint:** each plugin has its own saturated paint colour, a `PAINT_*` constant in `theme.rs`.
-  Taken: orange (Pitch Shifter), teal (Drum Synth), oxblood red (Guitar Amp). A new one must be clearly different from those
-  and dark enough for cream print to read on it
+  Taken: orange (Pitch Shifter), teal (Drum Synth), oxblood red (Guitar Amp), cobalt (Bass Synth),
+  plum (Shimmer Pad), pine green (Glass Bells). A new one must be clearly different from those
+  and dark enough for cream print to read on it; it goes in `PLUGIN_PAINTS`, where a test holds it to both
 - **Print on the paint is always `SILK` (cream).** Black is only for knobs, label tape and the logo plate.
   The one other thing on paint is the second coat of a mini pedal's art, in `shade`s of its own paint.
   `BRAND_ORANGE` is only the pointer in the logo
@@ -95,8 +114,8 @@ controls, portrait) or `plugins/drums/src/editor.rs` (many controls, landscape) 
   it (lit = on or selected) and, when there are several, a `silk_label` below
 - **Name band:** the plugin's plain name (what it does, two short words), with an `Ornament` that
   hints at it. Add a new `Ornament` variant in `frame.rs` for a new plugin
-- **Model number:** two letters from the name and a number, like `PS-10` and `DS-2`. It is print,
-  not the version, and does not change with releases
+- **Model number:** two letters from the name and a number, like `PS-10`, `DS-2` and `BA-1`.
+  It is print, not the version, and does not change with releases
 - **Jack captions** say what really goes in and out (`In`, `MIDI In`, `Stereo Out`)
 - **Window size:** fixed, sized to the controls. Portrait about 400 wide for up to four controls,
   landscape about 660 wide for more
@@ -202,17 +221,22 @@ Its CLAP ID and VST3 class ID predate the suite and are kept as they were.
 
 ### Drum Synth (`plugins/drums`)
 
-Fully synthesized drums: no sample files, nothing loaded from disk. MIDI in, stereo out, General MIDI drum map. Three kits: Rock, Jazz, Metal.
+Fully synthesized drums: no sample files, nothing loaded from disk. MIDI in, stereo out, General MIDI drum map. Four kits: Rock, Jazz, Metal, Groove.
+
+Rock and Jazz are two presets of one instrument, the modal voices. Metal and Groove are
+instruments of their own (`src/engines/`), ported from `prototypes/jsfx`.
 
 - `src/lib.rs` - Plugin entry point, parameters, MIDI events
 - `src/drum_kit.rs` - The instrument: owns all voices, note map, stereo mix, room send, output limiter
-- `src/kit.rs` - `Kit` enum and one `KitPreset` per kit: all the constants that make the kits differ
+- `src/kit.rs` - `Kit` enum and one `KitPreset` for Rock and for Jazz: all the constants that make those two differ
+- `src/engines/` - `metal.rs` and `groove.rs`: the Metal and the Groove kit, each whole (voices,
+  room, bus); `mod.rs` has what they share (`MetalCluster`, `CombRoom`, `BusDrive`, `Rest`)
 - `src/voices/` - `kick.rs`, `snare.rs`, `tom.rs`, `cymbal.rs`, and `mod.rs` (`Hit`, `Voice`, `VoicePair`)
 - `src/dsp.rs` - Shared building blocks: noise, filters, membrane modes, clippers
 - `src/reverb.rs` - Room: 8-line feedback delay network
 - `src/editor.rs` - egui GUI: teal pedal, knobs, one footswitch per kit
 
-How the voices work:
+How the modal voices (Rock, Jazz) work:
 
 1. Kick: sine body with a pitch sweep, one shell mode, band-passed noise click for the beater, saturation
 2. Snare and toms: inharmonic membrane modes (`dsp::Modes`) sharing a pitch bend, plus noise for the
@@ -231,16 +255,36 @@ How the voices work:
 7. A kit change, Tune and Damping apply to the next hits. Ringing voices keep their sound
 8. `dsp::bus_clip` on the output leaves single hits untouched and rounds off the peaks of busy patterns
 
+How Metal and Groove work:
+
+- One voice per piece: a new hit starts the piece again. Kick, snare and toms are sines with a
+  pitch drop and filtered noise; hi-hats and cymbals are six square waves at inharmonic ratios
+  (`MetalCluster`) and noise through filters; every noise part of a kit hears the same noise
+- Each has its own room (`CombRoom`: combs and all-passes) and a tanh on its bus. Metal's bus is
+  driven at 35 %; Groove's is a tape at 20 % with a low-pass behind it (Warmth 40 %)
+- They take the same controls as Rock and Jazz. Tune is on kick, snare, side stick and toms;
+  Damping scales every decay time; both are taken at the hit. Room at 25 % is the kit's own
+  default room (16 % of its full level for Metal, 22 % for Groove)
+- The kit's balance is in its trims (`*_TRIM_DB`), its level against the other kits in `LEVEL`:
+  kick and snare as loud as Rock's, and peaks that never reach `bus_clip`'s knee
+- Groove has no china (52 plays its crash) and one crash for 49, 57 and, cut short, 55. Its
+  shaker follows the Hi-Hat level
+- An engine that has been silent for 0.1 s rests and costs nothing. One that is ringing when
+  the kit changes rings on
+- Metal's splash borrows the hi-hat's cluster, which then runs twice as fast while both
+  sound. That is the script's sound; leave it
+
 | MIDI note | Voice | MIDI note | Voice |
 |-----------|-------|-----------|-------|
 | 35, 36 | Kick | 42 / 44 / 46 | Hi-hat closed / pedal / open |
 | 38, 40 | Snare | 49, 57 | Crash 1, Crash 2 |
 | 37 | Side stick | 51, 59 / 53 | Ride / Ride bell |
 | 41, 43, 45, 47, 48, 50 | Toms, low to high | 52, 55 | China, Splash |
+| | | 69, 70, 82 | Shaker (Groove only) |
 
 | Parameter | Range | Default | Description |
 |-----------|-------|---------|-------------|
-| Kit | Rock / Jazz / Metal | Rock | Sound of every piece and of the room |
+| Kit | Rock / Jazz / Metal / Groove | Rock | Sound of every piece and of the room. New kits go at the end: a project remembers its kit by its number |
 | Gain | -30 to +6 dB | -6 dB | Output level |
 | Room | 0-100 % | 25 % | Room reverb amount |
 | Tune | -6 to +6 st | 0 | Pitch of kick, snare and toms |
@@ -250,6 +294,107 @@ How the voices work:
 Stereo positions are from the drummer's seat (hi-hat left, floor tom right).
 
 Not there yet: separate outputs per drum, hi-hat openness from CC4, cymbal choke on note-off.
+
+### Bass Synth (`plugins/bass`)
+
+A plucked string bass, one note at a time. MIDI in, the same signal on both outputs. Two
+voices that share the string: Metal (picked; clean lows under a distorted band of mids) and
+Groove (finger; a tone filter and a little tube drive). Ported from `prototypes/jsfx`.
+
+- `src/lib.rs` - Plugin entry point, parameters. Reads them once per block into `BassSettings`
+- `src/bass.rs` - `Bass`: the string (a delay line that feeds itself through a low-pass), the
+  two plucks, the sine under the string, the two output stages; `Voice` and its settings
+- `src/editor.rs` - egui GUI: cobalt pedal, eight knobs, one footswitch per voice
+
+How it behaves:
+
+- A voice footswitch also sets the knobs to that voice's own settings (`Voice::settings`),
+  like a preset. A host that changes Voice itself leaves the knobs alone
+- Slide at 0 ms plucks every note. Above 0, a note that starts while another is held slides
+  to it without a new pluck, in the Slide time
+- Tone is the low-pass behind the string on Groove, and behind the drive on Metal
+- Letting go of the key damps the string (70 ms on Metal, 120 ms on Groove). All notes off and
+  all sound off do the same
+- Notes are within 1 cent from 44.1 to 192 kHz (`bass_report`)
+- `lib.rs` takes every default from `BassSettings::default`, which is Metal's settings
+
+| Parameter (id) | Range | Metal | Groove | Description |
+|----------------|-------|-------|--------|-------------|
+| Voice (`voice`) | Metal / Groove | | | Pluck and output stage |
+| Volume (`volume`) | -30 to +12 dB | -2 dB | -3 dB | Output level |
+| Drive (`drive`) | 0-100 % | 50 % | 15 % | Distortion of the mids (Metal), tube drive (Groove) |
+| Brightness (`brightness`) | 0-100 % | 55 % | 35 % | How hard the string is plucked and how long its top rings |
+| Sub (`sub`) | 0-100 % | 45 % | 25 % | Level of the sine under the string |
+| Tone (`tone`) | 300-4000 Hz | 3200 Hz | 1100 Hz | Low-pass |
+| Sustain (`sustain`) | 0.5-8 s | 3.5 s | 3 s | Time for a held note to fall by 60 dB |
+| Slide (`slide`) | 0-300 ms | 0 ms | 60 ms | Slide between overlapping notes; 0 plucks every note |
+| Transpose (`transpose`) | -24 to +24 st | 0 | 0 | |
+
+### Shimmer Pad (`plugins/pad`)
+
+A slow ambient pad. MIDI in, stereo out, twelve voices. Ported from `prototypes/jsfx`.
+
+- `src/lib.rs` - Plugin entry point, parameters. Reads them once per block into `PadSettings`
+- `src/pad.rs` - `ShimmerPad`: voices (three detuned saws and noise through a low-pass that
+  opens with the swell), chorus, the hall (`suite_common::dsp::Hall`), the shimmer
+- `src/editor.rs` - egui GUI: plum pedal, twelve knobs, Chorus and Shimmer footswitches
+
+How it behaves:
+
+- A note that is played again takes the voice it has; a thirteenth takes the quietest voice
+  that is let go, or the quietest of all
+- The filters are set every 32 samples counted across host blocks, so the output does not
+  depend on the host's block size
+- Shimmer reads the hall's tail back an octave up and feeds it into the hall again
+- The two footswitches fade their effect in and out in 20 ms; off is the same as the knob at 0
+
+| Parameter (id) | Range | Default | Description |
+|----------------|-------|---------|-------------|
+| Volume (`volume`) | -40 to +12 dB | -6 dB | Output level |
+| Attack (`attack`) | 0.01-6 s | 1.5 s | Time to swell to full level |
+| Release (`release`) | 0.05-10 s | 3.5 s | Time to fall by 40 dB once the key is let go |
+| Cutoff (`cutoff`) | 150-8000 Hz | 1600 Hz | Where the filter of a middle C stands once swelled |
+| Dry (`dry`) | 0-100 % | 45 % | Level of the pad itself |
+| Detune (`detune`) | 0-30 ct | 9 ct | Distance of the outer saws from the middle one |
+| Breath (`breath`) | 0-100 % | 18 % | Noise in each voice |
+| Motion (`motion`) | 0-100 % | 35 % | How far the filters wander |
+| Chorus (`chorus_on`), Chorus Depth (`chorus`) | on / off, 0-100 % | on, 60 % | |
+| Reverb (`reverb`) | 0-100 % | 60 % | Level of the hall |
+| Reverb Decay (`reverb_decay`) | 1-20 s | 7 s | Time for the tail to fall by 60 dB |
+| Shimmer (`shimmer_on`), Shimmer Level (`shimmer`) | on / off, 0-60 % | on, 30 % | How much of the tail comes back an octave up |
+
+### Glass Bells (`plugins/bells`)
+
+Soft glassy bells for sparse lines far behind a mix. MIDI in, stereo out, twelve voices; a
+bell rings out by itself, so note-off does nothing. Ported from `prototypes/jsfx`.
+
+- `src/lib.rs` - Plugin entry point, parameters. Reads them once per block into `BellSettings`
+- `src/bells.rs` - `GlassBells`: voices (a sine bent by another at 3.5 times its pitch, and an
+  octave partial), ping-pong delay, the hall (`suite_common::dsp::Hall`)
+- `src/editor.rs` - egui GUI: pine green pedal, ten knobs, Delay and Reverb footswitches
+
+How it behaves:
+
+- The glass of a strike (how far the modulator bends the tone) fades in 0.35 s, faster than
+  the tone; Brightness and velocity set how much there is
+- Decay is the time the A above middle C takes to fall by 40 dB; lower bells ring longer
+- Each note has its own place between the speakers. The delay takes the bells in on the left
+  and bounces them right and back, each bounce a little darker
+- A thirteenth bell takes the place of the oldest
+- The delay time glides when its knob is turned. The footswitches fade in 10 ms; with Delay
+  off the echoes are out of the hall as well
+
+| Parameter (id) | Range | Default | Description |
+|----------------|-------|---------|-------------|
+| Volume (`volume`) | -40 to +12 dB | -8 dB | Output level |
+| Brightness (`brightness`) | 0-100 % | 45 % | Glass in the strike |
+| Decay (`decay`) | 0.3-10 s | 3 s | How long a bell rings |
+| Attack (`attack`) | 0.5-50 ms | 6 ms | Fade in of the strike |
+| Dry (`dry`) | 0-100 % | 55 % | Level of the bells themselves |
+| Delay (`delay_on`) | on / off | on | |
+| Delay Time, Feedback, Mix (`delay_time`, `delay_feedback`, `delay_mix`) | 50-1500 ms, 0-90 %, 0-100 % | 445 ms, 45 %, 35 % | |
+| Reverb (`reverb_on`) | on / off | on | |
+| Reverb Decay, Mix (`reverb_decay`, `reverb_mix`) | 0.5-20 s, 0-100 % | 6 s, 50 % | |
 
 ### Guitar Amp (`plugins/amp`)
 
@@ -513,7 +658,10 @@ out; the HØJT name and logo are kept out of it (`NOTICE.md`).
 1. Set the version in `Cargo.toml` (`[workspace.package]`) and run `cargo check --workspace` so
    `Cargo.lock` follows
 2. Add a `## <version>` section to `CHANGELOG.md`: it becomes the text of the release
-3. Commit, then tag `v<version>` and push the tag. `release.yml` tests, builds for Windows,
+3. For every plugin whose sound changed in that section, run `scripts/site-audio.sh <plugin>`
+   (`drums`, `amp`, `pitch_shifter`, `bass`, `pad`, `bells`) and listen to what changed in `site/audio/`. Redo a
+   screenshot in `site/img/` if the plugin's look changed
+4. Commit, then tag `v<version>` and push the tag. `release.yml` tests, builds for Windows,
    macOS (Intel and Apple Silicon in one binary, signed ad hoc) and Linux, and publishes the zips
 
 - The zips are named `<BundleName>-<windows|macos|linux>.zip`, without a version: the page
@@ -523,9 +671,15 @@ out; the HØJT name and logo are kept out of it (`NOTICE.md`).
 - `Cargo.lock` is committed so a release is built from the crates that were tested
 - The page uses the plugins' colours (`ui/theme.rs`) and fonts (copies in `site/fonts/`). Body
   text never sits on the paint: cream on orange or teal is too weak at that size
-- Screenshots in `site/img/` are the standalone windows at their own size. Sound examples in
-  `site/audio/` are MP3s (`ffmpeg -codec:a libmp3lame -q:a 4`) of files from the `render_*`
-  tests. Redo both when a plugin's look or sound has changed
+- The page is published from `main` and the downloads are the latest release, so
+  `site/audio/` and `site/img/` only change in the commit of a release: a branch that changes
+  a sound leaves them alone, or the page plays what nobody can download yet
+- Sound examples in `site/audio/` are MP3s (`ffmpeg -codec:a libmp3lame -q:a 4`) of files from
+  the `render_*` tests, never made by hand. The table in `scripts/site-audio.sh` says which
+  render each one is. An example that has not changed comes out the same to the byte
+- An example can be our own playing through the plugin: the recording or MIDI file goes in
+  `site-sources/` and its name in that table. The sound is still made by the script
+- Screenshots in `site/img/` are the standalone windows at their own size, taken by hand
 
 ## Testing
 
@@ -553,7 +707,8 @@ cargo test -p pitch_shifter --release render_wavs -- --ignored
 Drum tests sit next to the code in `plugins/drums/src`. The ones for the whole instrument are in
 `drum_kit.rs` and cover the note map, decay to silence, output bounds at all sample rates, velocity
 changing level and brightness, hi-hat choke, the kits differing measurably, Tune, Damping, stereo
-placement and the room.
+placement and the room. The tests of an engine sit in its file and pin it to the numbers of its
+script (pitches, decay times, the room at the default setting).
 
 Two ignored tests are tools for working on the drum sound:
 
@@ -564,7 +719,24 @@ Two ignored tests are tools for working on the drum sound:
 cargo test -p drums --release kit_report -- --ignored --nocapture
 
 # WAV files in target/renders for listening: per kit, every piece at three velocities and a groove.
+# Optional: DRUMS_INPUT_MID=<MIDI file> renders that drum part through every kit as well
 cargo test -p drums --release render_wavs -- --ignored
+```
+
+Bass, pad and bells have their tests next to the code too (`bass.rs`, `pad.rs`, `bells.rs`):
+tuning at several rates, envelopes, voice stealing, the effects and their switches, bounded
+output with everything up. Each has the same two tools:
+
+```bash
+# Level, tuning and brightness per note, and the cost
+cargo test -p bass --release bass_report -- --ignored --nocapture
+cargo test -p pad --release pad_report -- --ignored --nocapture
+cargo test -p bells --release bells_report -- --ignored --nocapture
+
+# WAV files in target/renders: bass_metal.wav, bass_groove.wav, pad.wav, bells.wav
+cargo test -p bass --release render_wavs -- --ignored
+cargo test -p pad --release render_wavs -- --ignored
+cargo test -p bells --release render_wavs -- --ignored
 ```
 
 ## Code Conventions
@@ -573,6 +745,7 @@ cargo test -p drums --release render_wavs -- --ignored
 - Optimize for low latency over audio quality
 - Never allocate or resize buffers on the audio thread (all buffers are fixed-size)
 - Measure pitch shifter DSP changes with `quality_report` before judging them by ear
-- Drum sounds are tuned in `plugins/drums/src/kit.rs`; check `kit_report` and listen to `render_wavs`
+- Rock and Jazz are tuned in `plugins/drums/src/kit.rs`, Metal and Groove in their engine's file;
+  check `kit_report` and listen to `render_wavs`
 - Keep DSP code separate from plugin boilerplate
 - nih-plug is pinned to one revision in the root `Cargo.toml` (`[workspace.dependencies]`); bump it there for all plugins at once

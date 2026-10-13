@@ -20,6 +20,13 @@ pub const BRAND_ORANGE: Color32 = Color32::from_rgb(226, 88, 30);
 pub const PAINT_ORANGE: Color32 = Color32::from_rgb(222, 86, 30);
 pub const PAINT_TEAL: Color32 = Color32::from_rgb(29, 130, 130);
 pub const PAINT_OXBLOOD: Color32 = Color32::from_rgb(124, 28, 32);
+pub const PAINT_COBALT: Color32 = Color32::from_rgb(30, 64, 156);
+pub const PAINT_PLUM: Color32 = Color32::from_rgb(96, 44, 120);
+pub const PAINT_PINE: Color32 = Color32::from_rgb(28, 104, 60);
+
+/// The paint of every plugin
+pub const PLUGIN_PAINTS: [Color32; 6] =
+    [PAINT_ORANGE, PAINT_TEAL, PAINT_OXBLOOD, PAINT_COBALT, PAINT_PLUM, PAINT_PINE];
 
 /// Paint of the mini pedals of a rig, one each. The head keeps the plugin's paint
 pub const PAINT_GRANITE: Color32 = Color32::from_rgb(92, 94, 96);
@@ -174,6 +181,17 @@ mod tests {
         let least = silk_contrast(PAINT_ORANGE);
         for paint in PEDAL_PAINTS {
             assert!(silk_contrast(paint) >= least, "{paint:?}: {} under {least}", silk_contrast(paint));
+        }
+    }
+
+    #[test]
+    fn test_plugin_paints_take_cream_print_and_are_clearly_apart() {
+        let least = silk_contrast(PAINT_ORANGE);
+        for (i, &a) in PLUGIN_PAINTS.iter().enumerate() {
+            assert!(silk_contrast(a) >= least, "{a:?}: {} under {least}", silk_contrast(a));
+            for &b in &PLUGIN_PAINTS[i + 1..] {
+                assert!(distance(a, b) >= 45.0, "{a:?} and {b:?} are {} apart", distance(a, b));
+            }
         }
     }
 

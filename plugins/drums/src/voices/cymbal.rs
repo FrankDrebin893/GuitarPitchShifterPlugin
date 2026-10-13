@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn test_sounds_and_decays_to_silence() {
-        let preset = KitPreset::new(Kit::Rock).cymbals.crash1;
+        let preset = KitPreset::new(Kit::Rock).unwrap().cymbals.crash1;
         let mut cymbal = Cymbal::new(1);
         assert_eq!(cymbal.process_sample(), 0.0);
 
@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_harder_hits_are_brighter() {
-        let preset = KitPreset::new(Kit::Rock).cymbals.ride;
+        let preset = KitPreset::new(Kit::Rock).unwrap().cymbals.ride;
         let mut soft_cymbal = Cymbal::new(1);
         let mut hard_cymbal = Cymbal::new(1);
 
@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn test_second_hit_adds_to_the_ringing() {
-        let preset = KitPreset::new(Kit::Rock).cymbals.ride;
+        let preset = KitPreset::new(Kit::Rock).unwrap().cymbals.ride;
         let mut cymbal = Cymbal::new(1);
 
         cymbal.trigger(&preset, &hit(0.8));
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn test_level_is_independent_of_sample_rate() {
-        let preset = KitPreset::new(Kit::Rock).cymbals.ride;
+        let preset = KitPreset::new(Kit::Rock).unwrap().cymbals.ride;
         let mut levels = Vec::new();
 
         for &sample_rate in &[44100.0, 96000.0] {

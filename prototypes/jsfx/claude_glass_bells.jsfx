@@ -1,0 +1,192 @@
+desc:Claude Glass Bells (soft FM bells, ping-pong delay, reverb)
+//tags: instrument synthesizer bell ambient
+//author: Claude
+// Soft glassy FM bells (1:3.5 operator pair plus an octave partial) with velocity-sensitive
+// brightness, a filtered ping-pong delay and a lush FDN reverb. Made for sparse, twinkling
+// ambient lines sitting far behind the mix.
+
+in_pin:none
+out_pin:left
+out_pin:right
+
+slider1:-8<-40,12,0.1>Volume (dB)
+slider2:45<0,100,1>Brightness (%)
+slider3:3<0.3,10,0.1>Decay (s)
+slider4:6<0.5,50,0.1>Attack (ms)
+slider5:445<50,1500,1>Delay time (ms)
+slider6:45<0,90,1>Delay feedback (%)
+slider7:35<0,100,1>Delay mix (%)
+slider8:50<0,100,1>Reverb mix (%)
+slider9:6<0.5,20,0.1>Reverb decay (s)
+slider10:55<0,100,1>Dry (%)
+
+@init
+function db2g(d) ( 10^(d/20) );
+function svf_set(f, q) instance(g, k, a1, a2, a3) (
+  g = tan($pi * min(f, srate*0.45) / srate);
+  k = 1/q;
+  a1 = 1/(1 + g*(g + k));
+  a2 = g*a1;
+  a3 = g*a2;
+);
+function svf(v0) instance(ic1eq, ic2eq, a1, a2, a3, k, lp, bp, hp) local(v1, v2, v3) (
+  v3 = v0 - ic2eq;
+  v1 = a1*ic1eq + a2*v3;
+  v2 = ic2eq + a2*ic1eq + a3*v3;
+  ic1eq = 2*v1 - ic1eq;
+  ic2eq = 2*v2 - ic2eq;
+  lp = v2; bp = v1; hp = v0 - k*v1 - v2;
+  hp;
+);
+function ap_init(b, len, gg) instance(buf, size, pos, g) ( buf = b; size = len; pos = 0; g = gg; );
+function ap(x) instance(buf, size, pos, g) local(bo, y) (
+  bo = buf[pos];
+  y = bo - g*x;
+  buf[pos] = x + g*y;
+  pos += 1; pos >= size ? pos = 0;
+  y;
+);
+
+rs = srate/44100;
+NV = 12;
+b_f = 1000; b_pc = 1020; b_pm = 1040; b_p2 = 1060; b_env = 1080; b_ienv = 1100;
+b_att = 1120; b_vel = 1140; b_dec = 1160; b_pan = 1180; b_age = 1200;
+memset(1000, 0, 240);
+vnext = 0;
+
+// ping-pong delay
+dlL = 10000; dlR = 160000; DLSZ = 131072; DLMASK = 131071;
+memset(dlL, 0, DLSZ); memset(dlR, 0, DLSZ);
+dw = 0;
+dmpL = 0; dmpR = 0;
+dly_hp.svf_set(300, 0.7);
+
+// FDN reverb
+fdn = 300000; FDNSZ = 32768; FDNMASK = 32767;
+memset(fdn, 0, 8*FDNSZ);
+fl = 600000; fg = 600010; dmp = 600020; yy = 600030;
+memset(600000, 0, 40);
+fl[0] = floor(1777*rs); fl[1] = floor(2053*rs); fl[2] = floor(2399*rs); fl[3] = floor(2687*rs);
+fl[4] = floor(3001*rs); fl[5] = floor(3329*rs); fl[6] = floor(3697*rs); fl[7] = floor(4001*rs);
+fw = 0; flfo = 0; md = 6*rs;
+dfb = 610000;
+memset(dfb, 0, 4*8192);
+d1.ap_init(dfb,         floor(142*rs), 0.7);
+d2.ap_init(dfb + 8192,  floor(379*rs), 0.7);
+d3.ap_init(dfb + 16384, floor(107*rs), 0.65);
+d4.ap_init(dfb + 24576, floor(277*rs), 0.65);
+damp_c = 1 - exp(-2*$pi*6000/srate);
+out_hpL.svf_set(80, 0.7);
+out_hpR.svf_set(80, 0.7);
+
+evq = 700000; nev = 0; evi = 0; spos = 0;
+
+function strike(n, vel) local(i, f, v) (
+  i = vnext; vnext = (vnext + 1) % NV;
+  f = 440*2^((n - 69)/12);
+  v = vel/127;
+  b_f[i] = f; b_pc[i] = 0; b_pm[i] = 0; b_p2[i] = 0;
+  b_env[i] = 0.00001; b_att[i] = 0; b_vel[i] = v;
+  b_ienv[i] = (0.6 + 2.4*bright) * (0.4 + 0.6*v);
+  b_dec[i] = exp(-1/(decay/4.6*(440/f)^0.35*srate));
+  b_pan[i] = 0.5 + 0.35*sin(n*2.1);
+);
+
+@slider
+g_vol = db2g(slider1);
+bright = slider2/100;
+decay = slider3;
+att_inc = 1/(max(slider4, 0.5)*0.001*srate);
+dtime = min(slider5*0.001*srate, DLSZ - 4);
+dfb_g = slider6/100;
+dmix = slider7/100;
+wet = slider8/100;
+rt = slider9;
+dry = slider10/100;
+i_dec = exp(-1/(0.35*srate));
+i = 0; loop(8, fg[i] = 10^(-3*fl[i]/(rt*srate)); i += 1;);
+
+@block
+nev = 0; evi = 0; spos = 0;
+while (midirecv(ofs, m1, m2, m3)) (
+  ((m1 & 0xF0) == 0x90 && m3 > 0) ? (
+    evq[nev*3] = ofs; evq[nev*3+1] = m2; evq[nev*3+2] = m3; nev += 1;
+  );
+  midisend(ofs, m1, m2, m3);
+);
+
+@sample
+while (evi < nev && evq[evi*3] <= spos) (
+  strike(evq[evi*3+1], evq[evi*3+2]);
+  evi += 1;
+);
+spos += 1;
+
+// ---- bells
+bL = 0; bR = 0;
+i = 0;
+loop(NV,
+  b_env[i] > 0.000005 ? (
+    b_att[i] < 1 ? ( b_att[i] = min(1, b_att[i] + att_inc); );
+    f = b_f[i];
+    b_pc[i] += f/srate; b_pc[i] -= floor(b_pc[i]);
+    b_pm[i] += f*3.5/srate; b_pm[i] -= floor(b_pm[i]);
+    b_p2[i] += f*2.0/srate; b_p2[i] -= floor(b_p2[i]);
+    x = sin(2*$pi*b_pc[i] + b_ienv[i]*sin(2*$pi*b_pm[i]));
+    x += 0.18*sin(2*$pi*b_p2[i])*b_ienv[i];
+    x *= b_env[i] * b_att[i] * b_vel[i];
+    b_att[i] >= 1 ? (b_env[i] *= b_dec[i]) : (b_env[i] = 1);
+    b_ienv[i] *= i_dec;
+    bL += x*(1 - b_pan[i]); bR += x*b_pan[i];
+  );
+  i += 1;
+);
+bL *= 0.35; bR *= 0.35;
+
+// ---- ping-pong delay (input enters on the left, bounces L -> R -> L)
+dw = (dw + 1) & DLMASK;
+rp = dw - dtime; rp < 0 ? rp += DLSZ;
+ip = floor(rp); fr = rp - ip; ip2 = (ip + 1) & DLMASK;
+edL = dlL[ip]*(1 - fr) + dlL[ip2]*fr;
+edR = dlR[ip]*(1 - fr) + dlR[ip2]*fr;
+dmpL += (edL - dmpL)*0.35;
+dmpR += (edR - dmpR)*0.35;
+dlL[dw] = (bL + bR)*0.5 + dmpR*dfb_g;
+dlR[dw] = dmpL*dfb_g;
+echoL = dmpL; echoR = dmpR;
+
+// ---- reverb
+rin = (bL + bR)*0.3 + (echoL + echoR)*0.25;
+rin = d4.ap(d3.ap(d2.ap(d1.ap(rin))));
+fw = (fw + 1) & FDNMASK;
+flfo += 0.1/srate; flfo -= floor(flfo);
+i = 0;
+loop(8,
+  rp = fw - fl[i] - md*(1 + sin(2*$pi*(flfo + i*0.125)));
+  ip = floor(rp); fr = rp - ip;
+  ya = fdn[i*FDNSZ + ((ip + FDNSZ) & FDNMASK)];
+  yb = fdn[i*FDNSZ + ((ip + 1 + FDNSZ) & FDNMASK)];
+  y = ya + (yb - ya)*fr;
+  dmp[i] += (y - dmp[i])*damp_c;
+  yy[i] = dmp[i]*fg[i];
+  i += 1;
+);
+y0 = yy[0]; y1 = yy[1]; y2 = yy[2]; y3 = yy[3]; y4 = yy[4]; y5 = yy[5]; y6 = yy[6]; y7 = yy[7];
+revL = (y0 + y2 + y4 + y6)*0.5;
+revR = (y1 + y3 + y5 + y7)*0.5;
+a0 = y0 + y1; a1 = y0 - y1; a2 = y2 + y3; a3 = y2 - y3; a4 = y4 + y5; a5 = y4 - y5; a6 = y6 + y7; a7 = y6 - y7;
+c0 = a0 + a2; c1 = a1 + a3; c2 = a0 - a2; c3 = a1 - a3; c4 = a4 + a6; c5 = a5 + a7; c6 = a4 - a6; c7 = a5 - a7;
+fdn[0*FDNSZ + fw] = (c0 + c4)*0.353553 + rin;
+fdn[1*FDNSZ + fw] = (c1 + c5)*0.353553 - rin;
+fdn[2*FDNSZ + fw] = (c2 + c6)*0.353553 + rin;
+fdn[3*FDNSZ + fw] = (c3 + c7)*0.353553 - rin;
+fdn[4*FDNSZ + fw] = (c0 - c4)*0.353553 + rin;
+fdn[5*FDNSZ + fw] = (c1 - c5)*0.353553 - rin;
+fdn[6*FDNSZ + fw] = (c2 - c6)*0.353553 + rin;
+fdn[7*FDNSZ + fw] = (c3 - c7)*0.353553 - rin;
+
+// ---- output
+oL = bL*dry + echoL*dmix + revL*wet;
+oR = bR*dry + echoR*dmix + revR*wet;
+spl0 = out_hpL.svf(oL) * g_vol;
+spl1 = out_hpR.svf(oR) * g_vol;

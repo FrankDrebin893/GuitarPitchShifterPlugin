@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn test_decays_to_silence() {
-        let preset = KitPreset::new(Kit::Rock).kick;
+        let preset = KitPreset::new(Kit::Rock).unwrap().kick;
         let mut kick = Kick::new(1);
 
         kick.trigger(&preset, &hit(1.0));
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn test_settles_on_preset_pitch() {
-        let preset = KitPreset::new(Kit::Jazz).kick;
+        let preset = KitPreset::new(Kit::Jazz).unwrap().kick;
         let mut kick = Kick::new(1);
 
         kick.trigger(&preset, &hit(1.0));
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_hits_are_not_identical() {
-        let preset = KitPreset::new(Kit::Rock).kick;
+        let preset = KitPreset::new(Kit::Rock).unwrap().kick;
         let mut kick = Kick::new(1);
 
         kick.trigger(&preset, &hit(1.0));

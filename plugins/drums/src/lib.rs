@@ -5,6 +5,7 @@ use std::sync::Arc;
 mod drum_kit;
 mod dsp;
 mod editor;
+mod engines;
 mod kit;
 mod reverb;
 #[cfg(test)]
