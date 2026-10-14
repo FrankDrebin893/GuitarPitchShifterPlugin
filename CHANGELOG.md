@@ -26,6 +26,8 @@ Three new instruments, each a pedal of its own:
 - The hi-hat follows an electronic kit's pedal (MIDI CC4): a hit on 46 with the pedal half
   down is a half-open hat, and shutting the pedal chokes a hat that rings. On every kit; a
   part without the pedal sounds as before
+- A Choke switch: with it on, a note-off on a cymbal that was held for a moment damps it at
+  once, as a hand does. Off by default. The kit switches have moved to make room
 
 - Cymbals and hi-hats are clear: the top is noise in six bands that die away one after the
   other, and the resonances only carry the body, so the bell-like ring and the chorus of

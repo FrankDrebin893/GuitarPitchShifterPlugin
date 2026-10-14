@@ -2,6 +2,7 @@ bundle HojtDrumSynth
 name Hojt Drum Synth
 clap com.guitarpitchshifter.drum-synth
 vst3 SuiteDrumSyn0002
+param choke
 param cymbals
 param damping
 param gain

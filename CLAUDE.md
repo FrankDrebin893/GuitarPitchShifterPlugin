@@ -329,6 +329,17 @@ The hi-hat pedal (MIDI CC4, 127 shut, as electronic kits send it), on every kit:
   (`Cymbal::choke`). It plays no chick: an electronic kit sends 44 for that itself
 - The openness is kept when the kit changes; `reset` opens the hats again
 
+Choke (`choke`, off by default): a note-off on a cymbal (49, 51, 52, 53, 55, 57, 59) damps it
+at once, as a hand does, and a note-off on anything else does nothing. Hi-hats are the pedal's.
+
+- A note-off within 120 ms of its note-on is ignored, so a drawn sixteenth does not cut a
+  crash. With Choke off note-offs are ignored altogether, and the sound is as it was to the bit
+- Rock and Jazz: `Cymbal::choke` with `CymbalPreset::damped` (every decay at most 25 ms);
+  Metal and Groove: `choke_cymbal` pulls the envelopes of the ride, crashes, china and splash
+  to a 25 ms time constant (Damping scales both)
+- The kit tells time from the plugin (`set_time`, per event) and not by counting in `process`,
+  where one more store per frame costs a ringing kit 8 %
+
 | MIDI note | Voice | MIDI note | Voice |
 |-----------|-------|-----------|-------|
 | 35, 36 | Kick | 42 / 44 / 46 | Hi-hat closed / pedal / open |
