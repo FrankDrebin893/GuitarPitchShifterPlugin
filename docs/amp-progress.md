@@ -240,27 +240,8 @@ for something destructive or something that truly needs Rasmus.
 
 ## Next
 
-Waiting on Rasmus for one layout decision before backlog 4 (more amps and pedals): the head's
-bottom row is full (three amp switches, Tuner, On), the board holds exactly five pedals at
-960 wide, and the model print says GA-3. Recommended to him on 2026-10-10: the amp selector
-becomes a `stepper` (any number of amps), and pedals are added by widening the window to six
-slots. Do not start backlog 4 without his answer.
-
-Nobody has listened to anything yet, and the plugin has not been in a DAW. That is now the
-most useful next step by far, and it is Rasmus's. If he has listened and left notes, they
-come first.
-
-Work that needs neither:
-- Backlog 5 (mic choices per cabinet) needs room on the Cab pedal, which is full: it goes
-  with the layout decision above
-- Backlog 8 (shared `suite_common::dsp`) is set aside: the drums use f32 state-variable and
-  one-pole filters, the amp f64 biquads, so no filter is in use by both. Moving code would
-  put the drums at risk for nothing. Take it up when a third plugin needs the amp's filters
-- A logarithm of our own in the second-order clippers would save about 1.7 us per block but
-  changes the last bits of the output: needs a decision
-- The report tests do not pin their thread, so timings on this machine come out in two
-  modes (fast and slow cores, 1.33 times apart). Pinning inside the reports would make
-  before/after comparisons trustworthy
+The backlog is the GitHub issues (`plugin:amp`), see "How work flows" in CLAUDE.md. What
+was open here on 2026-10-14 is issues #8 to #23.
 
 ## What was decided with Rasmus
 
@@ -458,6 +439,8 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
 
 ## Known problems
 
+A history, not a to-do list: what is still open is an issue.
+
 - Nobody has listened yet. Everything is tuned by the report. The first listen to
   `target/renders/amp_*.wav` may ask for another voicing (cab bite, low end, gain at 5)
 - Brøl at Gain 0 is not fully clean on hard pick attacks (the level table pushes transients
@@ -619,14 +602,8 @@ The same chords at 44.1, 48, 96 and 192 kHz differ by at most 0.17 dB and 0.03 d
 Idle after the last note: 3.5 s at default effects, 63 s at delay 1000 ms / 90 %
 ```
 
-## Backlog after M5 (top to bottom)
+## Backlog after M5
 
-1. Factory preset browser (done)
-2. User IR loader (done)
-3. Tuner (done)
-4. More amps and pedals (compressor, fuzz, chorus)
-5. Mic choices per cabinet
-6. Lower CPU (shorter or partitioned IRs, SIMD) (done)
-7. Input and output meters (small version done: gate-open and clip lamps)
-8. Shared `suite_common::dsp` for filters used by more than one plugin
-9. Per-amp knob memory (done)
+Moved to the GitHub issues on 2026-10-14. Done before that: 1 preset browser, 2 user IR
+loader, 3 tuner, 6 lower CPU, 9 per-amp knob memory, 7 small version (lamps), and from 4 the
+compressor and the mods.

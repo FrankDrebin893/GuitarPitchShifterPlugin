@@ -1,0 +1,38 @@
+name: Something does not work
+description: A crash, a wrong value, a control that does nothing, a plugin that will not load
+labels: ["state:idea", "kind:bug"]
+body:
+  - type: dropdown
+    id: plugin
+    attributes:
+      label: Which plugin
+      options:
+        - Guitar Amp
+        - Drum Synth
+        - Pitch Shifter
+        - Bass Synth
+        - Shimmer Pad
+        - Glass Bells
+        - The page
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: Version, system and host
+      placeholder: 0.3.0, Windows 11, REAPER 7.2, VST3
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did
+      description: Step by step, so it can be done again.
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
