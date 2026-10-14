@@ -1,0 +1,31 @@
+name: Idea for a feature
+description: Something a plugin, the page or the tooling could do
+labels: ["state:idea", "kind:feature"]
+body:
+  - type: dropdown
+    id: plugin
+    attributes:
+      label: Which plugin
+      options:
+        - Guitar Amp
+        - Drum Synth
+        - Pitch Shifter
+        - Bass Synth
+        - Shimmer Pad
+        - Glass Bells
+        - All of them
+        - The page or the tooling
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What it should do
+      description: What you would play or click, and what you would hear or see.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What it is for, or what is missing without it.
