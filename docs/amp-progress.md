@@ -434,6 +434,13 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
   above), own radix-2 FFT, work spread per sample, spectra made off the audio thread in
   `CabStage::offer`. Response identical to the direct FIR; no tail under 641 taps. A tail at
   a decimated rate was not built: from the measured parts it cannot beat this
+- 2026-10-14 Tuner (#18): a note is shown only within 0.5 s of a pluck: a 25 ms frame 12 dB
+  over the quieter of the two before it. Changing the note shown takes 6 dB, as does plucking
+  the same string again while it rings. Both frames must have been heard since `start`, so a
+  string that rings at switch-on waits for its next pluck. Hum that sets in at once rises like
+  a pluck, so the last 50 ms must also fall by 3 dB from 0.2 s to 1 s after the last rise, or
+  the note is let go. 25 ms is 1.5 periods of 60 Hz and 1.25 of 50 Hz: with 10 ms frames hum
+  swung 5 dB from one to the next. First readings are as fast as without the rule
 - 2026-10-10 Worktrees for subagents start from `main`, not from `amp-sim`. Tell each agent to
   run `git merge --ff-only amp-sim` first
 
@@ -498,8 +505,15 @@ worst latency 0.317 ms (Torden, 44.1 kHz, everything on). Run `amp_report` for t
 
 - Tuner: only run on synthetic signals. No guitar, no DAW; the path from detector to display
   was exercised in halves (atomic hand-off by tests, drawing by captures with fixed readings)
-- Tuner: mains hum alone above -70 dBFS reads as a note; strong hum near a low string's
-  fundamental can pull the reading. Octaves and root-plus-octave read as the root
+- Tuner: hum that sets in at once out of silence is shown for up to a second before it is let
+  go. A string that rings on in the same note as hum (B1 over 60 Hz) holds the display until
+  the reading fails. Octaves and root-plus-octave read as the root
+- Tuner: hum at -45 dBFS or louder loses low notes for long stretches (A2 included) and pulls
+  some by up to 4.6 cents (`tuner_report`); a lost note comes back only with the next pluck.
+  At -57 dBFS it reads within 3 cents. A sustainer or an e-bow that does not fade is let go
+  after a second, and so is a soft pluck only a few dB over loud hum
+- Tuner: a string plucked while the last one is less than about 30 dB down is a chord to the
+  detector and is not read (as before #18)
 - Tuner: low limit 48 Hz; readings stop below -70 dBFS; first reading on low A after 133 ms
 - Tuner and Bypass both on: the dry signal is heard while tuning (bypass wins, by decision)
 - Tuner: `non_automatable` and the state filter that keeps a project from opening muted were
