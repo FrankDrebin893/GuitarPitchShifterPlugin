@@ -324,7 +324,7 @@ How Metal and Groove work:
 
 Stereo positions are from the drummer's seat (hi-hat left, floor tom right).
 
-Not there yet: separate outputs per drum, hi-hat openness from CC4, cymbal choke on note-off.
+Not there yet: see the `plugin:drums` issues.
 
 ### Bass Synth (`plugins/bass`)
 
