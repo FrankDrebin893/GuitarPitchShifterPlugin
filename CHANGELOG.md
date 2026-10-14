@@ -24,8 +24,9 @@ Three new instruments, each a pedal of its own:
 - A fourth kit, Groove: warm and soft, with a round kick, ghost notes that are darker and
   shorter than the backbeat, dark cymbals and a shaker (notes 69, 70 and 82)
 
-- Cymbals and hi-hats are crisp: four times as many resonances, so the top is a sizzle and no
-  longer a swirl of separate tones, and the low hum under the tail is gone
+- Cymbals and hi-hats are clear: the top is noise in six bands that die away one after the
+  other, and the resonances only carry the body, so the bell-like ring and the chorus of
+  beating tones are gone, and the low hum under the tail too. Rock and Jazz kits
 - The snare has its crack: louder and brighter wires, a fuller stick attack, and as loud in the
   kit as the kick and the toms
 

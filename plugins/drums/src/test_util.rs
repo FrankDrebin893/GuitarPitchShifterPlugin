@@ -51,7 +51,12 @@ pub fn band_rms(samples: &[f32], sample_rate: f32, low_hz: f32, high_hz: f32) ->
 /// How evenly the energy between two frequencies is spread, looked at 100 Hz at a time:
 /// near 1 for noise, near 0 for a few sines with nothing between them.
 pub fn spectrum_fill(samples: &[f32], sample_rate: f32, low_hz: f32, high_hz: f32) -> f32 {
-    const SLOT_HZ: f32 = 100.0;
+    spectrum_fill_by(samples, sample_rate, low_hz, high_hz, 100.0)
+}
+
+/// The same, looked at `slot_hz` at a time. Tones that sit closer together than 100 Hz fill
+/// the coarse measure, so a finer one tells a bank of resonators from noise.
+pub fn spectrum_fill_by(samples: &[f32], sample_rate: f32, low_hz: f32, high_hz: f32, slot_hz: f32) -> f32 {
     let len = samples.len();
     let windowed: Vec<f64> = samples
         .iter()
@@ -71,11 +76,11 @@ pub fn spectrum_fill(samples: &[f32], sample_rate: f32, low_hz: f32, high_hz: f3
     };
 
     let step_hz = sample_rate / len as f32;
-    let slots = ((high_hz - low_hz) / SLOT_HZ) as usize;
+    let slots = ((high_hz - low_hz) / slot_hz) as usize;
     let powers: Vec<f64> = (0..slots)
         .map(|slot| {
-            let start = low_hz + slot as f32 * SLOT_HZ;
-            let points = (SLOT_HZ / step_hz).max(1.0) as usize;
+            let start = low_hz + slot as f32 * slot_hz;
+            let points = (slot_hz / step_hz).max(1.0) as usize;
             (0..points).map(|point| power_at(start + point as f32 * step_hz)).sum::<f64>() / points as f64
         })
         .collect();
