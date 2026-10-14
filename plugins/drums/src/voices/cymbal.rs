@@ -29,6 +29,7 @@ const WASH_NORM: f32 = 0.25;
 // The voice is switched off after this many time constants (-60 dB)
 const TAIL_TIME_CONSTANTS: f32 = 7.0;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CymbalPreset {
     /// Number of resonant modes, at most `MAX_MODES`, spread evenly from `low_hz` to
     /// `high_hz`: the body and the pitch of the cymbal. A mode rings for a second or so, a
@@ -56,6 +57,36 @@ pub struct CymbalPreset {
     /// Short noise burst from the stick
     pub attack_level: f32,
     pub attack_ms: f32,
+}
+
+impl CymbalPreset {
+    /// A cymbal between `self` (at 0.0) and `other` (at 1.0), which must have the same modes
+    /// and range, as the three sounds of a hi-hat do: times on a log scale, levels straight.
+    /// The ends are `self` and `other` exactly
+    pub fn between(&self, other: &Self, share: f32) -> Self {
+        if share <= 0.0 {
+            return *self;
+        }
+        if share >= 1.0 {
+            return *other;
+        }
+        let time = |from: f32, to: f32| from * (to / from).powf(share);
+        let level = |from: f32, to: f32| from + (to - from) * share;
+        Self {
+            decay_low_ms: time(self.decay_low_ms, other.decay_low_ms),
+            decay_high_ms: time(self.decay_high_ms, other.decay_high_ms),
+            wash_decay_ms: time(self.wash_decay_ms, other.wash_decay_ms),
+            attack_ms: time(self.attack_ms, other.attack_ms),
+            mode_level: level(self.mode_level, other.mode_level),
+            wash_level: level(self.wash_level, other.wash_level),
+            attack_level: level(self.attack_level, other.attack_level),
+            tilt: level(self.tilt, other.tilt),
+            body_hz: time(self.body_hz, other.body_hz),
+            wash_hp_hz: time(self.wash_hp_hz, other.wash_hp_hz),
+            wash_lp_hz: time(self.wash_lp_hz, other.wash_lp_hz),
+            ..*self
+        }
+    }
 }
 
 /// Synthesized cymbal: a bank of resonators ringing at inharmonic frequencies, plus a
@@ -169,16 +200,7 @@ impl Cymbal {
             if self.remaining == 0 {
                 self.jitter[i] = self.noise.next() * 0.5 + 0.5;
             }
-            let position = (i as f32 + self.jitter[i]) / modes as f32;
-            let freq = preset.low_hz + (preset.high_hz - preset.low_hz) * position;
-            let decay_ms = preset.decay_low_ms
-                * (preset.decay_high_ms / preset.decay_low_ms).powf(position)
-                * hit.decay;
-            let radius = decay_coeff(decay_ms, sample_rate);
-            let omega = TAU * freq / sample_rate;
-
-            self.a1[i] = 2.0 * radius * omega.cos();
-            self.a2[i] = radius * radius;
+            let (position, freq, omega) = self.tune_mode(i, preset, hit.decay);
 
             // Modes that would alias are left out
             if freq > sample_rate * 0.45 {
@@ -197,6 +219,7 @@ impl Cymbal {
             self.state[1 - self.newest][i] += level * (phase - omega).sin();
         }
 
+        self.set_wash_decays(preset, hit.decay);
         let wash_top = preset.wash_lp_hz
             * (WASH_SOFT_TOP + (1.0 - WASH_SOFT_TOP) * hit.velocity * hit.velocity);
         let span = preset.wash_lp_hz / preset.wash_hp_hz;
@@ -211,20 +234,58 @@ impl Cymbal {
                 let reach = 1.0 / (1.0 + (centre / wash_top).powi(2)).sqrt();
                 WASH_NORM * reach * (centre / preset.wash_hp_hz).powf(WASH_TILT) / WASH_BAND_Q
             };
-            let decay_ms = preset.wash_decay_ms
-                * WASH_TOP_DECAY.powf(b as f32 / (WASH_BANDS - 1) as f32)
-                * hit.decay;
-            self.wash_coeff[b] = decay_coeff(decay_ms, sample_rate);
             self.wash_env[b] = self.wash_env[b].max(amplitude);
         }
-        self.attack_coeff = decay_coeff(preset.attack_ms, sample_rate);
         self.wash_level = preset.wash_level;
         self.attack_level = preset.attack_level;
         self.attack_env = self.attack_env.max(amplitude * hit.velocity);
+        self.remaining = self.tail_samples(preset, hit.decay);
+    }
 
+    /// Damps what rings to the decays of `preset`, without a new hit: the hi-hat's pedal
+    /// closing on a cymbal that rings open. `preset` has the modes and range it was hit with
+    pub fn choke(&mut self, preset: &CymbalPreset, decay: f32) {
+        if self.remaining == 0 || preset.modes.min(MAX_MODES) != self.modes {
+            return;
+        }
+        for i in 0..self.modes {
+            self.tune_mode(i, preset, decay);
+        }
+        self.set_wash_decays(preset, decay);
+        self.remaining = self.remaining.min(self.tail_samples(preset, decay));
+    }
+
+    /// Frequency and decay of one mode, from its place in the range. Returns the place, the
+    /// frequency and the frequency in radians per sample
+    fn tune_mode(&mut self, i: usize, preset: &CymbalPreset, decay: f32) -> (f32, f32, f32) {
+        let sample_rate = self.sample_rate;
+        let position = (i as f32 + self.jitter[i]) / self.modes as f32;
+        let freq = preset.low_hz + (preset.high_hz - preset.low_hz) * position;
+        let decay_ms = preset.decay_low_ms
+            * (preset.decay_high_ms / preset.decay_low_ms).powf(position)
+            * decay;
+        let radius = decay_coeff(decay_ms, sample_rate);
+        let omega = TAU * freq / sample_rate;
+
+        self.a1[i] = 2.0 * radius * omega.cos();
+        self.a2[i] = radius * radius;
+        (position, freq, omega)
+    }
+
+    fn set_wash_decays(&mut self, preset: &CymbalPreset, decay: f32) {
+        for b in 0..WASH_BANDS {
+            let decay_ms = preset.wash_decay_ms
+                * WASH_TOP_DECAY.powf(b as f32 / (WASH_BANDS - 1) as f32)
+                * decay;
+            self.wash_coeff[b] = decay_coeff(decay_ms, self.sample_rate);
+        }
+        self.attack_coeff = decay_coeff(preset.attack_ms, self.sample_rate);
+    }
+
+    fn tail_samples(&self, preset: &CymbalPreset, decay: f32) -> usize {
         let longest_ms =
-            preset.decay_low_ms.max(preset.decay_high_ms).max(preset.wash_decay_ms) * hit.decay;
-        self.remaining = (longest_ms * 0.001 * TAIL_TIME_CONSTANTS * sample_rate) as usize + 1;
+            preset.decay_low_ms.max(preset.decay_high_ms).max(preset.wash_decay_ms) * decay;
+        (longest_ms * 0.001 * TAIL_TIME_CONSTANTS * self.sample_rate) as usize + 1
     }
 
     pub fn process_sample(&mut self) -> f32 {

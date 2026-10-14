@@ -317,6 +317,16 @@ How Metal and Groove work:
 - Metal's splash borrows the hi-hat's cluster, which then runs twice as fast while both
   sound. That is the script's sound; leave it
 
+The hi-hat pedal (MIDI CC4, 127 shut, as electronic kits send it), on every kit:
+
+- It sets how open a hit on 46 is: a sound between the closed hat (42) and the open one,
+  decay times on a log scale (`CymbalPreset::between`, `hat_time` in the engines). Fully open
+  is the open hat to the bit, and the hats are open until the pedal first moves. 42 and 44
+  stay as they are
+- Shutting it (under 10 % open) while a hat rings chokes it to the closed hat's decay
+  (`Cymbal::choke`). It plays no chick: an electronic kit sends 44 for that itself
+- The openness is kept when the kit changes; `reset` opens the hats again
+
 | MIDI note | Voice | MIDI note | Voice |
 |-----------|-------|-----------|-------|
 | 35, 36 | Kick | 42 / 44 / 46 | Hi-hat closed / pedal / open |

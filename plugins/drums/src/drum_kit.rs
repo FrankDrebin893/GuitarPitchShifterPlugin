@@ -43,6 +43,9 @@ const CYMBAL_SEND: f32 = 0.35;
 // Share of the decay time that full Damping takes away
 const DAMPING_RANGE: f32 = 0.75;
 
+// The hi-hat pedal closing past this (openness, 0.0-1.0) chokes a hat that rings
+const HAT_CHOKE_BELOW: f32 = 0.1;
+
 /// Linear levels per group, and the room amount (0.0-1.0)
 pub struct Mix {
     pub kick: f32,
@@ -101,6 +104,10 @@ pub struct DrumKit {
     room_level: f32,
     metal: MetalKit,
     groove: GrooveKit,
+    // How open the hi-hat pedal holds the hats, 0.0-1.0, and the modal kit that hit the
+    // hats last: its closed hat is what a choke damps them to
+    hat_openness: f32,
+    hat_kit: Kit,
 }
 
 impl DrumKit {
@@ -132,6 +139,8 @@ impl DrumKit {
             room_level,
             metal: MetalKit::new(50),
             groove: GrooveKit::new(51),
+            hat_openness: 1.0,
+            hat_kit: Kit::Rock,
         }
     }
 
@@ -162,6 +171,7 @@ impl DrumKit {
         self.room.reset();
         self.metal.reset();
         self.groove.reset();
+        self.hat_openness = 1.0;
     }
 
     /// Applies to the next hits. Voices that are ringing keep the sound they were hit with.
@@ -188,6 +198,23 @@ impl DrumKit {
         self.decay_scale = 1.0 - DAMPING_RANGE * damping.clamp(0.0, 1.0);
     }
 
+    /// The hi-hat pedal (MIDI CC4): 0.0 shut, 1.0 open. Sets what the next hits on 46 sound
+    /// like, from closed to open, on every kit. Shutting it on a hat that rings chokes it.
+    /// Until it is first moved the hats are open, so a part without it sounds as it did
+    pub fn set_hat_openness(&mut self, openness: f32) {
+        let openness = openness.clamp(0.0, 1.0);
+        if self.hat_openness >= HAT_CHOKE_BELOW && openness < HAT_CHOKE_BELOW {
+            if let Some(preset) = &self.presets[self.hat_kit as usize] {
+                self.cymbals[HAT].choke(&preset.cymbals.hat_closed, self.decay_scale);
+            }
+            self.metal.choke_hat(self.decay_scale);
+            self.groove.choke_hat(self.decay_scale);
+        }
+        self.hat_openness = openness;
+        self.metal.set_hat_openness(openness);
+        self.groove.set_hat_openness(openness);
+    }
+
     /// General MIDI drum map. Velocity is 0.0-1.0.
     pub fn note_on(&mut self, note: u8, velocity: f32) {
         if velocity <= 0.0 {
@@ -212,9 +239,15 @@ impl DrumKit {
                 self.toms[index].next_voice().trigger(&preset.toms, index, &hit);
             }
             // The closed and pedal sounds have a short decay, which chokes an open hi-hat
-            42 => self.cymbals[HAT].trigger(&cymbals.hat_closed, &hit),
-            44 => self.cymbals[HAT].trigger(&cymbals.hat_pedal, &hit),
-            46 => self.cymbals[HAT].trigger(&cymbals.hat_open, &hit),
+            42 | 44 | 46 => {
+                let sound = match note {
+                    42 => cymbals.hat_closed,
+                    44 => cymbals.hat_pedal,
+                    _ => cymbals.hat_closed.between(&cymbals.hat_open, self.hat_openness),
+                };
+                self.cymbals[HAT].trigger(&sound, &hit);
+                self.hat_kit = self.kit;
+            }
             49 => self.cymbals[CRASH1].trigger(&cymbals.crash1, &hit),
             57 => self.cymbals[CRASH2].trigger(&cymbals.crash2, &hit),
             51 | 59 => self.cymbals[RIDE].trigger(&cymbals.ride, &hit),
@@ -554,6 +587,77 @@ mod tests {
         }
     }
 
+    /// The hi-hat struck on 46 with the pedal held at `openness`
+    fn render_hat(kit: Kit, openness: Option<f32>, seconds: f32) -> Vec<f32> {
+        let mut drums = dry_kit(kit, SAMPLE_RATE);
+        if let Some(openness) = openness {
+            drums.set_hat_openness(openness);
+        }
+        drums.note_on(HAT_OPEN, 1.0);
+        render_mono(&mut drums, seconds)
+    }
+
+    #[test]
+    fn test_hat_pedal_sets_how_open_a_hat_on_46_rings() {
+        for kit in Kit::ALL {
+            let decay = |hat: &[f32]| decay_time_s(hat, SAMPLE_RATE, -40.0);
+            let never_moved = render_hat(kit, None, 2.0);
+            let (open, half, shut) = (
+                render_hat(kit, Some(1.0), 2.0),
+                render_hat(kit, Some(0.5), 2.0),
+                render_hat(kit, Some(0.0), 2.0),
+            );
+            // Open is the hat as it was before the pedal, to the bit
+            assert!(open.iter().zip(&never_moved).all(|(a, b)| a.to_bits() == b.to_bits()));
+
+            let closed = render_note(kit, HAT_CLOSED, 1.0, 2.0);
+            let times = [decay(&open), decay(&half), decay(&shut), decay(&closed)];
+            assert!(times[0] > times[1] && times[1] > times[2], "{kit:?}: {times:?}");
+            assert!((times[2] / times[3] - 1.0).abs() < 0.1, "{kit:?}: {times:?}");
+        }
+    }
+
+    #[test]
+    fn test_shutting_the_pedal_chokes_a_ringing_hat() {
+        for kit in Kit::ALL {
+            let open = render_note(kit, HAT_OPEN, 1.0, 0.5);
+
+            let mut drums = dry_kit(kit, SAMPLE_RATE);
+            drums.note_on(HAT_OPEN, 1.0);
+            let mut choked = render_mono(&mut drums, 0.1);
+            drums.set_hat_openness(0.0);
+            choked.extend(render_mono(&mut drums, 0.4));
+
+            let ringing = rms(seconds(&open, 0.2, 0.3));
+            let after_choke = rms(seconds(&choked, 0.2, 0.3));
+            assert!(ringing > 0.001, "{kit:?} open hat does not ring: {ringing}");
+            assert!(after_choke < ringing * 0.1, "{kit:?}: {after_choke} vs {ringing}");
+        }
+    }
+
+    #[test]
+    fn test_moving_the_pedal_without_shutting_it_leaves_the_hat_alone() {
+        // Half way down is not a choke, and neither is a pedal that was already shut
+        for kit in Kit::ALL {
+            let open = render_note(kit, HAT_OPEN, 1.0, 0.5);
+            let mut drums = dry_kit(kit, SAMPLE_RATE);
+            drums.note_on(HAT_OPEN, 1.0);
+            let mut moved = render_mono(&mut drums, 0.1);
+            drums.set_hat_openness(0.5);
+            moved.extend(render_mono(&mut drums, 0.4));
+            assert!(open.iter().zip(&moved).all(|(a, b)| a.to_bits() == b.to_bits()), "{kit:?}");
+
+            let mut drums = dry_kit(kit, SAMPLE_RATE);
+            drums.set_hat_openness(0.0);
+            drums.note_on(HAT_CLOSED, 1.0);
+            let mut held = render_mono(&mut drums, 0.01);
+            drums.set_hat_openness(0.05);
+            held.extend(render_mono(&mut drums, 0.2));
+            let closed = render_note(kit, HAT_CLOSED, 1.0, 0.21);
+            assert!(closed.iter().zip(&held).all(|(a, b)| a.to_bits() == b.to_bits()), "{kit:?}");
+        }
+    }
+
     #[test]
     fn test_kits_differ() {
         let kick_freq = |kit| {
@@ -792,6 +896,8 @@ mod tests {
                 &dir.join(format!("drums_{}_groove.wav", name)),
                 &render_pattern(kit, &groove, bpm),
             );
+
+            write_wav(&dir.join(format!("drums_{}_hat_pedal.wav", name)), &render_hat_pedal(kit));
 
             if let Some((part, bpm)) = &part {
                 write_wav(
@@ -1082,6 +1188,43 @@ mod tests {
             output.push(left);
             output.push(right);
         }
+        output
+    }
+
+    /// Eighths on 46 at 120 while the hi-hat pedal opens slowly and closes again, then four
+    /// open hits that the pedal shuts half a second later. Stereo, interleaved
+    fn render_hat_pedal(kit: Kit) -> Vec<f32> {
+        let mut drums = DrumKit::new();
+        drums.set_sample_rate(SAMPLE_RATE);
+        drums.set_kit(kit);
+        let eighth = (SAMPLE_RATE * 0.25) as usize;
+        // The pedal is read as an electronic kit sends it, every 10 ms
+        let every = (SAMPLE_RATE * 0.01) as usize;
+        let mut output = Vec::new();
+        let mut play = |drums: &mut DrumKit, samples: usize| {
+            for _ in 0..samples {
+                let (left, right) = drums.process();
+                output.extend([left, right]);
+            }
+        };
+
+        let sweep = 32 * eighth;
+        for sample in (0..sweep).step_by(every) {
+            let through = sample as f32 / sweep as f32;
+            drums.set_hat_openness(1.0 - (2.0 * through - 1.0).abs());
+            if sample % eighth < every {
+                drums.note_on(HAT_OPEN, 0.8);
+            }
+            play(&mut drums, every);
+        }
+        for _ in 0..4 {
+            drums.set_hat_openness(1.0);
+            drums.note_on(HAT_OPEN, 0.9);
+            play(&mut drums, 2 * eighth);
+            drums.set_hat_openness(0.0);
+            play(&mut drums, 2 * eighth);
+        }
+        play(&mut drums, 4 * eighth);
         output
     }
 

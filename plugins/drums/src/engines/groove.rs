@@ -1,4 +1,4 @@
-use super::{advance, coef, db, sine, BusDrive, CombRoom, MetalCluster, Rest, ENV_FLOOR};
+use super::{advance, coef, db, hat_time, sine, BusDrive, CombRoom, MetalCluster, Rest, ENV_FLOOR};
 use crate::drum_kit::{tom_index, Mix};
 use crate::dsp::{Noise, Svf};
 use crate::voices::tom::TOM_COUNT;
@@ -11,6 +11,12 @@ const LEVEL: f32 = 0.4;
 // Balance of the kit with the level controls at 0 dB
 const TOM_TRIM_DB: f32 = -2.0;
 const HAT_TRIM_DB: f32 = -2.0;
+
+/// Time constant of the closed hi-hat, which the pedal also chokes an open one to: harder
+/// hits ring a little longer
+fn hat_closed_s(level: f32) -> f32 {
+    0.022 + 0.025 * level
+}
 const SHAKER_TRIM_DB: f32 = -7.0;
 const CYMBAL_TRIM_DB: f32 = -6.0;
 
@@ -128,6 +134,8 @@ impl Swell {
 pub struct GrooveKit {
     sample_rate: f32,
     active: bool,
+    // How open the hi-hat pedal holds the hats, 0.0-1.0: what a hit on 46 sounds like
+    hat_openness: f32,
     rest: Rest,
     noise: Noise,
 
@@ -173,6 +181,7 @@ impl GrooveKit {
         let mut kit = Self {
             sample_rate: 44100.0,
             active: false,
+            hat_openness: 1.0,
             rest: Rest::new(),
             noise: Noise::new(seed),
             kick: Kick::default(),
@@ -248,6 +257,7 @@ impl GrooveKit {
             *tom = Tom::default();
         }
         self.hat = Hat::default();
+        self.hat_openness = 1.0;
         self.ride = Ride::default();
         self.crash = Swell::default();
         self.shaker = Swell::default();
@@ -282,6 +292,20 @@ impl GrooveKit {
     #[cfg(test)]
     pub fn is_active(&self) -> bool {
         self.active
+    }
+
+    /// For the next hits on 46
+    pub fn set_hat_openness(&mut self, openness: f32) {
+        self.hat_openness = openness;
+    }
+
+    /// The pedal shut on a ringing hat: it dies as a closed one of its strength does.
+    /// `decay` is Damping's
+    pub fn choke_hat(&mut self, decay: f32) {
+        if self.hat.env > ENV_FLOOR {
+            let closed = coef(hat_closed_s(self.hat.level) * decay, self.sample_rate);
+            self.hat.decay = self.hat.decay.min(closed);
+        }
     }
 
     /// Only called with notes of the kit's map
@@ -346,9 +370,12 @@ impl GrooveKit {
                 };
             }
             // The closed and pedal sounds have a short decay, which chokes an open hi-hat
-            42 => self.hat = Hat { env: level, level, decay: decay(0.022 + 0.025 * level) },
+            42 => self.hat = Hat { env: level, level, decay: decay(hat_closed_s(level)) },
             44 => self.hat = Hat { env: level * 0.5, level: level * 0.6, decay: decay(0.016) },
-            46 => self.hat = Hat { env: level, level, decay: decay(0.32) },
+            46 => {
+                let tau_s = hat_time(hat_closed_s(level), 0.32, self.hat_openness);
+                self.hat = Hat { env: level, level, decay: decay(tau_s) };
+            }
             51 | 59 => {
                 self.ride.env = level * 0.7;
                 self.ride.ping = level;

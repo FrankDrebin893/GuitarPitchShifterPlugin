@@ -23,6 +23,9 @@ Three new instruments, each a pedal of its own:
   projects set to Metal play the new one
 - A fourth kit, Groove: warm and soft, with a round kick, ghost notes that are darker and
   shorter than the backbeat, dark cymbals and a shaker (notes 69, 70 and 82)
+- The hi-hat follows an electronic kit's pedal (MIDI CC4): a hit on 46 with the pedal half
+  down is a half-open hat, and shutting the pedal chokes a hat that rings. On every kit; a
+  part without the pedal sounds as before
 
 - Cymbals and hi-hats are clear: the top is noise in six bands that die away one after the
   other, and the resonances only carry the body, so the bell-like ring and the chorus of
