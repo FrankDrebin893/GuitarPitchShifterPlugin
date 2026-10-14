@@ -812,7 +812,11 @@ mod tests {
         let mut reverb = new_reverb(SAMPLE_RATE);
         let mut output = Vec::new();
         for (index, block) in input.chunks(BLOCK).enumerate() {
-            let now = if (index * BLOCK / seconds(0.3, SAMPLE_RATE)) % 2 == 0 { &on } else { &off };
+            let now = if (index * BLOCK / seconds(0.3, SAMPLE_RATE)).is_multiple_of(2) {
+                &on
+            } else {
+                &off
+            };
             output.extend(run_blocks(&mut reverb, now, block, BLOCK).0);
         }
         let limit = 1.5 * peak(&output) * std::f32::consts::TAU * 440.0 / SAMPLE_RATE;
@@ -1001,8 +1005,8 @@ mod tests {
             "\nLevel of each repeat of a 20 ms noise burst against the burst (dB), 300 ms, mix 1.0"
         );
         println!(
-            "{:>9} {:>7} {:>7} {:>7} {:>7} {:>7} {:>7}   {}",
-            "feedback", "1", "2", "3", "4", "5", "6", "per repeat, set"
+            "{:>9} {:>7} {:>7} {:>7} {:>7} {:>7} {:>7}   per repeat, set",
+            "feedback", "1", "2", "3", "4", "5", "6"
         );
         let mut burst = vec![0.0; at(2200.0)];
         burst[..at(20.0)].copy_from_slice(&noise(0.25, at(20.0)));

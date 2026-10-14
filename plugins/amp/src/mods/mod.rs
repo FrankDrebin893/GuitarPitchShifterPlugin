@@ -770,7 +770,7 @@ pub(crate) mod tests {
             for period_ms in [1.0, 12.0] {
                 let half = seconds(0.0005 * period_ms, sample_rate);
                 signal.extend((0..seconds(0.3, sample_rate)).map(|index| {
-                    if (index / half) % 2 == 0 {
+                    if (index / half).is_multiple_of(2) {
                         1.0
                     } else {
                         -1.0

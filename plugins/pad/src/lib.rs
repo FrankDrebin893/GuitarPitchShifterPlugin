@@ -299,3 +299,16 @@ mod tests {
         assert_eq!(ShimmerPadParams::default().settings(), PadSettings::default());
     }
 }
+
+#[cfg(test)]
+mod ids {
+    /// Bundle name, plugin ids and every parameter id stay as saved projects know them
+    #[test]
+    fn ids() {
+        suite_common::ids::check::<super::ShimmerPadPlugin>(
+            env!("CARGO_MANIFEST_DIR"),
+            include_str!("../../../bundler.toml"),
+            "pad",
+        );
+    }
+}

@@ -709,3 +709,16 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod ids {
+    /// Bundle name, plugin ids and every parameter id stay as saved projects know them
+    #[test]
+    fn ids() {
+        suite_common::ids::check::<super::GuitarAmpPlugin>(
+            env!("CARGO_MANIFEST_DIR"),
+            include_str!("../../../bundler.toml"),
+            "amp",
+        );
+    }
+}

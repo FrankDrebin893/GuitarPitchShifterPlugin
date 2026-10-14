@@ -1,0 +1,9 @@
+bundle HojtPitchShifter
+name Hojt Pitch Shifter
+clap com.guitarpitchshifter.guitar-pitch-shifter
+vst3 GuitarPShift0010
+param bypass
+param latency
+param semitones
+param smoothness
+persist editor-state-pedal

@@ -176,3 +176,16 @@ impl Vst3Plugin for GuitarPitchShifterPlugin {
 
 nih_export_clap!(GuitarPitchShifterPlugin);
 nih_export_vst3!(GuitarPitchShifterPlugin);
+
+#[cfg(test)]
+mod ids {
+    /// Bundle name, plugin ids and every parameter id stay as saved projects know them
+    #[test]
+    fn ids() {
+        suite_common::ids::check::<super::GuitarPitchShifterPlugin>(
+            env!("CARGO_MANIFEST_DIR"),
+            include_str!("../../../bundler.toml"),
+            "pitch_shifter",
+        );
+    }
+}

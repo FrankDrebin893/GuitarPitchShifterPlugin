@@ -902,7 +902,7 @@ mod tests {
                         gate_changes(&trace[index * period + lead..index * period + bar]) / 2
                     })
                     .sum();
-                let opened = trace[..bar].iter().any(|&gain| gain == 1.0);
+                let opened = trace[..bar].contains(&1.0);
                 // The last mute is cut off 10 ms before the bar ends
                 let last_ends = bar - (0.01 * SAMPLE_RATE) as usize;
                 let silent = trace[last_ends..period].iter().position(|&gain| gain == 0.0);

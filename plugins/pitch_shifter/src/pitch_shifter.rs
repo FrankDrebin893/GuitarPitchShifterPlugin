@@ -418,7 +418,7 @@ impl PitchShifter {
         let newest = self.decimated_pos.wrapping_sub(1);
         let head_coarse = (head + step - 1).saturating_sub(self.decimation_count) / step;
         let window = (self.window / step).max(4);
-        let first_lag = ((min_lag + step - 1) / step).max(1);
+        let first_lag = min_lag.div_ceil(step).max(1);
         let last_lag = (max_lag / step).clamp(first_lag.min(MAX_SCORES), MAX_SCORES);
         for lag in 1..=last_lag {
             let other =

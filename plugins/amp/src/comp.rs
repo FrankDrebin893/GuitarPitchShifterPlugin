@@ -471,7 +471,7 @@ mod tests {
             let mut output = Vec::new();
             for (index, block) in input.chunks(BLOCK).enumerate() {
                 // Off and on again a few times while the sine goes on
-                let now = if (index * BLOCK / ms(250.0, SAMPLE_RATE)) % 2 == 0 {
+                let now = if (index * BLOCK / ms(250.0, SAMPLE_RATE)).is_multiple_of(2) {
                     on
                 } else {
                     CompSettings { on: false, ..on }
@@ -890,7 +890,9 @@ mod tests {
             // Far over full scale, silence, a square, and next to nothing
             let mut input = noise(100.0, len);
             input.extend(vec![0.0; len]);
-            input.extend((0..len).map(|index| if (index / period) % 2 == 0 { 1e4 } else { -1e4 }));
+            input.extend(
+                (0..len).map(|index| if (index / period).is_multiple_of(2) { 1e4 } else { -1e4 }),
+            );
             input.extend(noise(1e-30, len));
             input.extend(noise(1.0, len));
             for (sustain, level) in [(0.0, 0.0), (1.0, 1.0), (0.0, 1.0), (1.0, 0.0), (0.5, 0.5)] {

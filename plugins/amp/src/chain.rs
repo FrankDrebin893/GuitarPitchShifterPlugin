@@ -5031,8 +5031,8 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
                 };
                 let hiss_gain = rms(&hiss_trace[48_000..]);
                 let hiss_state = match hiss_gain {
-                    gain if gain == 0.0 => "silent".to_string(),
-                    gain if gain == 1.0 => "open".to_string(),
+                    0.0 => "silent".to_string(),
+                    1.0 => "open".to_string(),
                     gain => format!("{:.1} dB", to_db(gain)),
                 };
                 println!(

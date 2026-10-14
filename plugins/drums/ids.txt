@@ -1,0 +1,15 @@
+bundle HojtDrumSynth
+name Hojt Drum Synth
+clap com.guitarpitchshifter.drum-synth
+vst3 SuiteDrumSyn0002
+param cymbals
+param damping
+param gain
+param hihat
+param kick
+param kit
+param room
+param snare
+param toms
+param tune
+persist editor-state-pedal

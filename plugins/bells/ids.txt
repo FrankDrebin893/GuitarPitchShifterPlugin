@@ -1,0 +1,17 @@
+bundle HojtGlassBells
+name Hojt Glass Bells
+clap net.hojte.glass-bells
+vst3 HojtGlassBells01
+param attack
+param brightness
+param decay
+param delay_feedback
+param delay_mix
+param delay_on
+param delay_time
+param dry
+param reverb_decay
+param reverb_mix
+param reverb_on
+param volume
+persist editor-state

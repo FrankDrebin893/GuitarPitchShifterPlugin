@@ -606,7 +606,7 @@ pub(crate) mod tests {
         let mut output = Vec::new();
         for (index, block) in input.chunks(BLOCK).enumerate() {
             // Off and on again a few times while the sine goes on
-            let now = if (index * BLOCK / ms(300.0)) % 2 == 0 { &on } else { &off };
+            let now = if (index * BLOCK / ms(300.0)).is_multiple_of(2) { &on } else { &off };
             output.extend(run_blocks(&mut delay, now, block, BLOCK).0);
         }
         // Dry and repeats in phase would be the loudest a steady state gets
@@ -645,7 +645,7 @@ pub(crate) mod tests {
                 let mut signal = noise(1.0, (sample_rate * 1.5) as usize);
                 let period = (time_ms * 0.001 * sample_rate) as usize;
                 signal.extend((0..(sample_rate * 2.5) as usize).map(|i| {
-                    if (i / period) % 2 == 0 {
+                    if (i / period).is_multiple_of(2) {
                         1.0
                     } else {
                         -1.0

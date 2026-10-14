@@ -24,3 +24,6 @@ nih_plug_egui = { workspace = true }
 suite_common = { workspace = true }
 # Reads the player's own cabinets (WAV files)
 hound = "3.5"
+
+[lints]
+workspace = true

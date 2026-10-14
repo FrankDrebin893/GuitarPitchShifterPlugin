@@ -229,3 +229,16 @@ impl Vst3Plugin for DrumSynthPlugin {
 
 nih_export_clap!(DrumSynthPlugin);
 nih_export_vst3!(DrumSynthPlugin);
+
+#[cfg(test)]
+mod ids {
+    /// Bundle name, plugin ids and every parameter id stay as saved projects know them
+    #[test]
+    fn ids() {
+        suite_common::ids::check::<super::DrumSynthPlugin>(
+            env!("CARGO_MANIFEST_DIR"),
+            include_str!("../../../bundler.toml"),
+            "drums",
+        );
+    }
+}

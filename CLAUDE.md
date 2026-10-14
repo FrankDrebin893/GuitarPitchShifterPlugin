@@ -652,6 +652,10 @@ picks it up, with its settings. For that to hold, these never change once a plug
 - the `#[id = "..."]` of every existing parameter (adding parameters is fine; removing or renaming
   an id loses that setting in saved projects)
 
+Each plugin's `ids` test holds these, with the keys of its `#[persist]` fields, against its
+`ids.txt` (`suite_common::ids`). A plugin that gains a parameter: run
+`UPDATE_IDS=1 cargo test -p <name> ids` and commit `ids.txt`. Never do that for an id that changed.
+
 The version number lives in `Cargo.toml` (`[workspace.package]`) and is what hosts show.
 
 Only to compare two builds side by side in the DAW: temporarily give one of them another bundle
@@ -691,7 +695,9 @@ out; the HØJT name and logo are kept out of it (`NOTICE.md`).
 
 ## Testing
 
-**Always run `cargo test --workspace` before committing changes.**
+**Always run `cargo test --workspace` before committing changes.** CI also runs
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings`; run them too.
+Lints that clash with DSP code are allowed in the root `Cargo.toml`, each with its reason.
 
 Pitch shifter tests are in `plugins/pitch_shifter/src/pitch_shifter.rs` and cover:
 - Bit-exact passthrough at 0 semitones

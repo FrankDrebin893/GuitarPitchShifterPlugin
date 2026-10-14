@@ -22,3 +22,14 @@ strip = "symbols"
 inherits = "release"
 debug = true
 strip = "none"
+
+# Lints that clash with how DSP code is written here. Every crate takes these (`[lints]`).
+[workspace.lints.clippy]
+# Filter coefficients and polynomial fits are kept to the digits they were designed with;
+# changing one changes the output's bits
+excessive_precision = "allow"
+approx_constant = "allow"
+# DSP loops index several buffers with one counter
+needless_range_loop = "allow"
+# Noise generators have a `next` that never ends, so they are not iterators
+should_implement_trait = "allow"
