@@ -23,7 +23,9 @@ pitch_shifter quality_report
 while read -r plugin report; do
     [ -z "$plugin" ] && continue
     file="$out/${plugin}_${report}.txt"
-    if cargo test -q -p "$plugin" --release --locked "$report" -- --ignored --nocapture > "$file.raw" 2>&1; then
+    # Only what the report prints (stdout): cargo's build output and warnings go to stderr and
+    # carry source line numbers, which move with any edit
+    if cargo test -q -p "$plugin" --release --locked "$report" -- --ignored --nocapture > "$file.raw" 2>/dev/null; then
         # Timings differ from run to run and machine to machine: leave them out
         grep -vE 'of a core|ns per|us per|µs|finished in|^running [0-9]|^$' "$file.raw" > "$file"
     else
