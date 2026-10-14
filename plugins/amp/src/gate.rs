@@ -8,8 +8,9 @@ const ATTACK_MS: f32 = 0.5;
 const HOLD_MS: f32 = 40.0;
 
 // The gate closes this far below the level that opens it, so a note that fades through the
-// threshold does not open and close it over and over
-const HYSTERESIS_DB: f32 = 6.0;
+// threshold does not open and close it over and over. Hiss that stays between the two keeps
+// it open after a note: the narrower this is, the closer to the threshold the hiss may be
+const HYSTERESIS_DB: f32 = 3.0;
 
 // How fast the measured level falls between the peaks of a waveform. Slow enough to bridge
 // the half periods of the lowest notes
@@ -299,6 +300,34 @@ pub mod tests {
         gain_trace(&mut gate, &sine(440.0, 0.1, SAMPLE_RATE, 4800));
         let trace = gain_trace(&mut gate, &quiet);
         assert!(trace.iter().all(|&gain| gain == 1.0));
+    }
+
+    /// A note, then hiss whose peaks are `below_db` under the threshold: the level that is
+    /// left to hold the gate open. How long after the note the gate has closed for good, in
+    /// seconds, or None if it is still open at the end
+    fn closed_after_hiss(below_db: f32) -> Option<f32> {
+        let threshold_db = -50.0;
+        let mut input = sine(110.0, 0.1, SAMPLE_RATE, 24_000);
+        let mut noise = hiss(-70.0, 96_000);
+        let scale = db_to_gain(threshold_db - below_db) / peak(&noise);
+        noise.iter_mut().for_each(|sample| *sample *= scale);
+        input.extend(noise);
+        let trace = gain_trace(&mut new_gate(threshold_db, 100.0), &input);
+        let after = trace[24_000..].iter().rposition(|&gain| gain > 0.0)?;
+        (after + 1 < trace.len() - 24_000).then_some((after + 1) as f32 / SAMPLE_RATE)
+    }
+
+    #[test]
+    fn test_hiss_under_the_threshold_does_not_hold_the_gate_open_after_a_note() {
+        // Hiss that never opens the gate by itself shuts it behind a note, however close to
+        // the threshold its peaks come, down to the margin of the hysteresis
+        for below_db in [4.0, 6.0, 10.0] {
+            let closed = closed_after_hiss(below_db);
+            assert!(
+                closed.is_some_and(|seconds| seconds < 0.6),
+                "Peaks {below_db} dB under the threshold: closed after {closed:?} s"
+            );
+        }
     }
 
     #[test]

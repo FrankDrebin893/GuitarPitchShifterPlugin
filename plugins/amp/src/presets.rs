@@ -476,6 +476,7 @@ mod tests {
     use crate::chain::{AmpChain, AmpSettings};
     use crate::comp::CompSettings;
     use crate::delay::DelaySettings;
+    use crate::dsp::db_to_gain;
     use crate::dsp::shaper::OUTPUT_CLIP_KNEE;
     use crate::gate::tests::{decaying_note, gain_trace, hiss, transitions as gate_changes};
     use crate::gate::Gate;
@@ -863,9 +864,13 @@ mod tests {
         println!("fallen when the gate starts to close on it, in dB, and after how many seconds (`shut`: never");
         println!("opened). Palm mutes with a rest after each bar, peaking at -12 and at -30 dBFS: `gaps` is how");
         println!("often the gate started to close between two mutes of a bar (0 is right), `rest` the time from");
-        println!("the last mute of a bar to silence in ms. `hiss`: the gate on noise at -70 and -76 dBFS RMS");
+        println!("the last mute of a bar to silence in ms. `hiss`: the gate on noise at -70 and -76 dBFS RMS.");
+        println!("`after note`: a note at -12 dBFS, then hiss with its peaks 1 and 4 dB under the preset's");
         println!(
-            "{:<8} {:>6} {:>5} {:>13} {:>13} {:>13} {:>13} {:>10} {:>10} {:>13}",
+            "threshold (which never opens the gate alone): `shut` if the gate has closed 1 s later"
+        );
+        println!(
+            "{:<8} {:>6} {:>5} {:>13} {:>13} {:>13} {:>13} {:>10} {:>10} {:>13} {:>13}",
             "preset",
             "thresh",
             "rel",
@@ -875,7 +880,8 @@ mod tests {
             "chord -30",
             "mutes -12",
             "mutes -30",
-            "hiss -70/-76"
+            "hiss -70/-76",
+            "after note"
         );
         for preset in &PRESETS {
             print!("{:<8} {:>6.0} {:>5.0}", preset.name, preset.gate.1, preset.gate.2);
@@ -923,7 +929,23 @@ mod tests {
                     "open"
                 }
             });
-            println!(" {:>13}", on_hiss.join(" / "));
+            print!(" {:>13}", on_hiss.join(" / "));
+
+            let after_note = [1.0, 4.0].map(|below_db| {
+                let mut input = at_peak_db(decaying_note(SAMPLE_RATE, 0.5), -12.0);
+                let mut noise = hiss(-70.0, 96_000);
+                let scale = db_to_gain(preset.gate.1 - below_db) / peak(&noise);
+                noise.iter_mut().for_each(|sample| *sample *= scale);
+                input.extend(noise);
+                let trace = gate_trace(preset, &input);
+                let from = (1.5 * SAMPLE_RATE) as usize;
+                if trace[from..].iter().all(|&gain| gain == 0.0) {
+                    "shut"
+                } else {
+                    "open"
+                }
+            });
+            println!(" {:>13}", after_note.join(" / "));
         }
     }
 
