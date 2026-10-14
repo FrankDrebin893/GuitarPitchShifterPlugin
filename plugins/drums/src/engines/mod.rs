@@ -33,6 +33,14 @@ fn hat_time(closed_s: f32, open_s: f32, openness: f32) -> f32 {
     }
 }
 
+/// Time constant of a hand on a cymbal: what a choke damps its envelopes to
+const CHOKE_S: f32 = 0.025;
+
+/// `decay` under the faster of itself and a choke of `scale` (Damping's share)
+fn choked(decay: f32, scale: f32, sample_rate: f32) -> f32 {
+    decay.min(coef(CHOKE_S * scale, sample_rate))
+}
+
 fn db(level_db: f32) -> f32 {
     10.0f32.powf(level_db / 20.0)
 }

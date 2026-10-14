@@ -22,6 +22,8 @@ const HAT_PEDAL_CC: u8 = 4;
 pub struct DrumSynthPlugin {
     params: Arc<DrumSynthParams>,
     drums: DrumKit,
+    // Samples played before the current block
+    played: u64,
 }
 
 #[derive(Params)]
@@ -59,11 +61,15 @@ pub struct DrumSynthParams {
 
     #[id = "cymbals"]
     pub cymbals: FloatParam,
+
+    // A note-off on a cymbal that was held for a moment damps it. Off: note-offs are ignored
+    #[id = "choke"]
+    pub choke: BoolParam,
 }
 
 impl Default for DrumSynthPlugin {
     fn default() -> Self {
-        Self { params: Arc::new(DrumSynthParams::default()), drums: DrumKit::new() }
+        Self { params: Arc::new(DrumSynthParams::default()), drums: DrumKit::new(), played: 0 }
     }
 }
 
@@ -90,6 +96,7 @@ impl Default for DrumSynthParams {
             toms: level_param("Toms", 0.0),
             hihat: level_param("Hi-Hat", 0.0),
             cymbals: level_param("Cymbals", 0.0),
+            choke: BoolParam::new("Choke", false),
         }
     }
 }
@@ -160,6 +167,7 @@ impl Plugin for DrumSynthPlugin {
     }
 
     fn reset(&mut self) {
+        self.played = 0;
         self.drums.reset();
     }
 
@@ -182,9 +190,19 @@ impl Plugin for DrumSynthPlugin {
                 if event.timing() > sample_id as u32 {
                     break;
                 }
+                self.drums.set_time(self.played + sample_id as u64);
 
                 match event {
+                    // A note-on of velocity 0 is how some MIDI sources say note-off
+                    NoteEvent::NoteOn { note, velocity, .. }
+                        if velocity <= 0.0 && self.params.choke.value() =>
+                    {
+                        self.drums.note_off(note)
+                    }
                     NoteEvent::NoteOn { note, velocity, .. } => self.drums.note_on(note, velocity),
+                    NoteEvent::NoteOff { note, .. } if self.params.choke.value() => {
+                        self.drums.note_off(note)
+                    }
                     // The foot controller: 127 is the pedal shut, as electronic kits send it
                     NoteEvent::MidiCC { cc: HAT_PEDAL_CC, value, .. } => {
                         self.drums.set_hat_openness(1.0 - value)
@@ -211,6 +229,7 @@ impl Plugin for DrumSynthPlugin {
             }
         }
 
+        self.played += buffer.samples() as u64;
         ProcessStatus::KeepAlive
     }
 }

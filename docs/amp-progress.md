@@ -478,9 +478,15 @@ A history, not a to-do list: what is still open is an issue.
 - M3: the output safety clip runs at base rate. Klar with Drive 10 and Level 10 hits it and
   aliases at -49 dB
 - M3: Brøl at Gain 0 now peaks at -3.1 dBFS on chords, just under the output clip's knee
-- Delay and reverb (not merged yet): the reverb blooms late (loudest around 95 ms); the
-  delay's odd repeats lose 2.8 dB in mono; neither limits its own output; the delay at
-  1000 ms and feedback 0.9 takes 76 s to go idle
+- Delay and reverb (not merged yet): the reverb blooms late (loudest around 95 ms); neither
+  limits its own output; the delay at 1000 ms and feedback 0.9 takes 76 s to go idle
+- Delay: the odd repeats lose 3 dB in a mono sum (-3.1, -3.4, -3.5 dB for the first three),
+  the even ones none. By design (#36), not a fault: the sides read `T - s` and `T + s`, so the
+  odd repeats land on the two sides at different times (correlation -0.1 to 0), which is
+  their width, and a mono sum of two unrelated signals is 3 dB under one side. The even
+  repeats land on both at once. Removing the loss removes the width. A test holds it
+  (`test_odd_repeats_are_wide_and_lose_3_db_in_mono_and_even_ones_do_not`) and
+  `effects_report` prints it per repeat
 
 M3 figures (2026-10-10, 48 kHz): Torden Gain 10 aliasing -91.7 / -90.4 dB, with the drive
 (Drive 3, Level 8) -91.5 / -79.5 dB; Brøl Gain 0 THD -45.0 dB; closed gate is exactly silent;

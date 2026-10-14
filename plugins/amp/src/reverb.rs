@@ -1086,6 +1086,26 @@ mod tests {
             );
         }
 
+        println!(
+            "\nRepeats of a noise burst at 300 ms, feedback 0.6, mix 1.0: the mono sum against the"
+        );
+        println!("left side (dB) and the correlation of left against right. The odd repeats are wide and");
+        println!("lose 3 dB in mono, the even ones land on both sides at once (by design, #36)");
+        println!(
+            "{:>12} {:>7} {:>7} {:>7} {:>7} {:>7} {:>7}",
+            "repeat", "1", "2", "3", "4", "5", "6"
+        );
+        let repeats = delay_tests::repeats_in_mono(0.6);
+        print!("{:>12}", "mono, dB");
+        for (mono_db, _) in &repeats {
+            print!(" {mono_db:>7.1}");
+        }
+        print!("\n{:>12}", "correlation");
+        for (_, correlation) in &repeats {
+            print!(" {correlation:>7.2}");
+        }
+        println!();
+
         println!("\nWidth: guitar phrase, 350 ms, feedback 0.4, mix 1.0");
         let (left, right) =
             delay_tests::run(&delay_tests::settings(350.0, 0.4, 1.0), &di, SAMPLE_RATE);

@@ -43,6 +43,11 @@ const CYMBAL_SEND: f32 = 0.35;
 // Share of the decay time that full Damping takes away
 const DAMPING_RANGE: f32 = 0.75;
 
+// A note-off this soon after its note-on is not a hand on the cymbal: drawn notes are short
+const CHOKE_MIN_HOLD_S: f32 = 0.12;
+// What a hand leaves of a modal cymbal's decay times, in ms
+const CHOKE_MS: f32 = 25.0;
+
 // The hi-hat pedal closing past this (openness, 0.0-1.0) chokes a hat that rings
 const HAT_CHOKE_BELOW: f32 = 0.1;
 
@@ -108,6 +113,10 @@ pub struct DrumKit {
     // hats last: its closed hat is what a choke damps them to
     hat_openness: f32,
     hat_kit: Kit,
+    // For the choke: samples played so far, the sample rate and when each note was struck
+    sample_rate: f32,
+    now: u64,
+    struck: [u64; 128],
 }
 
 impl DrumKit {
@@ -141,11 +150,15 @@ impl DrumKit {
             groove: GrooveKit::new(51),
             hat_openness: 1.0,
             hat_kit: Kit::Rock,
+            sample_rate: 44100.0,
+            now: 0,
+            struck: [0; 128],
         }
     }
 
     /// Allocates the rooms' delay lines. Not for the audio thread.
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.sample_rate = sample_rate;
         self.kick.set_sample_rate(sample_rate);
         self.snare.set_sample_rate(sample_rate);
         for tom in &mut self.toms {
@@ -172,6 +185,8 @@ impl DrumKit {
         self.metal.reset();
         self.groove.reset();
         self.hat_openness = 1.0;
+        self.now = 0;
+        self.struck = [0; 128];
     }
 
     /// Applies to the next hits. Voices that are ringing keep the sound they were hit with.
@@ -215,11 +230,51 @@ impl DrumKit {
         self.groove.set_hat_openness(openness);
     }
 
+    /// Where in the stream the next frame is, in samples: for the choke to tell a held note
+    /// from a short one. Not counted in `process`, where one more store per frame costs 8 %
+    /// of a ringing kit
+    pub fn set_time(&mut self, samples: u64) {
+        self.now = samples;
+    }
+
+    /// A hand on a cymbal: the note-off of a cymbal note that was held for a moment damps it
+    /// at once. Hi-hats are left to the pedal. Applies to what rings now
+    pub fn note_off(&mut self, note: u8) {
+        let slot = match note {
+            49 => CRASH1,
+            57 => CRASH2,
+            51 | 59 => RIDE,
+            53 => BELL,
+            52 => CHINA,
+            55 => SPLASH,
+            _ => return,
+        };
+        let held = self.now.wrapping_sub(self.struck[note as usize]);
+        if (held as f32) < CHOKE_MIN_HOLD_S * self.sample_rate {
+            return;
+        }
+        if let Some(preset) = &self.presets[self.kit as usize] {
+            let cymbal = &preset.cymbals;
+            let sound = match slot {
+                CRASH1 => &cymbal.crash1,
+                CRASH2 => &cymbal.crash2,
+                RIDE => &cymbal.ride,
+                BELL => &cymbal.bell,
+                CHINA => &cymbal.china,
+                _ => &cymbal.splash,
+            };
+            self.cymbals[slot].choke(&sound.damped(CHOKE_MS), self.decay_scale);
+        }
+        self.metal.choke_cymbal(note, self.decay_scale);
+        self.groove.choke_cymbal(note, self.decay_scale);
+    }
+
     /// General MIDI drum map. Velocity is 0.0-1.0.
     pub fn note_on(&mut self, note: u8, velocity: f32) {
         if velocity <= 0.0 {
             return;
         }
+        self.struck[(note & 127) as usize] = self.now;
 
         let hit =
             Hit { velocity: velocity.min(1.0), tune: self.tune_ratio, decay: self.decay_scale };
@@ -363,7 +418,9 @@ mod tests {
     }
 
     fn render(drums: &mut DrumKit, num_samples: usize) -> (Vec<f32>, Vec<f32>) {
-        (0..num_samples).map(|_| drums.process()).unzip()
+        let output = (0..num_samples).map(|_| drums.process()).unzip();
+        drums.set_time(drums.now + num_samples as u64);
+        output
     }
 
     fn render_mono(drums: &mut DrumKit, seconds: f32) -> Vec<f32> {
@@ -658,6 +715,62 @@ mod tests {
         }
     }
 
+    const CYMBAL_NOTES: [u8; 7] = [49, 51, 52, 53, 55, 57, 59];
+
+    /// A cymbal note held for `held_s` and let go, then `after_s` more
+    fn render_choked(kit: Kit, note: u8, held_s: f32, after_s: f32) -> Vec<f32> {
+        let mut drums = dry_kit(kit, SAMPLE_RATE);
+        drums.note_on(note, 1.0);
+        let mut output = render_mono(&mut drums, held_s);
+        drums.note_off(note);
+        output.extend(render_mono(&mut drums, after_s));
+        output
+    }
+
+    #[test]
+    fn test_a_note_off_after_a_hold_grabs_the_cymbal() {
+        for kit in Kit::ALL {
+            for note in CYMBAL_NOTES {
+                let free = render_note(kit, note, 1.0, 0.8);
+                let choked = render_choked(kit, note, 0.3, 0.5);
+                let ringing = rms(seconds(&free, 0.4, 0.5));
+                let after = rms(seconds(&choked, 0.4, 0.5));
+                assert!(ringing > 0.0005, "{kit:?} {note} does not ring: {ringing}");
+                assert!(after < ringing * 0.1, "{kit:?} {note}: {after} vs {ringing}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_a_note_off_soon_after_the_hit_is_ignored() {
+        // A drawn sixteenth: the crash rings out, to the bit
+        for kit in Kit::ALL {
+            for note in CYMBAL_NOTES {
+                let free = render_note(kit, note, 1.0, 0.8);
+                let short = render_choked(kit, note, 0.05, 0.75);
+                assert!(
+                    free.iter().zip(&short).all(|(a, b)| a.to_bits() == b.to_bits()),
+                    "{kit:?} {note}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_note_off_leaves_the_rest_of_the_kit_alone() {
+        // Hi-hats are the pedal's, and the other pieces ring out by themselves
+        for kit in Kit::ALL {
+            for note in [35, 38, 41, 42, 44, 46, 69] {
+                let free = render_note(kit, note, 1.0, 0.8);
+                let off = render_choked(kit, note, 0.3, 0.5);
+                assert!(
+                    free.iter().zip(&off).all(|(a, b)| a.to_bits() == b.to_bits()),
+                    "{kit:?} {note}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn test_kits_differ() {
         let kick_freq = |kit| {
@@ -898,6 +1011,7 @@ mod tests {
             );
 
             write_wav(&dir.join(format!("drums_{}_hat_pedal.wav", name)), &render_hat_pedal(kit));
+            write_wav(&dir.join(format!("drums_{}_choke.wav", name)), &render_choke(kit));
 
             if let Some((part, bpm)) = &part {
                 write_wav(
@@ -1225,6 +1339,37 @@ mod tests {
             play(&mut drums, 2 * eighth);
         }
         play(&mut drums, 4 * eighth);
+        output
+    }
+
+    /// Each cymbal struck and held 0.5, 1 and 2 s before the note-off, then 2 s of what is
+    /// left, one after the other, and a crash let go after 50 ms, which rings out. Stereo,
+    /// interleaved
+    fn render_choke(kit: Kit) -> Vec<f32> {
+        let mut drums = DrumKit::new();
+        drums.set_sample_rate(SAMPLE_RATE);
+        drums.set_kit(kit);
+        let mut output = Vec::new();
+        let mut play = |drums: &mut DrumKit, seconds: f32| {
+            let samples = (seconds * SAMPLE_RATE) as usize;
+            for _ in 0..samples {
+                let (left, right) = drums.process();
+                output.extend([left, right]);
+            }
+            drums.set_time(drums.now + samples as u64);
+        };
+        for (note, held) in
+            [(49, 0.5), (49, 1.0), (49, 2.0), (51, 1.0), (53, 1.0), (52, 1.0), (55, 0.5)]
+        {
+            drums.note_on(note, 0.9);
+            play(&mut drums, held);
+            drums.note_off(note);
+            play(&mut drums, 2.0);
+        }
+        drums.note_on(49, 0.9);
+        play(&mut drums, 0.05);
+        drums.note_off(49);
+        play(&mut drums, 3.0);
         output
     }
 
