@@ -30,6 +30,11 @@ Three new instruments, each a pedal of its own:
 - The snare has its crack: louder and brighter wires, a fuller stick attack, and as loud in the
   kit as the kick and the toms
 
+### Guitar Amp, Shimmer Pad, Glass Bells
+
+- VST3 hosts that stop processing a silent plugin no longer cut the delay and reverb tails:
+  the plugins tell the host from the start that their tails ring on
+
 ## 0.1.0
 
 First public release. VST3 and CLAP for Windows, macOS and Linux. The macOS and Linux builds

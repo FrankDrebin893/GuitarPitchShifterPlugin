@@ -275,6 +275,8 @@ impl Vst3Plugin for GlassBellsPlugin {
     const VST3_CLASS_ID: [u8; 16] = *b"HojtGlassBells01";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
         &[Vst3SubCategory::Instrument, Vst3SubCategory::Synth];
+    // The bells, the delay and the hall ring on after the last note, up to 20 s. A host that asks only once, before the first block, would hear 0
+    const VST3_INFINITE_TAIL: bool = true;
 }
 
 nih_export_clap!(GlassBellsPlugin);
@@ -300,5 +302,12 @@ mod ids {
             include_str!("../../../bundler.toml"),
             "bells",
         );
+    }
+
+    #[test]
+    fn vst3_tail_is_infinite() {
+        use nih_plug::prelude::Vst3Plugin;
+        let infinite = super::GlassBellsPlugin::VST3_INFINITE_TAIL;
+        assert!(infinite);
     }
 }

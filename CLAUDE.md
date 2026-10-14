@@ -509,7 +509,8 @@ How it behaves:
 - With every pedal off and the cabinet dials at 5.0 the chain is bit-identical to the amp alone
 - Latency is 0.1 to 0.3 ms and nothing is reported to the host
 - A mono host layout gets the left channel of the effects
-- `process` returns `KeepAlive` while a delay or reverb tail rings
+- `process` returns `KeepAlive` while a delay or reverb tail rings. VST3 hosts are told the tail
+  is infinite from the start (`VST3_INFINITE_TAIL`), as are those of the pad and the bells
 - Tuner on gives the amp silence and turns its output down in 10 ms (exactly silent, tails
   included); off brings it back as fast. Bypass still passes the input while tuning. The tuner
   costs nothing when off and under 3 us in its worst 64-sample block when on
@@ -804,4 +805,6 @@ cargo test -p bells --release render_wavs -- --ignored
 - Rock and Jazz are tuned in `plugins/drums/src/kit.rs`, Metal and Groove in their engine's file;
   check `kit_report` and listen to `render_wavs`
 - Keep DSP code separate from plugin boilerplate
-- nih-plug is pinned to one revision in the root `Cargo.toml` (`[workspace.dependencies]`); bump it there for all plugins at once
+- nih-plug is pinned to one revision in the root `Cargo.toml` (`[workspace.dependencies]`); bump it there for all plugins at once.
+  The pin is our fork `FrankDrebin893/nih-plug`: upstream plus one commit (`Vst3Plugin::VST3_INFINITE_TAIL`,
+  branch `hojt-vst3-infinite-tail`). To move to a newer upstream, rebase that commit onto it and pin the result

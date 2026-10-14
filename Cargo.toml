@@ -9,9 +9,13 @@ authors = ["Rasmus Højte"]
 license = "GPL-3.0-or-later"
 
 [workspace.dependencies]
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95" }
-nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95" }
-nih_plug_xtask = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "28b149ec4d62757d0b448809148a0c3ca6e09a95" }
+# Our fork: upstream 28b149e plus one commit, `Vst3Plugin::VST3_INFINITE_TAIL` (branch
+# hojt-vst3-infinite-tail; tag hojt-1 keeps the commit, never delete it). VST3 hosts that
+# read the tail length once, before the first block, would otherwise see 0 and may cut
+# delay and reverb tails (#20)
+nih_plug = { git = "https://github.com/FrankDrebin893/nih-plug.git", rev = "b122ba697d363f3035545e6ed7d2b8466a8864d8" }
+nih_plug_egui = { git = "https://github.com/FrankDrebin893/nih-plug.git", rev = "b122ba697d363f3035545e6ed7d2b8466a8864d8" }
+nih_plug_xtask = { git = "https://github.com/FrankDrebin893/nih-plug.git", rev = "b122ba697d363f3035545e6ed7d2b8466a8864d8" }
 suite_common = { path = "crates/suite_common" }
 
 [profile.release]
