@@ -539,11 +539,10 @@ impl MetalKit {
         send += china * 0.12;
 
         let room = mix.room * ROOM_SCALE;
-        if room > 0.0 {
-            let (room_left, room_right) = self.room.process(send * 0.2);
-            left += room_left * room;
-            right += room_right * room;
-        }
+        // Always run, so a tail keeps decaying while Room is at zero and does not resume
+        let (room_left, room_right) = self.room.process(send * 0.2);
+        left += room_left * room;
+        right += room_right * room;
 
         let left = self.drive.process(self.out_hps[0].process(left).high) * LEVEL;
         let right = self.drive.process(self.out_hps[1].process(right).high) * LEVEL;

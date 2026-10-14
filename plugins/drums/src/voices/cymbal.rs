@@ -162,9 +162,12 @@ impl Cymbal {
         let strike_cutoff = STRIKE_CUTOFF_MIN_HZ + STRIKE_CUTOFF_RANGE_HZ * hit.velocity * hit.velocity;
 
         for i in 0..modes {
-            // Where in its slot a mode sits is new on every hit, so no two hits ring the same
-            // tones and the beating between neighbours is never the same
-            self.jitter[i] = self.noise.next() * 0.5 + 0.5;
+            // Where in its slot a mode sits is new for every hit on a cymbal at rest, so no two
+            // strokes ring the same tones. A hit on one that still rings keeps its tuning, or
+            // the tail left from before would be retuned in the middle of its ring
+            if self.remaining == 0 {
+                self.jitter[i] = self.noise.next() * 0.5 + 0.5;
+            }
             let position = (i as f32 + self.jitter[i]) / modes as f32;
             let freq = preset.low_hz + (preset.high_hz - preset.low_hz) * position;
             let decay_ms =
