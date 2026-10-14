@@ -22,10 +22,13 @@ A suite of VST3/CLAP plugins built with Rust and the nih-plug framework. The bra
   (DI recordings, MIDI drum parts); not published. See its `README.md`
 - `scripts/package.sh` - Packs the bundles into the zips of a release
 - `scripts/site-audio.sh` - Makes the page's sound examples from the render tests
+- `scripts/sound-reports.sh` - The sound reports without their timings, for comparing two builds
 - `scripts/sync-labels.sh` - The backlog's labels on GitHub
 - `scripts/move-issue.sh` - Moves an issue to a state: its label and its place on the board
 - `.github/workflows/` - `ci.yml` (tests), `release.yml` (builds and publishes a release),
-  `pages.yml` (publishes `site/`), `approval-guard.yml` (see How work flows)
+  `pages.yml` (publishes `site/`), `approval-guard.yml` (see How work flows), `sound.yml` (on a
+  pull request that touches a plugin: what its reports say changed against `main`, as a
+  comment, and renders before and after)
 - `.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md` - What an issue and a pull request ask for
 
 Each plugin keeps DSP in its own module(s), separate from `lib.rs` (plugin entry point, parameters, nih-plug integration) and `editor.rs` (egui GUI).
@@ -720,6 +723,11 @@ out; the HØJT name and logo are kept out of it (`NOTICE.md`).
 - Screenshots in `site/img/` are the standalone windows at their own size, taken by hand
 
 ## Testing
+
+A pull request that touches the plugins gets a comment from `sound.yml`: every report of
+`scripts/sound-reports.sh` before and after, or that nothing changed. A pull request whose sound
+changed is `kind:sound` or says why it changed; one that must not change the sound shows
+none. The renders before and after are the run's `renders` artifact.
 
 **Always run `cargo test --workspace` before committing changes.**
 
