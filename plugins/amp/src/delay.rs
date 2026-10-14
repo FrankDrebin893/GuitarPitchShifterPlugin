@@ -405,6 +405,53 @@ pub(crate) mod tests {
         run_blocks(&mut new_delay(sample_rate), settings, input, BLOCK)
     }
 
+    /// A 20 ms noise burst through the delay at 300 ms, mix 1.0, without the dry signal: for
+    /// each of the first six repeats the level of its mono sum against its left side, in dB,
+    /// and the correlation of its left and right sides. The odd repeats land on the two sides
+    /// at different times (that is their width) and the even ones on both at once
+    pub(crate) fn repeats_in_mono(feedback: f32) -> Vec<(f32, f32)> {
+        let at = |ms: f32| (ms * 0.001 * SAMPLE_RATE) as usize;
+        let mut burst = vec![0.0; at(2000.0)];
+        burst[..at(20.0)].copy_from_slice(&noise(0.25, at(20.0)));
+        let (left, right) = run(&settings(300.0, feedback, 1.0), &burst, SAMPLE_RATE);
+        let wet = |channel: &[f32]| -> Vec<f32> {
+            channel.iter().zip(&burst).map(|(heard, dry)| heard - dry).collect()
+        };
+        let (left, right) = (wet(&left), wet(&right));
+        (1..=6)
+            .map(|number| {
+                let window = at(300.0 * number as f32 - 8.0)..at(300.0 * number as f32 + 28.0);
+                let (l, r) = (&left[window.clone()], &right[window]);
+                let mono: Vec<f32> = l.iter().zip(r).map(|(l, r)| 0.5 * (l + r)).collect();
+                (to_db(rms(&mono) / rms(l)), correlation(l, r))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_odd_repeats_are_wide_and_lose_3_db_in_mono_and_even_ones_do_not() {
+        // By design (#36): the sides differ in time, which is what makes the first repeat
+        // wide, and what a mono sum of two unrelated signals costs. Moving this moves the
+        // width of every preset's delay
+        for feedback in [0.3, 0.6] {
+            for (index, (mono_db, correlation)) in repeats_in_mono(feedback).into_iter().enumerate()
+            {
+                let number = index + 1;
+                if number % 2 == 1 {
+                    assert!(
+                        (-3.6..=-2.4).contains(&mono_db) && correlation.abs() < 0.2,
+                        "Repeat {number} at {feedback}: {mono_db} dB, correlation {correlation}"
+                    );
+                } else {
+                    assert!(
+                        mono_db.abs() < 0.5 && correlation > 0.9,
+                        "Repeat {number} at {feedback}: {mono_db} dB, correlation {correlation}"
+                    );
+                }
+            }
+        }
+    }
+
     fn impulse(len: usize) -> Vec<f32> {
         let mut signal = vec![0.0; len];
         signal[0] = 1.0;
