@@ -37,6 +37,9 @@ Three new instruments, each a pedal of its own:
 
 ### Guitar Amp
 
+- The noise gate closes behind a note on a noisy guitar: hiss only has to sit 3 dB under the
+  threshold, not 6. A note's tail is cut 3 dB sooner, and the four presets that had the
+  gate at -54 dB are at -57 dB, so they sound as before
 - The tuner no longer shows mains hum as a note. A note is shown from a pluck on, and let go
   when what rang does not fade like a string; a string that already rings when the tuner is
   switched on is read from its next pluck

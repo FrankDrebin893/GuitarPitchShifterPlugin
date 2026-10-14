@@ -417,6 +417,12 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
   second stage, not by the order of antialiasing. `FineClipper` takes two second-order steps
   per sample there, only while the drive is on: -67.6 to -74.8 dB at 44.1 kHz for 0.3 % of
   a core at 48 kHz. Drive off is bit-identical
+- 2026-10-14 Gate (#15): the gate closes 3 dB under its threshold, not 6, so hiss that stays
+  between the two shuts it behind a note when its peaks are 4 dB under the threshold, not
+  10. The four presets at -54 dB (Granit, Dyb, Lyn, Sus) went to -57 dB: they would chop
+  palm mutes at -30 dBFS otherwise, and -57 closes at -60 as -54 did with 6 dB. Their note
+  tails are as before; every other preset's gate closes 3 dB earlier in a fading note
+  (`preset_gate_report` gets an `after note` column for it)
 - 2026-10-10 Preset gates: -54 dB is the highest threshold that leaves palm mutes at -30 dBFS
   untouched; release, not threshold, sets how tight the rests are. Stram -56 dB / 50 ms,
   Granit -54 / 60, Dyb -54 / 40, Lyn -54 / 180. A test holds every preset to it
@@ -474,7 +480,7 @@ A history, not a to-do list: what is still open is an issue.
   1.1 dB, and Torden leaves little fundamental on single low notes (low E -37.5 dB of the
   whole signal, -39.0 with the drive)
 - M3: hiss between the gate's closing and opening levels keeps it open after a note; the
-  threshold has to sit 6 dB above the noise peaks
+  threshold has to sit 3 dB above the noise peaks (it was 6 dB before #15)
 - M3: the output safety clip runs at base rate. Klar with Drive 10 and Level 10 hits it and
   aliases at -49 dB
 - M3: Brøl at Gain 0 now peaks at -3.1 dBFS on chords, just under the output clip's knee
@@ -552,8 +558,9 @@ worst latency 0.317 ms (Torden, 44.1 kHz, everything on). Run `amp_report` for t
 - Lamps: the 150 ms clip hold was unit-tested, not watched on screen
 - Finer clipping with the drive on made a few 1245 Hz aliasing figures slightly worse while
   the 4186 Hz ones improved (largest: Torden 10, drive 3/5/8, 44.1 kHz, -87.4 to -83.2 dB)
-- Gates: mutes quieter than -36 dBFS are still chopped at -54 dB; a guitar noisier than
-  -62 dBFS RMS holds the preset gates open. All measured on synthetic plucks
+- Gates: mutes quieter than -36 dBFS are still chopped at -60 dB (the close level of the
+  -57 dB presets). A guitar whose hiss peaks within 3 dB of a preset's threshold still holds
+  its gate open. All measured on synthetic plucks
 
 - The agent doing the drive aliasing and the cabinets was cut off twice and left no report.
   Its two commits are verified by the tests and `amp_report`; its account of what it tried

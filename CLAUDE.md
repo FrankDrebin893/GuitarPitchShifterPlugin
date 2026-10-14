@@ -615,7 +615,7 @@ How it behaves:
 | Bypass (`bypass`) | on / off | off | The On switch on the head |
 | Input (`in_gain`) | -24 to +24 dB | 0 dB | Gain in front of everything except the gate's detector |
 | Gate (`gate_on`) | on / off | on | Noise gate on the input |
-| Gate Threshold (`gate_thresh`) | -80 to -20 dB | -60 dB | Input level that opens the gate (closes 6 dB lower) |
+| Gate Threshold (`gate_thresh`) | -80 to -20 dB | -60 dB | Input level that opens the gate (closes 3 dB lower) |
 | Gate Release (`gate_release`) | 20-500 ms | 100 ms | Time to close after a 40 ms hold |
 | Comp (`comp_on`) | on / off | off | Compressor pedal |
 | Comp Sustain (`comp_sustain`) | 0.0-10.0 | 5.0 | How much it evens out: threshold and ratio together |

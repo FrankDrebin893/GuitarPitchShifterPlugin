@@ -66,10 +66,11 @@ const USUAL_ORDER: &[&str] =
 // does not, so with a quieter guitar the clean ones come out quieter than the rest, and
 // with a hotter one louder. The first one is every parameter at its default.
 //
-// The gates are set by `preset_gate_report`. A threshold of -54 dB is the highest that
-// leaves palm mutes alone when they are played quietly (peaks at -30 dBFS): from -52 dB up
-// the gate starts to close on the tail of every mute. How fast a gate shuts in a rest is
-// its release, not its threshold: 8 dB of threshold are 9 ms
+// The gates are set by `preset_gate_report`. A threshold of -57 dB is the highest that
+// leaves palm mutes alone when they are played quietly (peaks at -30 dBFS): from -55 dB up
+// the gate starts to close on the tail of every mute. The gate closes 3 dB under its
+// threshold, so that is -60 dB, which was -54 dB with the 6 dB it had before. How fast a
+// gate shuts in a rest is its release, not its threshold: 8 dB of threshold are 9 ms
 pub static PRESETS: [Preset; 17] = [
     Preset {
         name: "Init",
@@ -210,7 +211,7 @@ pub static PRESETS: [Preset; 17] = [
         name: "Granit",
         amp: Amp::Torden,
         dials: [7.5, 6.5, 3.0, 6.5, 6.5, 5.5],
-        gate: (ON, -54.0, 60.0),
+        gate: (ON, -57.0, 60.0),
         drive: (ON, [1.5, 5.5, 7.0]),
         cab: (ON, [5.0, 6.0]),
         delay: (OFF, 350.0, 30.0, 20.0),
@@ -225,7 +226,7 @@ pub static PRESETS: [Preset; 17] = [
         name: "Dyb",
         amp: Amp::Torden,
         dials: [6.0, 4.0, 5.5, 6.0, 6.5, 5.0],
-        gate: (ON, -54.0, 40.0),
+        gate: (ON, -57.0, 40.0),
         drive: (ON, [0.5, 6.5, 8.5]),
         cab: (ON, [5.5, 2.5]),
         delay: (OFF, 350.0, 30.0, 20.0),
@@ -240,7 +241,7 @@ pub static PRESETS: [Preset; 17] = [
         name: "Lyn",
         amp: Amp::Torden,
         dials: [7.0, 5.0, 6.5, 5.5, 5.5, 5.0],
-        gate: (ON, -54.0, 180.0),
+        gate: (ON, -57.0, 180.0),
         drive: (ON, [2.5, 5.0, 7.0]),
         cab: (ON, [4.5, 5.0]),
         delay: (ON, 420.0, 30.0, 20.0),
@@ -301,7 +302,7 @@ pub static PRESETS: [Preset; 17] = [
         name: "Sus",
         amp: Amp::Torden,
         dials: [6.5, 5.0, 5.5, 5.5, 5.5, 5.0],
-        gate: (ON, -54.0, 120.0),
+        gate: (ON, -57.0, 120.0),
         drive: (ON, [1.5, 5.5, 7.0]),
         cab: (ON, [5.0, 5.0]),
         delay: (ON, 380.0, 25.0, 18.0),
