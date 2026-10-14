@@ -101,7 +101,8 @@ impl Drive {
         let tone_hz = TONE_SECTION_RATIO * TONE_HZ[0] * (TONE_HZ[1] / TONE_HZ[0]).powf(tone);
         let level_db = lerp(LEVEL_DB[0], LEVEL_DB[1], level) + curve(&TRIM_DB, drive);
         self.gain.set_target(db_to_gain(lerp(DRIVE_DB[0], DRIVE_DB[1], drive)), steps);
-        self.tone_coeff.set_target(1.0 - (-std::f32::consts::TAU * tone_hz / self.sample_rate).exp(), steps);
+        self.tone_coeff
+            .set_target(1.0 - (-std::f32::consts::TAU * tone_hz / self.sample_rate).exp(), steps);
         self.level.set_target(db_to_gain(level_db), steps);
         // Not heard, so there is nothing to glide from
         if self.is_idle() {
@@ -212,7 +213,8 @@ pub mod tests {
     #[test]
     fn test_drive_dial_adds_distortion() {
         let input = sine(440.0, 0.178, SAMPLE_RATE, LEN);
-        let distortion = |drive: f32| thd_db(&run(drive, 0.5, 0.5, &input)[LEN / 2..], SAMPLE_RATE, 440.0);
+        let distortion =
+            |drive: f32| thd_db(&run(drive, 0.5, 0.5, &input)[LEN / 2..], SAMPLE_RATE, 440.0);
         let (low, centre, full) = (distortion(0.0), distortion(0.5), distortion(1.0));
         assert!(low < -26.0, "Drive 0 is not nearly clean: {:.1} dB", low);
         assert!(centre > low + 8.0, "Drive 5 at {:.1} dB, drive 0 at {:.1} dB", centre, low);
@@ -229,7 +231,13 @@ pub mod tests {
         };
         for drive in [0.0, 0.2, 0.5, 1.0] {
             let (lows, mids) = (gain(drive, 80.0), gain(drive, 1000.0));
-            assert!(lows < mids - 8.0, "Drive {}: {:.1} dB at 80 Hz, {:.1} dB at 1 kHz", drive * 10.0, lows, mids);
+            assert!(
+                lows < mids - 8.0,
+                "Drive {}: {:.1} dB at 80 Hz, {:.1} dB at 1 kHz",
+                drive * 10.0,
+                lows,
+                mids
+            );
         }
 
         // A low note is clipped less than one in the middle of the neck
@@ -248,21 +256,35 @@ pub mod tests {
             band_level_db(&output, SAMPLE_RATE, Some(3000.0), None) + to_db(rms(&output))
         };
         let (dark, centre, bright) = (top(0.0), top(0.5), top(1.0));
-        assert!(centre > dark + 2.0 && bright > centre + 2.0, "Above 3 kHz: {:.1}, {:.1}, {:.1} dB", dark, centre, bright);
+        assert!(
+            centre > dark + 2.0 && bright > centre + 2.0,
+            "Above 3 kHz: {:.1}, {:.1}, {:.1} dB",
+            dark,
+            centre,
+            bright
+        );
 
         // And leaves the low end alone
-        let low = |tone: f32| to_db(rms(&run(0.0, tone, 0.5, &sine(100.0, 0.001, SAMPLE_RATE, LEN))[LEN / 2..]));
+        let low = |tone: f32| {
+            to_db(rms(&run(0.0, tone, 0.5, &sine(100.0, 0.001, SAMPLE_RATE, LEN))[LEN / 2..]))
+        };
         assert!((low(0.0) - low(1.0)).abs() < 0.5);
     }
 
     #[test]
     fn test_level_dial_spans_forty_decibels_with_unity_near_the_middle() {
         let input = power_chords(SAMPLE_RATE, 1.0);
-        let level = |drive: f32, level: f32| to_db(rms(&run(drive, 0.5, level, &input)) / rms(&input));
+        let level =
+            |drive: f32, level: f32| to_db(rms(&run(drive, 0.5, level, &input)) / rms(&input));
         assert!((level(0.3, 1.0) - level(0.3, 0.0) - 40.0).abs() < 0.5);
         for drive in [0.0, 0.3, 0.5] {
             let centre = level(drive, 0.5);
-            assert!(centre.abs() < 2.0, "Drive {}: {:.1} dB against bypassed at Level 5", drive * 10.0, centre);
+            assert!(
+                centre.abs() < 2.0,
+                "Drive {}: {:.1} dB against bypassed at Level 5",
+                drive * 10.0,
+                centre
+            );
         }
         assert!(level(1.0, 0.5).abs() < 4.0, "Drive 10: {:.1} dB", level(1.0, 0.5));
     }
@@ -290,7 +312,9 @@ pub mod tests {
     fn test_output_is_bounded_and_finite() {
         for sample_rate in [176_400.0, 192_000.0, 384_000.0, 768_000.0] {
             let input = sine(300.0, 4.0, sample_rate, 19_200);
-            for (drive, tone, level) in [(0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (1.0, 0.0, 1.0), (0.0, 1.0, 1.0)] {
+            for (drive, tone, level) in
+                [(0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (1.0, 0.0, 1.0), (0.0, 1.0, 1.0)]
+            {
                 let mut output = input.clone();
                 new_drive(sample_rate, drive, tone, level).process(&mut output);
                 assert!(output.iter().all(|s| s.is_finite()));

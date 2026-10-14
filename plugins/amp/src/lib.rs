@@ -27,13 +27,13 @@ pub use amp::model::Amp;
 use cab_stage::CabLoader;
 use chain::{AmpChain, AmpSettings, GATE_RELEASE_MS, GATE_THRESHOLD_DB, IN_GAIN_DB};
 use comp::CompSettings;
+use delay::{DelaySettings, FEEDBACK_MAX, TIME_MAX_MS, TIME_MIN_MS};
+use dial_memory::DialMemory;
 use mods::chorus::{self, ChorusSettings};
 use mods::flanger::{self, FlangerSettings};
 use mods::phaser::{self, PhaserSettings};
 use mods::tremolo::{self, TremoloSettings};
 use order::StoredOrder;
-use dial_memory::DialMemory;
-use delay::{DelaySettings, FEEDBACK_MAX, TIME_MAX_MS, TIME_MIN_MS};
 use reverb::{ReverbSettings, DECAY_MAX_S, DECAY_MIN_S};
 
 // The id of the tuner switch, as in `GuitarAmpParams`
@@ -228,11 +228,7 @@ impl Default for GuitarAmpPlugin {
     fn default() -> Self {
         let chain = AmpChain::new();
         let cab_loader = Arc::new(CabLoader::new(chain.cab_stage(), chain.sample_rate()));
-        Self {
-            params: Arc::new(GuitarAmpParams::default()),
-            chain,
-            cab_loader,
-        }
+        Self { params: Arc::new(GuitarAmpParams::default()), chain, cab_loader }
     }
 }
 
@@ -260,10 +256,7 @@ impl Default for GuitarAmpParams {
             in_gain: FloatParam::new(
                 "Input",
                 defaults.in_gain_db,
-                FloatRange::Linear {
-                    min: IN_GAIN_DB[0],
-                    max: IN_GAIN_DB[1],
-                },
+                FloatRange::Linear { min: IN_GAIN_DB[0], max: IN_GAIN_DB[1] },
             )
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
@@ -271,10 +264,7 @@ impl Default for GuitarAmpParams {
             gate_thresh: FloatParam::new(
                 "Gate Threshold",
                 defaults.gate_thresh_db,
-                FloatRange::Linear {
-                    min: GATE_THRESHOLD_DB[0],
-                    max: GATE_THRESHOLD_DB[1],
-                },
+                FloatRange::Linear { min: GATE_THRESHOLD_DB[0], max: GATE_THRESHOLD_DB[1] },
             )
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(0)),
@@ -309,16 +299,36 @@ impl Default for GuitarAmpParams {
             master: dial_param("Master", defaults.master),
 
             chorus_on: BoolParam::new("Chorus", defaults.chorus.on),
-            chorus_rate: rate_param("Chorus Rate", defaults.chorus.rate_hz, chorus::RATE_MIN_HZ, chorus::RATE_MAX_HZ),
+            chorus_rate: rate_param(
+                "Chorus Rate",
+                defaults.chorus.rate_hz,
+                chorus::RATE_MIN_HZ,
+                chorus::RATE_MAX_HZ,
+            ),
             chorus_depth: percent_param("Chorus Depth", defaults.chorus.depth, 1.0),
             phaser_on: BoolParam::new("Phaser", defaults.phaser.on),
-            phaser_rate: rate_param("Phaser Rate", defaults.phaser.rate_hz, phaser::RATE_MIN_HZ, phaser::RATE_MAX_HZ),
+            phaser_rate: rate_param(
+                "Phaser Rate",
+                defaults.phaser.rate_hz,
+                phaser::RATE_MIN_HZ,
+                phaser::RATE_MAX_HZ,
+            ),
             phaser_depth: percent_param("Phaser Depth", defaults.phaser.depth, 1.0),
             flanger_on: BoolParam::new("Flanger", defaults.flanger.on),
-            flanger_rate: rate_param("Flanger Rate", defaults.flanger.rate_hz, flanger::RATE_MIN_HZ, flanger::RATE_MAX_HZ),
+            flanger_rate: rate_param(
+                "Flanger Rate",
+                defaults.flanger.rate_hz,
+                flanger::RATE_MIN_HZ,
+                flanger::RATE_MAX_HZ,
+            ),
             flanger_depth: percent_param("Flanger Depth", defaults.flanger.depth, 1.0),
             trem_on: BoolParam::new("Tremolo", defaults.tremolo.on),
-            trem_rate: rate_param("Tremolo Rate", defaults.tremolo.rate_hz, tremolo::RATE_MIN_HZ, tremolo::RATE_MAX_HZ),
+            trem_rate: rate_param(
+                "Tremolo Rate",
+                defaults.tremolo.rate_hz,
+                tremolo::RATE_MIN_HZ,
+                tremolo::RATE_MAX_HZ,
+            ),
             trem_depth: percent_param("Tremolo Depth", defaults.tremolo.depth, 1.0),
 
             cab_on: BoolParam::new("Cabinet", defaults.cab_on),
@@ -447,7 +457,9 @@ impl GuitarAmpParams {
 fn dial_param(name: &str, default: f32) -> FloatParam {
     FloatParam::new(name, default, FloatRange::Linear { min: 0.0, max: 1.0 })
         .with_value_to_string(Arc::new(|value| format!("{:.1}", value * 10.0)))
-        .with_string_to_value(Arc::new(|text| text.trim().parse::<f32>().ok().map(|dial| dial / 10.0)))
+        .with_string_to_value(Arc::new(|text| {
+            text.trim().parse::<f32>().ok().map(|dial| dial / 10.0)
+        }))
 }
 
 /// The rate of a modulation pedal, in Hz
@@ -580,7 +592,8 @@ impl Plugin for GuitarAmpPlugin {
 impl ClapPlugin for GuitarAmpPlugin {
     // Frozen: DAW projects find the plugin by this ID. Never change it
     const CLAP_ID: &'static str = "com.guitarpitchshifter.guitar-amp";
-    const CLAP_DESCRIPTION: Option<&'static str> = Some("A low-latency guitar amp with pedals, cabinet, delay and reverb");
+    const CLAP_DESCRIPTION: Option<&'static str> =
+        Some("A low-latency guitar amp with pedals, cabinet, delay and reverb");
     const CLAP_MANUAL_URL: Option<&'static str> = None;
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
     const CLAP_FEATURES: &'static [ClapFeature] = &[
@@ -594,10 +607,8 @@ impl ClapPlugin for GuitarAmpPlugin {
 impl Vst3Plugin for GuitarAmpPlugin {
     // Frozen: DAW projects find the plugin by this ID. Never change it
     const VST3_CLASS_ID: [u8; 16] = *b"HojtGuitarAmp003";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
-        Vst3SubCategory::Fx,
-        Vst3SubCategory::Distortion,
-    ];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Distortion];
 }
 
 nih_export_clap!(GuitarAmpPlugin);
@@ -616,18 +627,52 @@ mod tests {
         // project sounds that never touched that knob
         let settings = params.settings();
         assert!(!settings.bypass && settings.gate_on && !settings.drive_on && settings.cab_on);
-        assert_eq!((settings.comp.on, settings.comp.sustain, settings.comp.level), (false, 0.5, 0.5));
-        assert_eq!((settings.chorus.on, settings.chorus.rate_hz, settings.chorus.depth), (false, 0.8, 0.5));
-        assert_eq!((settings.phaser.on, settings.phaser.rate_hz, settings.phaser.depth), (false, 0.5, 0.5));
-        assert_eq!((settings.flanger.on, settings.flanger.rate_hz, settings.flanger.depth), (false, 0.3, 0.5));
-        assert_eq!((settings.tremolo.on, settings.tremolo.rate_hz, settings.tremolo.depth), (false, 5.0, 0.5));
+        assert_eq!(
+            (settings.comp.on, settings.comp.sustain, settings.comp.level),
+            (false, 0.5, 0.5)
+        );
+        assert_eq!(
+            (settings.chorus.on, settings.chorus.rate_hz, settings.chorus.depth),
+            (false, 0.8, 0.5)
+        );
+        assert_eq!(
+            (settings.phaser.on, settings.phaser.rate_hz, settings.phaser.depth),
+            (false, 0.5, 0.5)
+        );
+        assert_eq!(
+            (settings.flanger.on, settings.flanger.rate_hz, settings.flanger.depth),
+            (false, 0.3, 0.5)
+        );
+        assert_eq!(
+            (settings.tremolo.on, settings.tremolo.rate_hz, settings.tremolo.depth),
+            (false, 5.0, 0.5)
+        );
         assert!(!settings.delay.on && !settings.reverb.on && !settings.tuner_on);
         assert_eq!(settings.amp, Amp::Brol);
-        assert_eq!((settings.in_gain_db, settings.gate_thresh_db, settings.gate_release_ms), (0.0, -60.0, 100.0));
-        assert_eq!((settings.drive_gain, settings.drive_tone, settings.drive_level), (0.3, 0.5, 0.5));
-        assert_eq!([settings.gain, settings.bass, settings.mid, settings.treble, settings.presence, settings.master], [0.5; 6]);
+        assert_eq!(
+            (settings.in_gain_db, settings.gate_thresh_db, settings.gate_release_ms),
+            (0.0, -60.0, 100.0)
+        );
+        assert_eq!(
+            (settings.drive_gain, settings.drive_tone, settings.drive_level),
+            (0.3, 0.5, 0.5)
+        );
+        assert_eq!(
+            [
+                settings.gain,
+                settings.bass,
+                settings.mid,
+                settings.treble,
+                settings.presence,
+                settings.master
+            ],
+            [0.5; 6]
+        );
         assert_eq!((settings.cab_mic, settings.cab_res), (0.5, 0.5));
-        assert_eq!((settings.delay.time_ms, settings.delay.feedback, settings.delay.mix), (350.0, 0.35, 0.25));
+        assert_eq!(
+            (settings.delay.time_ms, settings.delay.feedback, settings.delay.mix),
+            (350.0, 0.35, 0.25)
+        );
         assert_eq!((settings.reverb.decay_s, settings.reverb.mix), (1.5, 0.2));
         assert_eq!(settings.out_level, 1.0);
     }
@@ -648,10 +693,18 @@ mod tests {
         assert_eq!(range(&params.phaser_rate), (0.1, 8.0));
         assert_eq!(range(&params.flanger_rate), (0.05, 5.0));
         assert_eq!(range(&params.trem_rate), (0.5, 12.0));
-        for depth in [&params.chorus_depth, &params.phaser_depth, &params.flanger_depth, &params.trem_depth] {
+        for depth in
+            [&params.chorus_depth, &params.phaser_depth, &params.flanger_depth, &params.trem_depth]
+        {
             assert_eq!(range(depth), (0.0, 1.0));
         }
-        for dial in [&params.gain, &params.drive_gain, &params.cab_mic, &params.comp_sustain, &params.comp_level] {
+        for dial in [
+            &params.gain,
+            &params.drive_gain,
+            &params.cab_mic,
+            &params.comp_sustain,
+            &params.comp_level,
+        ] {
             assert_eq!(range(dial), (0.0, 1.0));
         }
     }

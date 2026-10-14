@@ -27,11 +27,7 @@ pub struct TremoloSettings {
 
 impl Default for TremoloSettings {
     fn default() -> Self {
-        Self {
-            on: false,
-            rate_hz: 5.0,
-            depth: 0.5,
-        }
+        Self { on: false, rate_hz: 5.0, depth: 0.5 }
     }
 }
 
@@ -48,12 +44,8 @@ pub struct Tremolo {
 impl Tremolo {
     /// Allocates nothing: the tremolo has no buffers
     pub fn new() -> Self {
-        let mut tremolo = Self {
-            lfo: Lfo::new(),
-            mix: Fade::new(),
-            dip: Dial::new(),
-            makeup: Dial::new(),
-        };
+        let mut tremolo =
+            Self { lfo: Lfo::new(), mix: Fade::new(), dip: Dial::new(), makeup: Dial::new() };
         tremolo.set_sample_rate(48000.0);
         tremolo
     }
@@ -85,7 +77,12 @@ impl Tremolo {
     }
 
     /// Behind the cabinet: two channels at the host's rate
-    pub fn process_stereo(&mut self, settings: &TremoloSettings, left: &mut [f32], right: &mut [f32]) {
+    pub fn process_stereo(
+        &mut self,
+        settings: &TremoloSettings,
+        left: &mut [f32],
+        right: &mut [f32],
+    ) {
         debug_assert_eq!(left.len(), right.len());
         let len = left.len().min(right.len());
         self.process(settings, [&mut left[..len], &mut right[..len]]);
@@ -96,7 +93,11 @@ impl Tremolo {
         self.makeup.value() * (1.0 - self.dip.value() * (0.5 - 0.5 * self.lfo.sine(0.0)))
     }
 
-    fn process<const N: usize>(&mut self, settings: &TremoloSettings, mut channels: [&mut [f32]; N]) {
+    fn process<const N: usize>(
+        &mut self,
+        settings: &TremoloSettings,
+        mut channels: [&mut [f32]; N],
+    ) {
         let rate = settings.rate_hz.clamp(RATE_MIN_HZ, RATE_MAX_HZ);
         let dip = DEEPEST * settings.depth.clamp(0.0, 1.0);
         // The power the dips leave on average, over a whole turn of the sine
@@ -155,9 +156,13 @@ mod tests {
         for sample_rate in [48000.0, 192_000.0, 384_000.0] {
             for (depth, dip_db) in [(1.0, -26.0), (0.5, -5.6), (0.0, 0.0)] {
                 for stereo in [false, true] {
-                    let (low, high) = swept_range::<Tremolo>(sample_rate, &settings(5.0, depth), stereo);
+                    let (low, high) =
+                        swept_range::<Tremolo>(sample_rate, &settings(5.0, depth), stereo);
                     let measured = to_db(low / high);
-                    assert!((measured - dip_db).abs() < 0.1, "{sample_rate} Hz, depth {depth}: {measured} dB");
+                    assert!(
+                        (measured - dip_db).abs() < 0.1,
+                        "{sample_rate} Hz, depth {depth}: {measured} dB"
+                    );
                 }
             }
         }
@@ -168,11 +173,15 @@ mod tests {
         // A steady tone, and its level every millisecond
         let input = sine(1000.0, 0.5, 48000.0, 48000);
         let output = run_mono(&mut Tremolo::at(48000.0), &settings(5.0, 1.0), &input, 64);
-        let levels: Vec<f32> = output[4800..43200].chunks(48).map(|piece| rms(piece) / rms(&input[..48])).collect();
-        let (low, high) = levels.iter().fold((f32::MAX, f32::MIN), |(low, high), &level| (low.min(level), high.max(level)));
+        let levels: Vec<f32> =
+            output[4800..43200].chunks(48).map(|piece| rms(piece) / rms(&input[..48])).collect();
+        let (low, high) = levels
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(low, high), &level| (low.min(level), high.max(level)));
         let middle = 0.5 * (low + high);
         // Four turns: as long over the middle as under it, and a top in each
-        let over = levels.iter().filter(|&&level| level > middle).count() as f32 / levels.len() as f32;
+        let over =
+            levels.iter().filter(|&&level| level > middle).count() as f32 / levels.len() as f32;
         assert!((over - 0.5).abs() < 0.03, "{over} of the time over the middle");
         let tops = levels.windows(2).filter(|pair| pair[0] <= middle && pair[1] > middle).count();
         assert!((3..=5).contains(&tops), "{tops} tops in 800 ms");
@@ -209,7 +218,11 @@ mod tests {
         // The tops are over the level without the pedal by as much as the average is under
         for (depth, top_db) in [(0.5, 1.07), (1.0, 2.05)] {
             let (_, high) = swept_range::<Tremolo>(48000.0, &settings(5.0, depth), false);
-            assert!((to_db(high) - top_db).abs() < 0.05, "Depth {depth}: tops at {} dB", to_db(high));
+            assert!(
+                (to_db(high) - top_db).abs() < 0.05,
+                "Depth {depth}: tops at {} dB",
+                to_db(high)
+            );
         }
     }
 }

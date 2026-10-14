@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use nih_plug_egui::egui::text::LayoutJob;
 use nih_plug_egui::egui::{
-    Align2, Color32, Context, FontData, FontDefinitions, FontFamily, FontId, Galley, Painter, Pos2, Rect, TextFormat,
+    Align2, Color32, Context, FontData, FontDefinitions, FontFamily, FontId, Galley, Painter, Pos2,
+    Rect, TextFormat,
 };
 
 /// Window background around the enclosure
@@ -78,8 +79,14 @@ pub const SHADOW: Color32 = Color32::from_black_alpha(80);
 
 /// `from` mixed with `to`: 0 is all `from`, 1 all `to`
 pub fn blend(from: Color32, to: Color32, share: f32) -> Color32 {
-    let channel = |from: u8, to: u8| (from as f32 + (to as f32 - from as f32) * share.clamp(0.0, 1.0)).round() as u8;
-    Color32::from_rgb(channel(from.r(), to.r()), channel(from.g(), to.g()), channel(from.b(), to.b()))
+    let channel = |from: u8, to: u8| {
+        (from as f32 + (to as f32 - from as f32) * share.clamp(0.0, 1.0)).round() as u8
+    };
+    Color32::from_rgb(
+        channel(from.r(), to.r()),
+        channel(from.g(), to.g()),
+        channel(from.b(), to.b()),
+    )
 }
 
 /// A darker tone of `paint` for the second coat of a pedal's art: 0 is the paint, 1 black
@@ -123,7 +130,13 @@ pub fn mono(size: f32) -> FontId {
 }
 
 /// Single line of text with letter spacing given as a fraction of the font size
-pub fn layout(painter: &Painter, text: &str, font: FontId, color: Color32, spacing: f32) -> Arc<Galley> {
+pub fn layout(
+    painter: &Painter,
+    text: &str,
+    font: FontId,
+    color: Color32,
+    spacing: f32,
+) -> Arc<Galley> {
     let format = TextFormat {
         extra_letter_spacing: font.size * spacing,
         font_id: font,
@@ -180,7 +193,11 @@ mod tests {
         // The orange of the Pitch Shifter is the lightest paint print is known to read on
         let least = silk_contrast(PAINT_ORANGE);
         for paint in PEDAL_PAINTS {
-            assert!(silk_contrast(paint) >= least, "{paint:?}: {} under {least}", silk_contrast(paint));
+            assert!(
+                silk_contrast(paint) >= least,
+                "{paint:?}: {} under {least}",
+                silk_contrast(paint)
+            );
         }
     }
 

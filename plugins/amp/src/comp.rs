@@ -68,11 +68,7 @@ pub struct CompSettings {
 
 impl Default for CompSettings {
     fn default() -> Self {
-        Self {
-            on: false,
-            sustain: 0.5,
-            level: 0.5,
-        }
+        Self { on: false, sustain: 0.5, level: 0.5 }
     }
 }
 
@@ -192,7 +188,10 @@ impl Comp {
         for (left, right) in left.iter_mut().zip(right.iter_mut()) {
             let (dry_left, dry_right) = (*left, *right);
             // The louder side sets the gain of both, so nothing moves between them
-            let side = self.highpass[0].process(dry_left).abs().max(self.highpass[1].process(dry_right).abs());
+            let side = self.highpass[0]
+                .process(dry_left)
+                .abs()
+                .max(self.highpass[1].process(dry_right).abs());
             let gain = self.next_gain(side, sustain);
             let mix = self.next_mix(settings.on);
             *left = mixed(dry_left, gain, mix);
@@ -340,10 +339,7 @@ mod tests {
     }
 
     fn off() -> CompSettings {
-        CompSettings {
-            on: false,
-            ..settings(1.0, 1.0)
-        }
+        CompSettings { on: false, ..settings(1.0, 1.0) }
     }
 
     fn run_mono(comp: &mut Comp, settings: &CompSettings, input: &[f32], block: usize) -> Vec<f32> {
@@ -354,7 +350,13 @@ mod tests {
         output
     }
 
-    fn run_stereo(comp: &mut Comp, settings: &CompSettings, left: &[f32], right: &[f32], block: usize) -> (Vec<f32>, Vec<f32>) {
+    fn run_stereo(
+        comp: &mut Comp,
+        settings: &CompSettings,
+        left: &[f32],
+        right: &[f32],
+        block: usize,
+    ) -> (Vec<f32>, Vec<f32>) {
         let (mut left, mut right) = (left.to_vec(), right.to_vec());
         for (l, r) in left.chunks_mut(block).zip(right.chunks_mut(block)) {
             comp.process_stereo(settings, l, r);
@@ -392,7 +394,8 @@ mod tests {
     fn picked_notes(sample_rate: f32) -> Vec<f32> {
         let note_len = ms(800.0, sample_rate);
         let mut recording = Vec::new();
-        for (index, freq) in [110.0, 196.0, 146.83, 246.94, 329.63, 164.81].into_iter().enumerate() {
+        for (index, freq) in [110.0, 196.0, 146.83, 246.94, 329.63, 164.81].into_iter().enumerate()
+        {
             recording.extend(pluck(freq, Pluck::OPEN, index as u32 + 1, sample_rate, note_len));
             recording.extend(vec![0.0; ms(50.0, sample_rate)]);
         }
@@ -413,7 +416,11 @@ mod tests {
     /// Gain in dB over every 10 ms of a recording
     fn gain_trace_db(input: &[f32], output: &[f32], sample_rate: f32) -> Vec<f32> {
         let piece = ms(10.0, sample_rate);
-        input.chunks_exact(piece).zip(output.chunks_exact(piece)).map(|(dry, wet)| to_db(rms(wet) / rms(dry))).collect()
+        input
+            .chunks_exact(piece)
+            .zip(output.chunks_exact(piece))
+            .map(|(dry, wet)| to_db(rms(wet) / rms(dry)))
+            .collect()
     }
 
     #[test]
@@ -464,13 +471,23 @@ mod tests {
             let mut output = Vec::new();
             for (index, block) in input.chunks(BLOCK).enumerate() {
                 // Off and on again a few times while the sine goes on
-                let now = if (index * BLOCK / ms(250.0, SAMPLE_RATE)) % 2 == 0 { on } else { CompSettings { on: false, ..on } };
+                let now = if (index * BLOCK / ms(250.0, SAMPLE_RATE)) % 2 == 0 {
+                    on
+                } else {
+                    CompSettings { on: false, ..on }
+                };
                 output.extend(run_mono(&mut comp, &now, block, BLOCK));
             }
             // The steepest the sine is by itself, and through the pedal once it has settled
             let settled = run(&on, &input);
             let own_step = largest_step(&input).max(largest_step(&settled[settled.len() / 2..]));
-            assert!(largest_step(&output) < own_step * 1.1, "Sustain {}: step {} against {}", sustain * 10.0, largest_step(&output), own_step);
+            assert!(
+                largest_step(&output) < own_step * 1.1,
+                "Sustain {}: step {} against {}",
+                sustain * 10.0,
+                largest_step(&output),
+                own_step
+            );
             assert!(rms(&output) > 0.1);
         }
     }
@@ -494,11 +511,24 @@ mod tests {
             let steepest = |setting: &CompSettings| largest_step(&run(setting, &input)[half..]);
             let own_step = steepest(&from).max(steepest(&to));
             let step = largest_step(&output[half - 1..]);
-            assert!(step < own_step * 1.15, "{:?} to {:?}: step {} against {}", from, to, step, own_step);
+            assert!(
+                step < own_step * 1.15,
+                "{:?} to {:?}: step {} against {}",
+                from,
+                to,
+                step,
+                own_step
+            );
             // And it arrives where the new setting is by itself
             let end = input.len() - ms(100.0, SAMPLE_RATE);
             let apart = to_db(rms(&output[end..]) / rms(&run(&to, &input)[end..]));
-            assert!(apart.abs() < 0.1, "{:?} to {:?}: {:.2} dB from the new setting", from, to, apart);
+            assert!(
+                apart.abs() < 0.1,
+                "{:?} to {:?}: {:.2} dB from the new setting",
+                from,
+                to,
+                apart
+            );
         }
     }
 
@@ -514,14 +544,18 @@ mod tests {
         ];
         let mono = |block: usize| {
             let mut comp = new_comp(SAMPLE_RATE);
-            parts.iter().flat_map(|(setting, part)| run_mono(&mut comp, setting, part, block)).collect::<Vec<f32>>()
+            parts
+                .iter()
+                .flat_map(|(setting, part)| run_mono(&mut comp, setting, part, block))
+                .collect::<Vec<f32>>()
         };
         let stereo = |block: usize| {
             let mut comp = new_comp(SAMPLE_RATE);
             let mut both = (Vec::new(), Vec::new());
             for (setting, part) in &parts {
                 // The right channel is the left one late and quieter
-                let right: Vec<f32> = (0..part.len()).map(|index| 0.7 * part[index.saturating_sub(40)]).collect();
+                let right: Vec<f32> =
+                    (0..part.len()).map(|index| 0.7 * part[index.saturating_sub(40)]).collect();
                 let (left, right) = run_stereo(&mut comp, setting, part, &right, block);
                 both.0.extend(left);
                 both.1.extend(right);
@@ -547,17 +581,25 @@ mod tests {
         };
         let reference = trace(48000.0, 32);
         // It moves: turned down in the loud part, and back up after it
-        assert!(reference[35] - reference[75] > 10.0, "{:.1} and {:.1} dB", reference[35], reference[75]);
+        assert!(
+            reference[35] - reference[75] > 10.0,
+            "{:.1} and {:.1} dB",
+            reference[35],
+            reference[75]
+        );
         assert!(reference[115] - reference[75] > 10.0);
-        for (sample_rate, block) in [(44100.0, 32), (96000.0, 32), (192000.0, 128), (384000.0, 128)] {
+        for (sample_rate, block) in [(44100.0, 32), (96000.0, 32), (192000.0, 128), (384000.0, 128)]
+        {
             let other = trace(sample_rate, block);
-            let apart = reference.iter().zip(&other).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+            let apart =
+                reference.iter().zip(&other).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
             assert!(apart < 0.3, "{} Hz: {:.2} dB from 48 kHz", sample_rate, apart);
         }
 
         // And on two channels
         let input = steps(192000.0);
-        let (left, _) = run_stereo(&mut new_comp(192000.0), &settings(0.7, 0.5), &input, &input, 32);
+        let (left, _) =
+            run_stereo(&mut new_comp(192000.0), &settings(0.7, 0.5), &input, &input, 32);
         let other = gain_trace_db(&input, &left, 192000.0);
         let apart = reference.iter().zip(&other).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
         assert!(apart < 0.3, "Two channels at 192 kHz: {:.2} dB from 48 kHz", apart);
@@ -570,7 +612,13 @@ mod tests {
             for step in 0..=10 {
                 let sustain = step as f32 / 10.0;
                 let wet = loudness_lufs(&[&run(&settings(sustain, 0.5), &input)], SAMPLE_RATE);
-                assert!((wet - dry).abs() < 1.5, "{}, Sustain {}: {:.1} LU against off", name, step, wet - dry);
+                assert!(
+                    (wet - dry).abs() < 1.5,
+                    "{}, Sustain {}: {:.1} LU against off",
+                    name,
+                    step,
+                    wet - dry
+                );
             }
         }
     }
@@ -580,21 +628,31 @@ mod tests {
         let input = at_rms_db(&guitar_di(SAMPLE_RATE)[..ms(3000.0, SAMPLE_RATE)], REFERENCE_DI_DB);
         let level = |level: f32| to_db(rms(&run(&settings(0.5, level), &input)));
         // All but the 10 ms fade from the untouched signal at the start
-        assert!((level(1.0) - level(0.5) - LEVEL_DB).abs() < 0.1, "{:.2} dB up", level(1.0) - level(0.5));
-        assert!((level(0.5) - level(0.0) - LEVEL_DB).abs() < 0.1, "{:.2} dB down", level(0.5) - level(0.0));
+        assert!(
+            (level(1.0) - level(0.5) - LEVEL_DB).abs() < 0.1,
+            "{:.2} dB up",
+            level(1.0) - level(0.5)
+        );
+        assert!(
+            (level(0.5) - level(0.0) - LEVEL_DB).abs() < 0.1,
+            "{:.2} dB down",
+            level(0.5) - level(0.0)
+        );
     }
 
     /// How far apart in level the pedal leaves the same playing at -36 and at -18 dBFS RMS
     fn soft_to_hard_db(sustain: f32) -> f32 {
         let di = guitar_di(SAMPLE_RATE);
-        let out = |level_db: f32| to_db(rms(&run(&settings(sustain, 0.5), &at_rms_db(&di, level_db))));
+        let out =
+            |level_db: f32| to_db(rms(&run(&settings(sustain, 0.5), &at_rms_db(&di, level_db))));
         out(-18.0) - out(-36.0)
     }
 
     #[test]
     fn test_sustain_evens_out_soft_and_hard_playing() {
         // 18 dB apart going in
-        let apart: Vec<f32> = [0.0, 0.25, 0.5, 0.75, 1.0].into_iter().map(soft_to_hard_db).collect();
+        let apart: Vec<f32> =
+            [0.0, 0.25, 0.5, 0.75, 1.0].into_iter().map(soft_to_hard_db).collect();
         assert!(apart.windows(2).all(|pair| pair[1] < pair[0] - 1.0), "{:?}", apart);
         assert!(apart[0] > 15.0, "Sustain 0 does more than a little: {:.1} dB", apart[0]);
         assert!((8.0..13.0).contains(&apart[2]), "Sustain 5: {:.1} dB", apart[2]);
@@ -610,7 +668,8 @@ mod tests {
             Some(sustain) => run(&settings(sustain, 0.5), &note),
             None => note,
         };
-        let at = |time_ms: f32| rms(&output[ms(time_ms, SAMPLE_RATE)..ms(time_ms + 100.0, SAMPLE_RATE)]);
+        let at =
+            |time_ms: f32| rms(&output[ms(time_ms, SAMPLE_RATE)..ms(time_ms + 100.0, SAMPLE_RATE)]);
         to_db(at(1500.0) / at(100.0))
     }
 
@@ -639,14 +698,24 @@ mod tests {
         let pick = |signal: &[f32]| -> f32 {
             let over: Vec<f32> = signal
                 .chunks_exact(note)
-                .map(|note| to_db(peak(&note[..ms(5.0, SAMPLE_RATE)]) / rms(&note[ms(50.0, SAMPLE_RATE)..ms(150.0, SAMPLE_RATE)])))
+                .map(|note| {
+                    to_db(
+                        peak(&note[..ms(5.0, SAMPLE_RATE)])
+                            / rms(&note[ms(50.0, SAMPLE_RATE)..ms(150.0, SAMPLE_RATE)]),
+                    )
+                })
                 .collect();
             over.iter().sum::<f32>() / over.len() as f32
         };
         // The second note on: the first one meets a pedal that is still fading in
         let (pick_in, pick_out) = (pick(&input[note..]), pick(&output[note..]));
         assert!(pick_out > pick_in, "Pick over body: {:.1} dB in, {:.1} dB out", pick_in, pick_out);
-        assert!(pick_out < pick_in + 9.0, "Pick over body: {:.1} dB in, {:.1} dB out", pick_in, pick_out);
+        assert!(
+            pick_out < pick_in + 9.0,
+            "Pick over body: {:.1} dB in, {:.1} dB out",
+            pick_in,
+            pick_out
+        );
     }
 
     #[test]
@@ -704,7 +773,12 @@ mod tests {
                 break;
             }
             attempts += 1;
-            assert!(attempts < 3, "{:.2} us per block playing, {:.2} us in silence", playing, slowest);
+            assert!(
+                attempts < 3,
+                "{:.2} us per block playing, {:.2} us in silence",
+                playing,
+                slowest
+            );
         }
     }
 
@@ -723,7 +797,14 @@ mod tests {
             for freq_hz in [65.41, 82.41, 220.0] {
                 for level in [HELD_NOTE, 0.5] {
                     let thd = held_note_thd_db(sustain, freq_hz, level, SAMPLE_RATE);
-                    assert!(thd < -70.0, "Sustain {}, {} Hz at {}: {:.1} dB", sustain * 10.0, freq_hz, level, thd);
+                    assert!(
+                        thd < -70.0,
+                        "Sustain {}, {} Hz at {}: {:.1} dB",
+                        sustain * 10.0,
+                        freq_hz,
+                        level,
+                        thd
+                    );
                 }
             }
         }
@@ -744,12 +825,18 @@ mod tests {
             to_db(rms(&output[input.len() / 2..]) / rms(&input[input.len() / 2..]))
         };
         let (low, high) = (gain(82.41), gain(660.0));
-        assert!(low > high + 1.0 && low < high + 4.0, "{:.1} dB at 82 Hz, {:.1} dB at 660 Hz", low, high);
+        assert!(
+            low > high + 1.0 && low < high + 4.0,
+            "{:.1} dB at 82 Hz, {:.1} dB at 660 Hz",
+            low,
+            high
+        );
     }
 
     #[test]
     fn test_both_channels_get_the_same_gain() {
-        let left_in = at_rms_db(&guitar_di(SAMPLE_RATE)[..ms(3000.0, SAMPLE_RATE)], REFERENCE_DI_DB);
+        let left_in =
+            at_rms_db(&guitar_di(SAMPLE_RATE)[..ms(3000.0, SAMPLE_RATE)], REFERENCE_DI_DB);
         // Something else on the right, quieter, then louder than the left
         let right_in: Vec<f32> = sine(330.0, 1.0, SAMPLE_RATE, left_in.len())
             .iter()
@@ -757,22 +844,31 @@ mod tests {
             .map(|(index, sample)| sample * if index < left_in.len() / 2 { 0.01 } else { 0.4 })
             .collect();
         let setting = settings(0.8, 0.5);
-        let (left, right) = run_stereo(&mut new_comp(SAMPLE_RATE), &setting, &left_in, &right_in, BLOCK);
+        let (left, right) =
+            run_stereo(&mut new_comp(SAMPLE_RATE), &setting, &left_in, &right_in, BLOCK);
 
         // Past the fade, each side is its input times the same gain
         let from = ms(FADE_MS, SAMPLE_RATE) + 1;
         let mut compared = 0;
         for index in from..left.len() {
             if left_in[index].abs() > 1e-3 && right_in[index].abs() > 1e-3 {
-                let (gain_left, gain_right) = (left[index] / left_in[index], right[index] / right_in[index]);
-                assert!((gain_left / gain_right - 1.0).abs() < 1e-5, "{} against {} at sample {}", gain_left, gain_right, index);
+                let (gain_left, gain_right) =
+                    (left[index] / left_in[index], right[index] / right_in[index]);
+                assert!(
+                    (gain_left / gain_right - 1.0).abs() < 1e-5,
+                    "{} against {} at sample {}",
+                    gain_left,
+                    gain_right,
+                    index
+                );
                 compared += 1;
             }
         }
         assert!(compared > left.len() / 4);
 
         // Whichever side is louder sets the gain: the sides swapped come out swapped
-        let (swapped_left, swapped_right) = run_stereo(&mut new_comp(SAMPLE_RATE), &setting, &right_in, &left_in, BLOCK);
+        let (swapped_left, swapped_right) =
+            run_stereo(&mut new_comp(SAMPLE_RATE), &setting, &right_in, &left_in, BLOCK);
         assert!(swapped_left == right && swapped_right == left);
         // A loud right side turns the left one down
         let alone = run(&setting, &left_in);
@@ -780,7 +876,8 @@ mod tests {
         assert!(rms(&left[half..]) < 0.8 * rms(&alone[half..]));
 
         // The same on both sides is what one channel gives
-        let (left, right) = run_stereo(&mut new_comp(SAMPLE_RATE), &setting, &left_in, &left_in, BLOCK);
+        let (left, right) =
+            run_stereo(&mut new_comp(SAMPLE_RATE), &setting, &left_in, &left_in, BLOCK);
         assert!(left == alone && right == alone);
     }
 
@@ -799,12 +896,19 @@ mod tests {
             for (sustain, level) in [(0.0, 0.0), (1.0, 1.0), (0.0, 1.0), (1.0, 0.0), (0.5, 0.5)] {
                 let setting = settings(sustain, level);
                 let mono = run_mono(&mut new_comp(sample_rate), &setting, &input, 128);
-                let (left, right) = run_stereo(&mut new_comp(sample_rate), &setting, &input, &mono, 32);
+                let (left, right) =
+                    run_stereo(&mut new_comp(sample_rate), &setting, &input, &mono, 32);
                 for output in [&mono, &left, &right] {
                     assert!(output.iter().all(|sample| sample.is_finite()));
                 }
                 for (sample, dry) in mono.iter().zip(&input) {
-                    assert!(sample.abs() <= dry.abs() * most * 1.001, "{} from {} at {} Hz", sample, dry, sample_rate);
+                    assert!(
+                        sample.abs() <= dry.abs() * most * 1.001,
+                        "{} from {} at {} Hz",
+                        sample,
+                        dry,
+                        sample_rate
+                    );
                 }
             }
         }
@@ -849,7 +953,10 @@ mod tests {
         let (soft, loud) = (gains[piece - 1], gains[2 * piece - 1]);
         let passed = soft + share * (loud - soft);
         let attack = gains[piece..].iter().position(|&gain| gain <= passed).unwrap();
-        let release = gains[2 * piece..].iter().position(|&gain| gain >= loud + share * (soft - loud)).unwrap_or(piece);
+        let release = gains[2 * piece..]
+            .iter()
+            .position(|&gain| gain >= loud + share * (soft - loud))
+            .unwrap_or(piece);
         (attack as f32 * 1000.0 / sample_rate, release as f32 * 1000.0 / sample_rate)
     }
 
@@ -860,8 +967,18 @@ mod tests {
             let (attack, release) = step_times_ms(sustain, 0.63, SAMPLE_RATE);
             let (attack_end, _) = step_times_ms(sustain, 0.9, SAMPLE_RATE);
             assert!(attack < 6.0, "Sustain {}: attack {:.1} ms", sustain * 10.0, attack);
-            assert!((2.0..12.0).contains(&attack_end), "Sustain {}: attack ends after {:.1} ms", sustain * 10.0, attack_end);
-            assert!((60.0..250.0).contains(&release), "Sustain {}: release {:.1} ms", sustain * 10.0, release);
+            assert!(
+                (2.0..12.0).contains(&attack_end),
+                "Sustain {}: attack ends after {:.1} ms",
+                sustain * 10.0,
+                attack_end
+            );
+            assert!(
+                (60.0..250.0).contains(&release),
+                "Sustain {}: release {:.1} ms",
+                sustain * 10.0,
+                release
+            );
         }
     }
 
@@ -878,12 +995,23 @@ mod tests {
             let settled = peak(&output[ms(900.0, SAMPLE_RATE)..]);
             let first = to_db(peak(&output[..ms(520.0, SAMPLE_RATE)]) / settled);
             assert!(first > 2.0, "Sustain {}: no attack left, {:.1} dB", sustain * 10.0, first);
-            assert!(first < ATTACK_OVER_DB + 1.5, "Sustain {}: {:.1} dB over where it settles", sustain * 10.0, first);
+            assert!(
+                first < ATTACK_OVER_DB + 1.5,
+                "Sustain {}: {:.1} dB over where it settles",
+                sustain * 10.0,
+                first
+            );
         }
     }
 
     /// Fastest of seven runs over a recording, in ns per sample
-    fn cost_ns(sample_rate: f32, block: usize, stereo: bool, setting: &CompSettings, input: &[f32]) -> f64 {
+    fn cost_ns(
+        sample_rate: f32,
+        block: usize,
+        stereo: bool,
+        setting: &CompSettings,
+        input: &[f32],
+    ) -> f64 {
         let mut comp = new_comp(sample_rate);
         (0..7)
             .map(|_| {
@@ -925,7 +1053,10 @@ mod tests {
             };
             let loudness: Vec<f32> = reference_recordings(SAMPLE_RATE)
                 .iter()
-                .map(|(_, input)| loudness_lufs(&[&run(&setting, input)], SAMPLE_RATE) - loudness_lufs(&[input], SAMPLE_RATE))
+                .map(|(_, input)| {
+                    loudness_lufs(&[&run(&setting, input)], SAMPLE_RATE)
+                        - loudness_lufs(&[input], SAMPLE_RATE)
+                })
                 .collect();
             println!(
                 "{:>6.1}{:>9.1}{:>8.1}{:>7.1}{:>8.1}{:>8.1}{:>7.1}{:>8.1}",
@@ -950,7 +1081,10 @@ mod tests {
         println!("            riffs   clean  picked                              82 Hz  220 Hz     63 %   90 %    63 %   90 %");
         for sustain in [0.0, 0.25, 0.5, 0.75, 1.0] {
             let setting = settings(sustain, 0.5);
-            let crests: Vec<f32> = reference_recordings(SAMPLE_RATE).iter().map(|(_, input)| crest_db(&run(&setting, input))).collect();
+            let crests: Vec<f32> = reference_recordings(SAMPLE_RATE)
+                .iter()
+                .map(|(_, input)| crest_db(&run(&setting, input)))
+                .collect();
             let picked = crest_db(&run(&setting, &picked_notes(SAMPLE_RATE)));
             let (attack, release) = step_times_ms(sustain, 0.63, SAMPLE_RATE);
             let (attack_90, release_90) = step_times_ms(sustain, 0.9, SAMPLE_RATE);
@@ -1009,7 +1143,11 @@ mod tests {
         write_wav(&dir.join("amp_comp_dry.wav"), &[&input], SAMPLE_RATE as u32);
         for sustain in [3, 5, 8] {
             let output = run(&settings(sustain as f32 / 10.0, 0.5), &input);
-            write_wav(&dir.join(format!("amp_comp_sustain_{}.wav", sustain)), &[&output], SAMPLE_RATE as u32);
+            write_wav(
+                &dir.join(format!("amp_comp_sustain_{}.wav", sustain)),
+                &[&output],
+                SAMPLE_RATE as u32,
+            );
         }
         println!("Wrote renders to {}", dir.display());
     }

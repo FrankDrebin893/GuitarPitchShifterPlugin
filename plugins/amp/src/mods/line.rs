@@ -79,9 +79,15 @@ mod tests {
         for delay in [2.0, 17.25, 100.5, 383.9] {
             line.clear();
             for (index, &sample) in input.iter().enumerate() {
-                let expected = 0.5 * (std::f64::consts::TAU * 440.0 * (index as f64 - delay) / 48000.0).sin();
+                let expected =
+                    0.5 * (std::f64::consts::TAU * 440.0 * (index as f64 - delay) / 48000.0).sin();
                 if index > 400 {
-                    assert!((line.read(delay) as f64 - expected).abs() < 1e-4, "{} samples back at {}", delay, index);
+                    assert!(
+                        (line.read(delay) as f64 - expected).abs() < 1e-4,
+                        "{} samples back at {}",
+                        delay,
+                        index
+                    );
                 }
                 line.push(sample);
             }

@@ -44,12 +44,8 @@ impl Default for GuitarPitchShifterParams {
         Self {
             editor_state: editor::default_state(),
 
-            semitones: IntParam::new(
-                "Semitones",
-                0,
-                IntRange::Linear { min: -12, max: 12 },
-            )
-            .with_unit(" st"),
+            semitones: IntParam::new("Semitones", 0, IntRange::Linear { min: -12, max: 12 })
+                .with_unit(" st"),
 
             latency_ms: FloatParam::new(
                 "Max Latency",
@@ -66,11 +62,7 @@ impl Default for GuitarPitchShifterParams {
             smoothness_ms: FloatParam::new(
                 "Smoothness",
                 2.0,
-                FloatRange::Skewed {
-                    min: 0.5,
-                    max: 10.0,
-                    factor: FloatRange::skew_factor(-1.0),
-                },
+                FloatRange::Skewed { min: 0.5, max: 10.0, factor: FloatRange::skew_factor(-1.0) },
             )
             .with_unit(" ms")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
@@ -178,10 +170,8 @@ impl ClapPlugin for GuitarPitchShifterPlugin {
 impl Vst3Plugin for GuitarPitchShifterPlugin {
     // Frozen: DAW projects find the plugin by this ID. Never change it
     const VST3_CLASS_ID: [u8; 16] = *b"GuitarPShift0010";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
-        Vst3SubCategory::Fx,
-        Vst3SubCategory::PitchShift,
-    ];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::PitchShift];
 }
 
 nih_export_clap!(GuitarPitchShifterPlugin);

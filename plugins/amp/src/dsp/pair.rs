@@ -216,7 +216,8 @@ mod tests {
             for &b in &values {
                 let (pair, other) = (Pair::new(a, b), Pair::new(b, a));
                 let same = |pair: Pair, first: f64, second: f64| {
-                    pair.first().to_bits() == first.to_bits() && pair.second().to_bits() == second.to_bits()
+                    pair.first().to_bits() == first.to_bits()
+                        && pair.second().to_bits() == second.to_bits()
                 };
                 assert!(same(pair + other, a + b, b + a));
                 assert!(same(pair - other, a - b, b - a));

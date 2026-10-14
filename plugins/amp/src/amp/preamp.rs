@@ -127,7 +127,8 @@ impl Stage {
     /// One sample. `process` does two at a time
     fn process_sample(&mut self, input: f32) -> f32 {
         let (driven, bias) = self.drive(input);
-        let clipped = self.clip(driven + bias) - asym_clip(bias, self.headroom[0], self.headroom[1]);
+        let clipped =
+            self.clip(driven + bias) - asym_clip(bias, self.headroom[0], self.headroom[1]);
         // A gain stage inverts, so the next one clips the other half harder
         -self.lowpass.process(clipped)
     }
@@ -149,12 +150,14 @@ impl Stage {
 
             let (first, first_bias) = self.drive(pair[0]);
             let (second, second_bias) = self.drive(pair[1]);
-            let rest = asym_clip_pair([first_bias, second_bias], self.headroom[0], self.headroom[1]);
+            let rest =
+                asym_clip_pair([first_bias, second_bias], self.headroom[0], self.headroom[1]);
             let inputs = [first + first_bias, second + second_bias];
             let clipped = if finer {
                 [self.fine.process(inputs[0]), self.fine.process(inputs[1])]
             } else {
-                let clipped = self.clipper.process_pair(Pair::new(inputs[0] as f64, inputs[1] as f64));
+                let clipped =
+                    self.clipper.process_pair(Pair::new(inputs[0] as f64, inputs[1] as f64));
                 [clipped.first() as f32, clipped.second() as f32]
             };
             pair[0] = -self.lowpass.process(clipped[0] - rest[0]);
@@ -200,7 +203,12 @@ impl Preamp {
     /// `sample_rate` is the rate the preamp runs at (the oversampled one)
     pub fn configure(&mut self, model: &AmpModel, sample_rate: f32) {
         self.tight.set(model.tight_hz, sample_rate);
-        self.focus.set(BiquadCoeffs::peak(model.focus[0], model.focus[1], model.focus[2], sample_rate));
+        self.focus.set(BiquadCoeffs::peak(
+            model.focus[0],
+            model.focus[1],
+            model.focus[2],
+            sample_rate,
+        ));
         self.bright.set(model.bright_hz, sample_rate);
         self.fizz.set(match model.fizz_hz {
             Some(fizz_hz) => BiquadCoeffs::lowpass(fizz_hz, FIZZ_Q, sample_rate),
@@ -276,7 +284,8 @@ impl Preamp {
             stage.process(block);
         }
         for sample in block.iter_mut() {
-            *sample = self.lowcut.process(self.fizz.process(*sample as f64)) as f32 * self.level.next();
+            *sample =
+                self.lowcut.process(self.fizz.process(*sample as f64)) as f32 * self.level.next();
         }
     }
 }
@@ -312,16 +321,35 @@ mod tests {
         let input = sine(440.0, 0.15, SAMPLE_RATE, LEN);
         let distortion = |amp: Amp, gain: f32| harmonics_db(&run(amp, gain, &input), 440.0);
         for amp in Amp::ALL {
-            let (low, centre, full) = (distortion(amp, 0.0), distortion(amp, 0.5), distortion(amp, 1.0));
+            let (low, centre, full) =
+                (distortion(amp, 0.0), distortion(amp, 0.5), distortion(amp, 1.0));
             assert!(centre > low, "{:?}: {:.1} dB at gain 0, {:.1} dB at gain 5", amp, low, centre);
-            assert!(full > centre, "{:?}: {:.1} dB at gain 5, {:.1} dB at gain 10", amp, centre, full);
+            assert!(
+                full > centre,
+                "{:?}: {:.1} dB at gain 5, {:.1} dB at gain 10",
+                amp,
+                centre,
+                full
+            );
         }
 
         // Each amp has its own share of the range: clean, clean to crunch, crunch to flat out
-        assert!(distortion(Amp::Klar, 0.5) < -40.0, "Klar at gain 5: {:.1} dB", distortion(Amp::Klar, 0.5));
-        assert!(distortion(Amp::Brol, 0.0) < -30.0, "Brøl at gain 0: {:.1} dB", distortion(Amp::Brol, 0.0));
+        assert!(
+            distortion(Amp::Klar, 0.5) < -40.0,
+            "Klar at gain 5: {:.1} dB",
+            distortion(Amp::Klar, 0.5)
+        );
+        assert!(
+            distortion(Amp::Brol, 0.0) < -30.0,
+            "Brøl at gain 0: {:.1} dB",
+            distortion(Amp::Brol, 0.0)
+        );
         assert!(distortion(Amp::Brol, 0.5) > distortion(Amp::Brol, 0.0) + 10.0);
-        assert!(distortion(Amp::Torden, 0.0) > -20.0, "Torden at gain 0: {:.1} dB", distortion(Amp::Torden, 0.0));
+        assert!(
+            distortion(Amp::Torden, 0.0) > -20.0,
+            "Torden at gain 0: {:.1} dB",
+            distortion(Amp::Torden, 0.0)
+        );
     }
 
     #[test]
@@ -338,7 +366,8 @@ mod tests {
                 preamp.set_gain(model, gain, 0);
                 let mut output = input.clone();
                 preamp.process(&mut output);
-                let measured = to_db(rms(&output[LEN / 2..]) / rms(&input[LEN / 2..])) - model.level_db[end * 2];
+                let measured = to_db(rms(&output[LEN / 2..]) / rms(&input[LEN / 2..]))
+                    - model.level_db[end * 2];
                 let expected: f32 = stages.iter().map(|stage| stage.gain_db[end]).sum();
                 // The bright lift at gain 0 and the focus add to it; the low-passes take a little
                 assert!(
@@ -355,7 +384,9 @@ mod tests {
 
     #[test]
     fn test_soft_playing_is_cleaner_than_hard_playing() {
-        let distortion = |amp: Amp, level: f32| harmonics_db(&run(amp, 0.5, &sine(440.0, level, SAMPLE_RATE, LEN)), 440.0);
+        let distortion = |amp: Amp, level: f32| {
+            harmonics_db(&run(amp, 0.5, &sine(440.0, level, SAMPLE_RATE, LEN)), 440.0)
+        };
         for amp in [Amp::Klar, Amp::Brol] {
             let (soft, hard) = (distortion(amp, 0.02), distortion(amp, 0.3));
             assert!(soft < hard - 12.0, "{:?}: soft {:.1} dB, hard {:.1} dB", amp, soft, hard);
@@ -375,7 +406,8 @@ mod tests {
             // A slow, small sine comes out the same way up
             let input = sine(1000.0, 0.01, SAMPLE_RATE, LEN);
             let output = run(amp, 0.3, &input);
-            let dot: f32 = input[LEN / 2..].iter().zip(&output[LEN / 2..]).map(|(a, b)| a * b).sum();
+            let dot: f32 =
+                input[LEN / 2..].iter().zip(&output[LEN / 2..]).map(|(a, b)| a * b).sum();
             assert!(dot > 0.0, "{:?} inverts", amp);
         }
     }
@@ -398,7 +430,9 @@ mod tests {
             output
         };
         for amp in Amp::ALL {
-            let finer = amp.model().stages[..amp.model().stage_count].iter().any(|stage| stage.finer_when_driven);
+            let finer = amp.model().stages[..amp.model().stage_count]
+                .iter()
+                .any(|stage| stage.finer_when_driven);
             let plain = run_driven(amp, &[(9600, false)]);
             let driven = run_driven(amp, &[(9600, true)]);
             assert_eq!(driven != plain, finer, "{amp:?}");
@@ -408,15 +442,24 @@ mod tests {
 
             // The same sound, a quarter of a sample later in that stage: no louder, and
             // nothing like a step where one clipper takes over from the other
-            assert!((to_db(rms(&driven[4800..])) - to_db(rms(&plain[4800..]))).abs() < 0.1, "{amp:?}");
-            let steps = |signal: &[f32]| signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
+            assert!(
+                (to_db(rms(&driven[4800..])) - to_db(rms(&plain[4800..]))).abs() < 0.1,
+                "{amp:?}"
+            );
+            let steps = |signal: &[f32]| {
+                signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max)
+            };
             let switched = run_driven(amp, &[(2400, false), (6000, true), (9600, false)]);
             assert!(steps(&switched) < 1.1 * steps(&plain).max(steps(&driven)), "{amp:?}");
             // Until it is switched it is the plain amp to the bit, and switched back it is
             // the plain amp again once the fade is over and the filters behind have settled
             assert_eq!(switched[..2400], plain[..2400]);
             let settled = 6000 + 1920 + 960;
-            let off = switched[settled..].iter().zip(&plain[settled..]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+            let off = switched[settled..]
+                .iter()
+                .zip(&plain[settled..])
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f32::max);
             assert!(off < 1e-3 * peak(&plain), "{amp:?}: off by {off}");
         }
         assert!(Amp::Torden.model().stages[1].finer_when_driven);
@@ -429,7 +472,10 @@ mod tests {
             let input = sine(440.0, 0.15, SAMPLE_RATE, LEN);
             let levels: Vec<f32> = [0.0, 0.25, 0.5, 0.75, 1.0]
                 .iter()
-                .map(|&gain| to_db(rms(&run(amp, gain, &input)[LEN / 2..])) + curve(&amp.model().makeup_db, gain))
+                .map(|&gain| {
+                    to_db(rms(&run(amp, gain, &input)[LEN / 2..]))
+                        + curve(&amp.model().makeup_db, gain)
+                })
                 .collect();
             let loudest = levels.iter().cloned().fold(f32::MIN, f32::max);
             let quietest = levels.iter().cloned().fold(f32::MAX, f32::min);

@@ -311,12 +311,8 @@ impl MetalKit {
                 };
             }
             37 => {
-                self.side_stick = SideStick {
-                    env: level,
-                    phases: [0.0; 2],
-                    tune: hit.tune,
-                    decay: decay(0.012),
-                };
+                self.side_stick =
+                    SideStick { env: level, phases: [0.0; 2], tune: hit.tune, decay: decay(0.012) };
             }
             38 | 40 => {
                 self.snare = Snare {
@@ -424,7 +420,8 @@ impl MetalKit {
             let voice = &mut self.snare;
             advance(&mut voice.phases[0], (182.0 + 45.0 * voice.pitch_env) * voice.tune, rate);
             advance(&mut voice.phases[1], (331.0 + 30.0 * voice.pitch_env) * voice.tune, rate);
-            let body = (sine(voice.phases[0]) * 0.85 + sine(voice.phases[1]) * 0.45) * voice.body_env;
+            let body =
+                (sine(voice.phases[0]) * 0.85 + sine(voice.phases[1]) * 0.45) * voice.body_env;
             let hiss = self.snare_hp.process(noise).high;
             let band = self.snare_bp.process(hiss).band;
             let wires = (self.snare_lp.process(hiss).low * 0.5 + band * 1.1) * voice.wire_env;
@@ -461,7 +458,8 @@ impl MetalKit {
             let freq = TOM_FREQS_HZ[index] * (1.0 + 0.55 * voice.pitch_env) * voice.tune;
             advance(&mut voice.phases[0], freq, rate);
             advance(&mut voice.phases[1], freq * 1.51, rate);
-            let tom = (sine(voice.phases[0]) + 0.3 * sine(voice.phases[1]) * (0.3 + 0.7 * voice.pitch_env))
+            let tom = (sine(voice.phases[0])
+                + 0.3 * sine(voice.phases[1]) * (0.3 + 0.7 * voice.pitch_env))
                 * voice.env
                 + self.noise.next() * voice.noise_env * 0.2;
             voice.env *= voice.decay;
@@ -502,7 +500,8 @@ impl MetalKit {
                 + 0.7 * sine(voice.bell_phases[1])
                 + 0.45 * sine(voice.bell_phases[2]))
                 * voice.bell;
-            ride = ((band * 0.7 + high * 0.25) * voice.env + high * voice.ping * 0.9 + bell * 0.3) * cymbal_gain;
+            ride = ((band * 0.7 + high * 0.25) * voice.env + high * voice.ping * 0.9 + bell * 0.3)
+                * cymbal_gain;
             voice.env *= voice.decay;
             voice.ping *= voice.ping_decay;
             voice.bell *= voice.bell_decay;
@@ -521,7 +520,10 @@ impl MetalKit {
         }
         // The splash borrows the hi-hat's metal, which runs twice as fast while both sound
         let source = noise * 0.7 + self.hat_metal.process(rate) * 0.3;
-        let splash = self.splash_hp.process(source).high * self.splash.process(0.0012, rate) * cymbal_gain * 0.8;
+        let splash = self.splash_hp.process(source).high
+            * self.splash.process(0.0012, rate)
+            * cymbal_gain
+            * 0.8;
         left += crashes[0] * 0.85 + crashes[1] * 0.3 + splash * 0.7;
         right += crashes[0] * 0.3 + crashes[1] * 0.85 + splash * 0.4;
         send += (crashes[0] + crashes[1]) * 0.15;
@@ -562,18 +564,11 @@ mod tests {
     const SAMPLE_RATE: f32 = 44100.0;
 
     fn hit(velocity: f32) -> Hit {
-        Hit {
-            velocity,
-            tune: 1.0,
-            decay: 1.0,
-        }
+        Hit { velocity, tune: 1.0, decay: 1.0 }
     }
 
     fn dry() -> Mix {
-        Mix {
-            room: 0.0,
-            ..Mix::default()
-        }
+        Mix { room: 0.0, ..Mix::default() }
     }
 
     fn kit() -> MetalKit {
@@ -641,12 +636,16 @@ mod tests {
             render(&mut kit, &dry(), 2.0)
         };
         let settled = |output: &[f32]| {
-            zero_crossing_freq(&output[(0.2 * SAMPLE_RATE) as usize..(0.4 * SAMPLE_RATE) as usize], SAMPLE_RATE)
+            zero_crossing_freq(
+                &output[(0.2 * SAMPLE_RATE) as usize..(0.4 * SAMPLE_RATE) as usize],
+                SAMPLE_RATE,
+            )
         };
 
         let (plain, high, damped) = (tom(1.0, 1.0), tom(1.5, 1.0), tom(1.0, 0.25));
         assert!((settled(&high) / settled(&plain) - 1.5).abs() < 0.05);
-        let ratio = decay_time_s(&damped, SAMPLE_RATE, -40.0) / decay_time_s(&plain, SAMPLE_RATE, -40.0);
+        let ratio =
+            decay_time_s(&damped, SAMPLE_RATE, -40.0) / decay_time_s(&plain, SAMPLE_RATE, -40.0);
         assert!((0.2..0.35).contains(&ratio), "Decay ratio: {}", ratio);
     }
 
@@ -660,7 +659,11 @@ mod tests {
         // Every render has the same noise, so what the room adds is the difference
         let room_alone = |room: f32| {
             let tail = (0.3 * SAMPLE_RATE) as usize;
-            let added: Vec<f32> = snare(room)[tail..].iter().zip(&snare(0.0)[tail..]).map(|(wet, dry)| wet - dry).collect();
+            let added: Vec<f32> = snare(room)[tail..]
+                .iter()
+                .zip(&snare(0.0)[tail..])
+                .map(|(wet, dry)| wet - dry)
+                .collect();
             rms(&added)
         };
 

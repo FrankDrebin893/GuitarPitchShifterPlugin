@@ -109,15 +109,13 @@ impl CabIr {
     /// An impulse response by itself
     #[cfg(test)]
     pub fn plain(taps: &[f32]) -> Self {
-        Self {
-            taps: taps.to_vec(),
-            lows: BiquadCoeffs::IDENTITY,
-        }
+        Self { taps: taps.to_vec(), lows: BiquadCoeffs::IDENTITY }
     }
 
     /// Gain of the cabinet at one frequency
     pub fn magnitude(&self, freq_hz: f32, sample_rate: f32) -> f32 {
-        ir_magnitude(&self.taps, freq_hz, sample_rate) * db_to_gain(self.lows.magnitude_db(freq_hz, sample_rate))
+        ir_magnitude(&self.taps, freq_hz, sample_rate)
+            * db_to_gain(self.lows.magnitude_db(freq_hz, sample_rate))
     }
 }
 
@@ -130,7 +128,10 @@ static DESIGNS: Mutex<Vec<(CabModel, f32, CabIr)>> = Mutex::new(Vec::new());
 /// audio thread
 pub fn design_ir(model: &CabModel, sample_rate: f32) -> CabIr {
     let find = |designs: &Vec<(CabModel, f32, CabIr)>| {
-        designs.iter().find(|(known, rate, _)| known == model && *rate == sample_rate).map(|(_, _, ir)| ir.clone())
+        designs
+            .iter()
+            .find(|(known, rate, _)| known == model && *rate == sample_rate)
+            .map(|(_, _, ir)| ir.clone())
     };
     let known = find(&DESIGNS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
     known.unwrap_or_else(|| {
@@ -153,10 +154,7 @@ fn design_reference(model: &CabModel) -> (CabIr, [f32; 2]) {
     let len = ((model.ir_ms * 0.001 * sample_rate).round() as usize).clamp(16, ir_len(sample_rate));
     let taps = faded_response(&rest, len, FADE_SHARE);
     let moved = fit_lows(model, &long_response(model, sample_rate), &taps, sample_rate);
-    let mut ir = CabIr {
-        taps,
-        lows: lows_filter(model, moved, sample_rate),
-    };
+    let mut ir = CabIr { taps, lows: lows_filter(model, moved, sample_rate) };
 
     let gain = level_gain(|freq_hz| ir.magnitude(freq_hz, sample_rate));
     for tap in &mut ir.taps {
@@ -174,17 +172,16 @@ fn design_at(model: &CabModel, sample_rate: f32) -> CabIr {
     }
     // As many seconds of it, each sample worth less by as much as there are more of them
     let scale = DESIGN_RATE / sample_rate;
-    let mut taps: Vec<f32> =
-        resample(&reference.taps, DESIGN_RATE as f64, sample_rate as f64).iter().map(|tap| tap * scale).collect();
+    let mut taps: Vec<f32> = resample(&reference.taps, DESIGN_RATE as f64, sample_rate as f64)
+        .iter()
+        .map(|tap| tap * scale)
+        .collect();
     taps.truncate(ir_len(sample_rate));
     // The reference has faded to nothing at its end
     if let Some(last) = taps.last_mut() {
         *last = 0.0;
     }
-    CabIr {
-        taps,
-        lows: lows_filter(model, moved, sample_rate),
-    }
+    CabIr { taps, lows: lows_filter(model, moved, sample_rate) }
 }
 
 fn resonance_filter(model: &CabModel, sample_rate: f32) -> BiquadCoeffs {
@@ -220,7 +217,9 @@ fn fit_lows(model: &CabModel, long: &[f32], taps: &[f32], sample_rate: f32) -> [
         let filter = lows_filter(model, moved, sample_rate);
         wanted
             .iter()
-            .map(|&(freq_hz, wanted_db)| (filter.magnitude_db(freq_hz, sample_rate) - wanted_db).abs())
+            .map(|&(freq_hz, wanted_db)| {
+                (filter.magnitude_db(freq_hz, sample_rate) - wanted_db).abs()
+            })
             .fold(0.0, f32::max)
     };
 
@@ -264,7 +263,9 @@ fn rest_filters(model: &CabModel, sample_rate: f32) -> Vec<BiquadCoeffs> {
     for index in 0..model.breakup_count {
         let position = (index as f32 + random.next()) / model.breakup_count as f32;
         let freq = model.breakup_hz[0] * span.powf(position);
-        let gain_db = model.breakup_db * (0.3 + 0.7 * random.next()) * if random.next() < 0.5 { -1.0 } else { 1.0 };
+        let gain_db = model.breakup_db
+            * (0.3 + 0.7 * random.next())
+            * if random.next() < 0.5 { -1.0 } else { 1.0 };
         let q = BREAKUP_Q[0] + (BREAKUP_Q[1] - BREAKUP_Q[0]) * random.next();
         filters.push(BiquadCoeffs::peak(freq, q, gain_db, sample_rate));
     }
@@ -287,7 +288,8 @@ fn faded_response(filters: &[BiquadCoeffs], len: usize, fade_share: f32) -> Vec<
     (0..len)
         .map(|index| {
             let impulse = if index == 0 { 1.0 } else { 0.0 };
-            let sample = sections.iter_mut().fold(impulse, |signal, section| section.process(signal));
+            let sample =
+                sections.iter_mut().fold(impulse, |signal, section| section.process(signal));
             let fade = if index < fade_start {
                 1.0
             } else {
@@ -316,9 +318,7 @@ struct Random {
 
 impl Random {
     fn new(seed: u32) -> Self {
-        Self {
-            state: seed.wrapping_mul(0x9E37_79B9) | 1,
-        }
+        Self { state: seed.wrapping_mul(0x9E37_79B9) | 1 }
     }
 
     fn next(&mut self) -> f32 {
@@ -367,13 +367,7 @@ impl Slot {
     fn new() -> Self {
         let mut taps = vec![0.0; MAX_USER_IR_LEN];
         taps[0] = 1.0;
-        Self {
-            taps,
-            len: 1,
-            tailed: false,
-            lows: Biquad::new(),
-            filtered: false,
-        }
+        Self { taps, len: 1, tailed: false, lows: Biquad::new(), filtered: false }
     }
 }
 
@@ -520,7 +514,11 @@ impl Cabinet {
     #[cfg(test)]
     pub fn buffers(&self) -> Vec<(usize, usize)> {
         let describe = |buffer: &Vec<f32>| (buffer.as_ptr() as usize, buffer.capacity());
-        let mut buffers = vec![describe(&self.history), describe(&self.slots[0].taps), describe(&self.slots[1].taps)];
+        let mut buffers = vec![
+            describe(&self.history),
+            describe(&self.slots[0].taps),
+            describe(&self.slots[1].taps),
+        ];
         buffers.extend(self.tail.buffers());
         buffers
     }
@@ -534,7 +532,11 @@ impl Cabinet {
         let tailed = self.tail.has(slot);
         let slot = &mut self.slots[slot];
         slot.tailed = tailed;
-        slot.len = if tailed { partitioned::head_len(self.tail.block()) } else { taps.len().clamp(1, self.longest) };
+        slot.len = if tailed {
+            partitioned::head_len(self.tail.block())
+        } else {
+            taps.len().clamp(1, self.longest)
+        };
         let reversed = &mut slot.taps[..slot.len];
         reversed.fill(0.0);
         for (tap, &sample) in reversed.iter_mut().rev().zip(taps) {
@@ -653,7 +655,14 @@ impl CabVoicing {
     /// to the edge of the cone (darker, a little fuller), above it to the centre (brighter,
     /// a little leaner). `resonance` is how much the cabinet thumps at its own resonance.
     /// The filters move there over the next `steps` samples; at once with no steps
-    pub fn set(&mut self, model: &CabModel, mic: f32, resonance: f32, sample_rate: f32, steps: u32) {
+    pub fn set(
+        &mut self,
+        model: &CabModel,
+        mic: f32,
+        resonance: f32,
+        sample_rate: f32,
+        steps: u32,
+    ) {
         let (mic_coeffs, mic_centred) = Self::mic_coeffs(model, mic, sample_rate);
         // Coming from the centre the filters start from rest. What they hold there passes
         // the signal as it is, so they start from where the skipped signal was
@@ -676,12 +685,14 @@ impl CabVoicing {
     fn mic_coeffs(model: &CabModel, mic: f32, sample_rate: f32) -> ([BiquadCoeffs; 2], bool) {
         let mic = mic.clamp(0.0, 1.0);
         let position = (mic - 0.5) * 2.0;
-        let corner_hz = model.bite[0] * (MIC_CORNER_RATIO[0] + (MIC_CORNER_RATIO[1] - MIC_CORNER_RATIO[0]) * mic);
+        let corner_hz = model.bite[0]
+            * (MIC_CORNER_RATIO[0] + (MIC_CORNER_RATIO[1] - MIC_CORNER_RATIO[0]) * mic);
         let trim = 10.0f32.powf(-MIC_TRIM_DB * position / 20.0);
         (
             [
                 BiquadCoeffs::high_shelf(corner_hz, MIC_Q, MIC_DB * position, sample_rate),
-                BiquadCoeffs::low_shelf(MIC_LOW_HZ, 0.707, -MIC_LOW_DB * position, sample_rate).scaled(trim),
+                BiquadCoeffs::low_shelf(MIC_LOW_HZ, 0.707, -MIC_LOW_DB * position, sample_rate)
+                    .scaled(trim),
             ],
             position == 0.0,
         )
@@ -689,7 +700,10 @@ impl CabVoicing {
 
     fn thump_coeffs(model: &CabModel, resonance: f32, sample_rate: f32) -> (BiquadCoeffs, bool) {
         let position = (resonance.clamp(0.0, 1.0) - 0.5) * 2.0;
-        (BiquadCoeffs::peak(model.resonance_hz, THUMP_Q, THUMP_DB * position, sample_rate), position == 0.0)
+        (
+            BiquadCoeffs::peak(model.resonance_hz, THUMP_Q, THUMP_DB * position, sample_rate),
+            position == 0.0,
+        )
     }
 
     pub fn process(&mut self, block: &mut [f32]) {
@@ -705,7 +719,13 @@ impl CabVoicing {
 
     /// What the dials do to the level at one frequency, in dB
     #[cfg(test)]
-    pub fn response_db(model: &CabModel, mic: f32, resonance: f32, freq_hz: f32, sample_rate: f32) -> f32 {
+    pub fn response_db(
+        model: &CabModel,
+        mic: f32,
+        resonance: f32,
+        freq_hz: f32,
+        sample_rate: f32,
+    ) -> f32 {
         if mic == 0.5 && resonance == 0.5 {
             return 0.0;
         }
@@ -749,7 +769,10 @@ pub mod tests {
         let long = long_response(&amp.model().cab, DESIGN_RATE);
         let ratio = (LEVEL_BAND_HZ[1] / LEVEL_BAND_HZ[0]).powf(1.0 / (LEVEL_PROBES - 1) as f32);
         let long_level: f32 = (0..LEVEL_PROBES)
-            .map(|probe| ir_magnitude(&long, LEVEL_BAND_HZ[0] * ratio.powi(probe as i32), DESIGN_RATE).powi(2))
+            .map(|probe| {
+                ir_magnitude(&long, LEVEL_BAND_HZ[0] * ratio.powi(probe as i32), DESIGN_RATE)
+                    .powi(2)
+            })
             .sum::<f32>()
             / LEVEL_PROBES as f32;
         let long_level_db = 0.5 * gain_to_db(long_level);
@@ -798,13 +821,24 @@ pub mod tests {
             for sample_rate in [48000.0, 192000.0] {
                 let ir = design(amp, sample_rate);
                 let time = convolution_ns(&ir);
-                print!("{:>8} taps{:>7.1} ns{:>7.3} ns/tap", ir.taps.len(), time, time / ir.taps.len() as f64);
+                print!(
+                    "{:>8} taps{:>7.1} ns{:>7.3} ns/tap",
+                    ir.taps.len(),
+                    time,
+                    time / ir.taps.len() as f64
+                );
             }
             println!();
         }
         for taps in [240, 960, 3840] {
             let time = convolution_ns(&CabIr::plain(&vec![0.01; taps]));
-            println!("{:<8}{:>8} taps{:>7.1} ns{:>7.3} ns/tap", "plain", taps, time, time / taps as f64);
+            println!(
+                "{:<8}{:>8} taps{:>7.1} ns{:>7.3} ns/tap",
+                "plain",
+                taps,
+                time,
+                time / taps as f64
+            );
         }
         println!();
 
@@ -831,7 +865,13 @@ pub mod tests {
         let len = (ms * 0.001 * sample_rate) as usize;
         let mut noise = Noise::new(seed);
         (0..len)
-            .map(|index| if index == 0 { 1.0 } else { 0.2 * noise.next() * (-6.0 * index as f32 / len as f32).exp() })
+            .map(|index| {
+                if index == 0 {
+                    1.0
+                } else {
+                    0.2 * noise.next() * (-6.0 * index as f32 / len as f32).exp()
+                }
+            })
             .collect()
     }
 
@@ -874,7 +914,8 @@ pub mod tests {
         (0..200)
             .map(|probe| {
                 let freq_hz = 60.0 * (10_000.0f32 / 60.0).powf(probe as f32 / 199.0);
-                to_db(ir_magnitude(a, freq_hz, sample_rate) / ir_magnitude(b, freq_hz, sample_rate)).abs()
+                to_db(ir_magnitude(a, freq_hz, sample_rate) / ir_magnitude(b, freq_hz, sample_rate))
+                    .abs()
             })
             .fold(0.0, f32::max)
     }
@@ -891,15 +932,26 @@ pub mod tests {
         println!("with its late part in the tail (`tail`). Time per {}-sample block in us, median and worst,", BLOCK);
         println!("and the median as a share of real time. Then what the tail changes: the largest difference");
         println!("of the responses from 60 Hz to 10 kHz in dB, the largest difference of the outputs on noise");
-        println!("against their RMS in dB, and the first sample that differs by more than a millionth");
+        println!(
+            "against their RMS in dB, and the first sample that differs by more than a millionth"
+        );
         println!(
             "{:>9}{:>7}{:>7}{:>7}{:>23}{:>23}{:>9}{:>9}{:>8}",
-            "rate", "ms", "taps", "block", "direct med/worst", "tail med/worst", "resp dB", "out dB", "first"
+            "rate",
+            "ms",
+            "taps",
+            "block",
+            "direct med/worst",
+            "tail med/worst",
+            "resp dB",
+            "out dB",
+            "first"
         );
         for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0] {
             let block_us = BLOCK as f64 / sample_rate as f64 * 1e6;
             let mut noise = Noise::new(11);
-            let input: Vec<f32> = (0..(sample_rate as usize / BLOCK) * BLOCK).map(|_| 0.1 * noise.next()).collect();
+            let input: Vec<f32> =
+                (0..(sample_rate as usize / BLOCK) * BLOCK).map(|_| 0.1 * noise.next()).collect();
             for ms in [3.0, 5.0, 10.0, 20.0, 40.0] {
                 let taps = long_response_taps(ms, sample_rate, 5);
                 let mut direct = cabinet_with(&taps, sample_rate, false);
@@ -921,8 +973,15 @@ pub mod tests {
                 };
                 let (direct_response, tail_response) = (respond(false), respond(true));
                 let (direct_output, tail_output) = (play(false), play(true));
-                let gap = direct_output.iter().zip(&tail_output).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
-                let first = direct_response.iter().zip(&tail_response).position(|(a, b)| (a - b).abs() > 1e-6);
+                let gap = direct_output
+                    .iter()
+                    .zip(&tail_output)
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0, f32::max);
+                let first = direct_response
+                    .iter()
+                    .zip(&tail_response)
+                    .position(|(a, b)| (a - b).abs() > 1e-6);
                 println!(
                     "{:>9}{:>7}{:>7}{:>7}{:>9.2} /{:>6.2}{:>5.2} %{:>9.2} /{:>6.2}{:>5.2} %{:>9.4}{:>9.1}{:>8}",
                     sample_rate,
@@ -948,24 +1007,33 @@ pub mod tests {
         for sample_rate in [48000.0, 96000.0, 192000.0] {
             let taps = long_response_taps(40.0, sample_rate, 5);
             let mut noise = Noise::new(13);
-            let input: Vec<f32> = (0..sample_rate as usize / 512 * 512).map(|_| 0.1 * noise.next()).collect();
+            let input: Vec<f32> =
+                (0..sample_rate as usize / 512 * 512).map(|_| 0.1 * noise.next()).collect();
             print!("{:>9}", sample_rate);
             for block in [16, 32, 64, 128, 512] {
-                let (median, worst) = block_times_us(&mut cabinet_with(&taps, sample_rate, true), &input, block);
+                let (median, worst) =
+                    block_times_us(&mut cabinet_with(&taps, sample_rate, true), &input, block);
                 print!("{:>7}:{:>6.2} /{:>6.2} x{:>4.2}", block, median, worst, worst / median);
             }
             println!();
         }
 
         println!();
-        println!("While one long cabinet is swapped for another both are worked out. Time per {}-sample", BLOCK);
+        println!(
+            "While one long cabinet is swapped for another both are worked out. Time per {}-sample",
+            BLOCK
+        );
         println!("block in us of the 40 ms response by itself, and the worst while it is swapped for another");
         for sample_rate in [48000.0, 96000.0, 192000.0] {
-            let (taps, other) = (long_response_taps(40.0, sample_rate, 5), long_response_taps(40.0, sample_rate, 7));
+            let (taps, other) = (
+                long_response_taps(40.0, sample_rate, 5),
+                long_response_taps(40.0, sample_rate, 7),
+            );
             let mut spectra = vec![0.0; MAX_TAIL_SPECTRA_LEN];
             let len = tail_spectra(&other, sample_rate, &mut spectra);
             let mut noise = Noise::new(17);
-            let input: Vec<f32> = (0..sample_rate as usize / 4 / BLOCK * BLOCK).map(|_| 0.1 * noise.next()).collect();
+            let input: Vec<f32> =
+                (0..sample_rate as usize / 4 / BLOCK * BLOCK).map(|_| 0.1 * noise.next()).collect();
             let mut cabinet = cabinet_with(&taps, sample_rate, true);
             let (median, _) = block_times_us(&mut cabinet, &input, BLOCK);
             let mut swapping = f64::MAX;
@@ -983,11 +1051,19 @@ pub mod tests {
                 assert!(!cabinet.is_swapping());
                 swapping = swapping.min(worst);
             }
-            println!("{:>9}{:>8.2} us alone{:>8.2} us while swapping, x{:.2}", sample_rate, median, swapping, swapping / median);
+            println!(
+                "{:>9}{:>8.2} us alone{:>8.2} us while swapping, x{:.2}",
+                sample_rate,
+                median,
+                swapping,
+                swapping / median
+            );
         }
 
         println!();
-        println!("Making a response ready for the tail, off the audio thread (`tail_spectra`), in ms");
+        println!(
+            "Making a response ready for the tail, off the audio thread (`tail_spectra`), in ms"
+        );
         for sample_rate in [48000.0, 96000.0, 192000.0] {
             let taps = long_response_taps(40.0, sample_rate, 5);
             let mut spectra = vec![0.0; MAX_TAIL_SPECTRA_LEN];
@@ -1007,7 +1083,14 @@ pub mod tests {
         for amp in Amp::ALL {
             for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0] {
                 let (off, freq_hz) = off_the_long_response(amp, sample_rate, 150);
-                assert!(off.abs() < 0.5, "{:?} at {} Hz: {:.2} dB at {:.0} Hz", amp, sample_rate, off, freq_hz);
+                assert!(
+                    off.abs() < 0.5,
+                    "{:?} at {} Hz: {:.2} dB at {:.0} Hz",
+                    amp,
+                    sample_rate,
+                    off,
+                    freq_hz
+                );
             }
         }
     }
@@ -1017,7 +1100,12 @@ pub mod tests {
         for amp in Amp::ALL {
             for sample_rate in [48000.0, 192000.0] {
                 let ir = design(amp, sample_rate);
-                assert!(ir.taps.len() * 2 <= ir_len(sample_rate), "{:?}: {} taps", amp, ir.taps.len());
+                assert!(
+                    ir.taps.len() * 2 <= ir_len(sample_rate),
+                    "{:?}: {} taps",
+                    amp,
+                    ir.taps.len()
+                );
                 assert!(ir.lows != BiquadCoeffs::IDENTITY);
             }
         }
@@ -1033,7 +1121,14 @@ pub mod tests {
             for freq in [60.0, 80.0, 100.0, 150.0, 1000.0, 3000.0] {
                 let played = to_db(ir_magnitude(&response, freq, sample_rate));
                 let designed = to_db(ir.magnitude(freq, sample_rate));
-                assert!((played - designed).abs() < 0.05, "{:?} at {} Hz: {:.2} dB, {:.2} dB", amp, freq, played, designed);
+                assert!(
+                    (played - designed).abs() < 0.05,
+                    "{:?} at {} Hz: {:.2} dB, {:.2} dB",
+                    amp,
+                    freq,
+                    played,
+                    designed
+                );
             }
         }
     }
@@ -1052,7 +1147,13 @@ pub mod tests {
                     .map(|i| ir.magnitude(LEVEL_BAND_HZ[0] * ratio.powi(i), sample_rate).powi(2))
                     .sum::<f32>()
                     / 100.0;
-                assert!(to_db(power.sqrt()).abs() < 0.5, "{:?} at {}: {:.2} dB", amp, sample_rate, to_db(power.sqrt()));
+                assert!(
+                    to_db(power.sqrt()).abs() < 0.5,
+                    "{:?} at {}: {:.2} dB",
+                    amp,
+                    sample_rate,
+                    to_db(power.sqrt())
+                );
             }
         }
     }
@@ -1094,12 +1195,19 @@ pub mod tests {
 
     /// Largest difference in dB between a cabinet at a sample rate and the same cabinet
     /// at `DESIGN_RATE`, over `probes` frequencies from 60 Hz to `top_hz`, and where it is
-    pub fn off_the_design_rate(amp: Amp, sample_rate: f32, top_hz: f32, probes: usize) -> (f32, f32) {
+    pub fn off_the_design_rate(
+        amp: Amp,
+        sample_rate: f32,
+        top_hz: f32,
+        probes: usize,
+    ) -> (f32, f32) {
         let (ir, reference) = (design(amp, sample_rate), design(amp, DESIGN_RATE));
         let mut worst = (0.0f32, 0.0);
         for probe in 0..probes {
             let freq_hz = 60.0 * (top_hz / 60.0).powf(probe as f32 / (probes - 1) as f32);
-            let off = to_db(ir.magnitude(freq_hz, sample_rate) / reference.magnitude(freq_hz, DESIGN_RATE));
+            let off = to_db(
+                ir.magnitude(freq_hz, sample_rate) / reference.magnitude(freq_hz, DESIGN_RATE),
+            );
             if off.abs() > worst.0.abs() {
                 worst = (off, freq_hz);
             }
@@ -1113,7 +1221,14 @@ pub mod tests {
         for amp in Amp::ALL {
             for sample_rate in [44100.0, 88200.0, 96000.0, 192000.0] {
                 let (off, freq_hz) = off_the_design_rate(amp, sample_rate, 10_000.0, 120);
-                assert!(off.abs() < SAME_DB, "{:?} at {} Hz: {:.3} dB at {:.0} Hz", amp, sample_rate, off, freq_hz);
+                assert!(
+                    off.abs() < SAME_DB,
+                    "{:?} at {} Hz: {:.3} dB at {:.0} Hz",
+                    amp,
+                    sample_rate,
+                    off,
+                    freq_hz
+                );
             }
         }
     }
@@ -1141,9 +1256,21 @@ pub mod tests {
             for sample_rate in [44100.0, 96000.0, 192000.0] {
                 let ir = design(amp, sample_rate);
                 let late = arrival_s(&ir, sample_rate) - reference;
-                assert!(late.abs() <= 1.0 / sample_rate.min(DESIGN_RATE), "{:?} at {}: {} s", amp, sample_rate, late);
+                assert!(
+                    late.abs() <= 1.0 / sample_rate.min(DESIGN_RATE),
+                    "{:?} at {}: {} s",
+                    amp,
+                    sample_rate,
+                    late
+                );
                 let expected = (amp.model().cab.ir_ms * 0.001 * sample_rate).round() as usize;
-                assert!(ir.taps.len().abs_diff(expected) <= 1, "{:?} at {}: {} taps", amp, sample_rate, ir.taps.len());
+                assert!(
+                    ir.taps.len().abs_diff(expected) <= 1,
+                    "{:?} at {}: {} taps",
+                    amp,
+                    sample_rate,
+                    ir.taps.len()
+                );
             }
         }
     }
@@ -1205,10 +1332,7 @@ pub mod tests {
     fn test_swap_crossfades_without_a_click() {
         let sample_rate = 48000.0;
         let ir = design(Amp::ALL[0], sample_rate);
-        let quieter = CabIr {
-            taps: ir.taps.iter().map(|s| s * 0.25).collect(),
-            lows: ir.lows,
-        };
+        let quieter = CabIr { taps: ir.taps.iter().map(|s| s * 0.25).collect(), lows: ir.lows };
         let mut cabinet = Cabinet::new();
         cabinet.set_sample_rate(sample_rate);
         cabinet.set_ir(&ir);
@@ -1222,14 +1346,18 @@ pub mod tests {
         let after = rms(&block[7200..]);
         assert!((after / before - 0.25).abs() < 0.01, "Level ratio: {}", after / before);
 
-        let largest_step = block[2400..].windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
-        let own_step = block[2400..4800].windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
+        let largest_step =
+            block[2400..].windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
+        let own_step =
+            block[2400..4800].windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
         assert!(largest_step < own_step * 1.05, "Step of {} against {}", largest_step, own_step);
     }
 
     #[test]
     fn test_long_response_through_the_tail_is_the_response_tap_by_tap() {
-        for (sample_rate, ms) in [(44100.0, 40.0), (48000.0, 15.0), (96000.0, 40.0), (192000.0, 40.0)] {
+        for (sample_rate, ms) in
+            [(44100.0, 40.0), (48000.0, 15.0), (96000.0, 40.0), (192000.0, 40.0)]
+        {
             let taps = long_response_taps(ms, sample_rate, 3);
             let mut tailed = cabinet_with(&taps, sample_rate, true);
             assert!(tailed.tailed);
@@ -1239,7 +1367,11 @@ pub mod tests {
             response[0] = 1.0;
             response.chunks_mut(37).for_each(|piece| tailed.process(piece));
             assert_eq!(response[0], taps[0]);
-            let off = response.iter().zip(taps.iter().chain(&[0.0; 500])).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+            let off = response
+                .iter()
+                .zip(taps.iter().chain(&[0.0; 500]))
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f32::max);
             assert!(off < 2e-6, "{sample_rate} Hz, {ms} ms: response off by {off}");
             let gap = largest_gap_db(&response, &taps, sample_rate);
             assert!(gap < 0.001, "{sample_rate} Hz, {ms} ms: {gap} dB");
@@ -1256,7 +1388,11 @@ pub mod tests {
             let compared = taps.len()..output.len();
             let (output, expected) = (&output[compared.clone()], &expected[compared]);
             let off = output.iter().zip(expected).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
-            assert!(off < 1e-5 * rms(expected), "{sample_rate} Hz, {ms} ms: off by {off} at {}", rms(expected));
+            assert!(
+                off < 1e-5 * rms(expected),
+                "{sample_rate} Hz, {ms} ms: off by {off} at {}",
+                rms(expected)
+            );
         }
     }
 
@@ -1264,7 +1400,8 @@ pub mod tests {
     fn test_output_through_the_tail_does_not_depend_on_block_size() {
         // To the bit: the work is counted in samples, not in calls
         let sample_rate = 48000.0;
-        let (taps, other) = (long_response_taps(40.0, sample_rate, 3), long_response_taps(25.0, sample_rate, 5));
+        let (taps, other) =
+            (long_response_taps(40.0, sample_rate, 3), long_response_taps(25.0, sample_rate, 5));
         let mut spectra = vec![0.0; MAX_TAIL_SPECTRA_LEN];
         let len = tail_spectra(&other, sample_rate, &mut spectra);
         let mut noise = Noise::new(9);
@@ -1297,7 +1434,9 @@ pub mod tests {
             spectra
         };
         let input = sine(500.0, 0.5, sample_rate, 24_000);
-        let own_step = |signal: &[f32]| signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
+        let own_step = |signal: &[f32]| {
+            signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max)
+        };
         // What each plays by itself: the same tap by tap, which holds all of the past
         let alone = |taps: &[f32]| {
             let mut output = input.clone();
@@ -1317,7 +1456,12 @@ pub mod tests {
         cabinet.swap_taps(&long, &spectra_of(&long));
         let wait = cabinet.swap_len() - cabinet.fade_len();
         let block = tail_block(sample_rate);
-        assert!(cabinet.is_swapping() && wait > long.len() - 2 * block && wait <= long.len() + 2 * block, "{wait}");
+        assert!(
+            cabinet.is_swapping()
+                && wait > long.len() - 2 * block
+                && wait <= long.len() + 2 * block,
+            "{wait}"
+        );
         let mut short_alone = input.clone();
         let mut reference = Cabinet::new();
         reference.set_sample_rate(sample_rate);
@@ -1330,9 +1474,16 @@ pub mod tests {
         let settled = 6000 + cabinet.swap_len();
         assert!(settled < 12_000);
         let long_alone = alone(&long);
-        let off = output[settled..12_000].iter().zip(&long_alone[settled..]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        let off = output[settled..12_000]
+            .iter()
+            .zip(&long_alone[settled..])
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
         assert!(off < 1e-5, "After the swap: off by {off}");
-        assert!(own_step(&output[5000..12_000]) < 1.05 * own_step(&long_alone[5000..]).max(own_step(&short_alone[5000..])));
+        assert!(
+            own_step(&output[5000..12_000])
+                < 1.05 * own_step(&long_alone[5000..]).max(own_step(&short_alone[5000..]))
+        );
 
         // From one long response to another: two blocks, then the crossfade
         cabinet.swap_taps(&other, &spectra_of(&other));
@@ -1342,9 +1493,16 @@ pub mod tests {
         assert!(!cabinet.is_swapping());
         let other_alone = alone(&other);
         let settled = 12_000 + cabinet.swap_len();
-        let off = output[settled..18_000].iter().zip(&other_alone[settled..]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        let off = output[settled..18_000]
+            .iter()
+            .zip(&other_alone[settled..])
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
         assert!(off < 1e-5, "After the second swap: off by {off}");
-        assert!(own_step(&output[11_000..18_000]) < 1.05 * own_step(&long_alone[11_000..]).max(own_step(&other_alone[11_000..])));
+        assert!(
+            own_step(&output[11_000..18_000])
+                < 1.05 * own_step(&long_alone[11_000..]).max(own_step(&other_alone[11_000..]))
+        );
 
         // Started from rest in the middle of a swap, the cabinet swapped to plays alone
         // and at once, and nothing is worked out for the other any more
@@ -1353,10 +1511,14 @@ pub mod tests {
         restarted.process(&mut input[..10].to_vec());
         restarted.reset();
         assert!(!restarted.is_swapping() && restarted.slots[restarted.active].tailed);
-        assert!(!restarted.slots[1 - restarted.active].tailed && !restarted.tail.has(1 - restarted.active));
+        assert!(
+            !restarted.slots[1 - restarted.active].tailed
+                && !restarted.tail.has(1 - restarted.active)
+        );
         let mut from_rest = input[..4800].to_vec();
         restarted.process(&mut from_rest);
-        let off = from_rest.iter().zip(&other_alone).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        let off =
+            from_rest.iter().zip(&other_alone).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
         assert!(off < 1e-5, "From rest: off by {off}");
 
         // And back to a short one: at once, as between short ones, and the tail stops
@@ -1366,9 +1528,16 @@ pub mod tests {
         assert!(!cabinet.is_swapping() && !cabinet.tailed);
         // Its filter starts from rest, and takes a while to forget that
         let settled = 18_000 + cabinet.swap_len() + 4800;
-        let off = output[settled..].iter().zip(&short_alone[settled..]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        let off = output[settled..]
+            .iter()
+            .zip(&short_alone[settled..])
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
         assert!(off < 1e-4, "Back on the short one: off by {off}");
-        assert!(own_step(&output[17_000..]) < 1.05 * own_step(&other_alone[17_000..]).max(own_step(&short_alone[17_000..])));
+        assert!(
+            own_step(&output[17_000..])
+                < 1.05 * own_step(&other_alone[17_000..]).max(own_step(&short_alone[17_000..]))
+        );
         assert_eq!(cabinet.buffers(), buffers);
     }
 
@@ -1416,7 +1585,9 @@ pub mod tests {
 
         // And when the dials glide back: the same as the input once they have arrived, and
         // no step on the way there or on the way out again
-        let largest_step = |samples: &[f32]| samples.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
+        let largest_step = |samples: &[f32]| {
+            samples.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max)
+        };
         let tone = sine(300.0, 0.5, 48000.0, 4800);
         voicing.set(&Amp::Brol.model().cab, 0.9, 0.1, 48000.0, 0);
         let mut output = tone.clone();
@@ -1434,11 +1605,32 @@ pub mod tests {
     fn test_mic_dial_moves_the_top_and_a_little_of_the_low_end() {
         for amp in Amp::ALL {
             let cab = &amp.model().cab;
-            let change = |mic: f32, freq: f32| CabVoicing::response_db(cab, mic, 0.5, freq, 48000.0);
-            assert!(change(0.0, 4000.0) < -4.0, "{:?} dark at 4 kHz: {:.1} dB", amp, change(0.0, 4000.0));
-            assert!(change(1.0, 5000.0) > 4.0, "{:?} bright at 5 kHz: {:.1} dB", amp, change(1.0, 5000.0));
-            assert!((0.3..2.5).contains(&change(0.0, 200.0)), "{:?} dark at 200 Hz: {:.1} dB", amp, change(0.0, 200.0));
-            assert!((-2.5..-0.3).contains(&change(1.0, 100.0)), "{:?} bright at 100 Hz: {:.1} dB", amp, change(1.0, 100.0));
+            let change =
+                |mic: f32, freq: f32| CabVoicing::response_db(cab, mic, 0.5, freq, 48000.0);
+            assert!(
+                change(0.0, 4000.0) < -4.0,
+                "{:?} dark at 4 kHz: {:.1} dB",
+                amp,
+                change(0.0, 4000.0)
+            );
+            assert!(
+                change(1.0, 5000.0) > 4.0,
+                "{:?} bright at 5 kHz: {:.1} dB",
+                amp,
+                change(1.0, 5000.0)
+            );
+            assert!(
+                (0.3..2.5).contains(&change(0.0, 200.0)),
+                "{:?} dark at 200 Hz: {:.1} dB",
+                amp,
+                change(0.0, 200.0)
+            );
+            assert!(
+                (-2.5..-0.3).contains(&change(1.0, 100.0)),
+                "{:?} bright at 100 Hz: {:.1} dB",
+                amp,
+                change(1.0, 100.0)
+            );
             // Steady across the dial
             let steps: Vec<f32> = (0..=10).map(|step| change(step as f32 * 0.1, 4000.0)).collect();
             assert!(steps.windows(2).all(|pair| pair[1] > pair[0]), "{:?}: {:?}", amp, steps);
@@ -1449,7 +1641,9 @@ pub mod tests {
     fn test_resonance_dial_moves_the_thump_only() {
         for amp in Amp::ALL {
             let cab = &amp.model().cab;
-            let change = |resonance: f32, freq: f32| CabVoicing::response_db(cab, 0.5, resonance, freq, 48000.0);
+            let change = |resonance: f32, freq: f32| {
+                CabVoicing::response_db(cab, 0.5, resonance, freq, 48000.0)
+            };
             assert!((change(1.0, cab.resonance_hz) - THUMP_DB).abs() < 0.1);
             assert!((change(0.0, cab.resonance_hz) + THUMP_DB).abs() < 0.1);
             assert!(change(1.0, 1000.0).abs() < 0.3 && change(0.0, 1000.0).abs() < 0.3);
@@ -1459,12 +1653,20 @@ pub mod tests {
     #[test]
     fn test_voicing_filters_do_what_their_response_says() {
         let cab = &Amp::Brol.model().cab;
-        for (mic, resonance, freq) in [(0.0, 0.5, 4000.0), (1.0, 0.5, 4000.0), (0.5, 1.0, 95.0), (0.2, 0.1, 300.0)] {
+        for (mic, resonance, freq) in
+            [(0.0, 0.5, 4000.0), (1.0, 0.5, 4000.0), (0.5, 1.0, 95.0), (0.2, 0.1, 300.0)]
+        {
             let input = sine(freq, 0.5, 48000.0, 24_000);
             let output = voiced(Amp::Brol, mic, resonance, &input);
             let measured = to_db(rms(&output[12_000..]) / rms(&input[12_000..]));
             let expected = CabVoicing::response_db(cab, mic, resonance, freq, 48000.0);
-            assert!((measured - expected).abs() < 0.1, "{} Hz: {:.2} dB, expected {:.2} dB", freq, measured, expected);
+            assert!(
+                (measured - expected).abs() < 0.1,
+                "{} Hz: {:.2} dB, expected {:.2} dB",
+                freq,
+                measured,
+                expected
+            );
         }
     }
 }

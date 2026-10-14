@@ -110,7 +110,9 @@ pub fn switch_amp(params: &GuitarAmpParams, setter: &ParamSetter, to: Amp) {
 pub fn preset_loaded(params: &GuitarAmpParams, amp: Amp, dials: AmpDials) {
     let from = params.amp.value();
     if from != amp {
-        params.dial_memory.leave(from, params.amp_dials().map(|dial| dial.unmodulated_plain_value()));
+        params
+            .dial_memory
+            .leave(from, params.amp_dials().map(|dial| dial.unmodulated_plain_value()));
     }
     params.dial_memory.leave(amp, dials);
 }

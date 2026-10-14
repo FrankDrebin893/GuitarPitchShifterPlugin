@@ -82,8 +82,19 @@ impl PowerAmp {
     }
 
     /// Moves to a Presence dial position over the next `steps` samples; at once with no steps
-    pub fn set_presence(&mut self, model: &PowerModel, presence: f32, sample_rate: f32, steps: u32) {
-        let coeffs = BiquadCoeffs::high_shelf(model.presence_hz, PRESENCE_Q, model.presence_db * presence, sample_rate);
+    pub fn set_presence(
+        &mut self,
+        model: &PowerModel,
+        presence: f32,
+        sample_rate: f32,
+        steps: u32,
+    ) {
+        let coeffs = BiquadCoeffs::high_shelf(
+            model.presence_hz,
+            PRESENCE_Q,
+            model.presence_db * presence,
+            sample_rate,
+        );
         self.presence.set(coeffs, steps);
     }
 
@@ -107,7 +118,8 @@ impl PowerAmp {
         // Off, and faded out: the stage as it is without the pedal, to the bit. The two
         // have a loop each, so that the stage without the pedal does not wait for what
         // only the pedal needs: every sample's headroom waits for the sample before
-        let pushed = self.driven_sag > 0.0 && (self.driven_share.value() != 0.0 || self.driven_share.target() != 0.0);
+        let pushed = self.driven_sag > 0.0
+            && (self.driven_share.value() != 0.0 || self.driven_share.target() != 0.0);
         if pushed {
             for sample in block.iter_mut() {
                 *sample = self.process_sample(*sample, true);
@@ -122,7 +134,8 @@ impl PowerAmp {
     #[inline(always)]
     fn process_sample(&mut self, sample: f32, pushed: bool) -> f32 {
         let input = self.dc.process(sample) as f64;
-        let mut shaped = self.presence.process(self.resonance.process(input)) as f32 * self.drive.next();
+        let mut shaped =
+            self.presence.process(self.resonance.process(input)) as f32 * self.drive.next();
         if pushed {
             let over = (self.load - self.driven_sag_from).max(0.0);
             shaped /= 1.0 + self.driven_share.next() * self.driven_sag * over;
@@ -186,7 +199,12 @@ mod tests {
                 .iter()
                 .map(|&master| to_db(rms(&run(amp, master, 0.5, &input)[LEN / 2..])))
                 .collect();
-            assert!(levels[1] > levels[0] + 10.0 && levels[2] > levels[1], "{:?}: {:?}", amp, levels);
+            assert!(
+                levels[1] > levels[0] + 10.0 && levels[2] > levels[1],
+                "{:?}: {:?}",
+                amp,
+                levels
+            );
         }
     }
 
@@ -253,16 +271,20 @@ mod tests {
 
         // Pushed 12 dB over that it comes down, in the time the sag takes, and stays there
         let pushed: Vec<f32> = played.iter().map(|sample| sample * 4.0).collect();
-        let (plain, driven) = (run_driven(&[(LEN, false)], &pushed), run_driven(&[(LEN, true)], &pushed));
+        let (plain, driven) =
+            (run_driven(&[(LEN, false)], &pushed), run_driven(&[(LEN, true)], &pushed));
         let volume = db_to_gain(model.volume_db[1]);
-        let (plain_peak, driven_peak) = (peak(&plain[LEN / 2..]) / volume, peak(&driven[LEN / 2..]) / volume);
+        let (plain_peak, driven_peak) =
+            (peak(&plain[LEN / 2..]) / volume, peak(&driven[LEN / 2..]) / volume);
         assert!(plain_peak > 0.85, "Without the pedal: {plain_peak}");
         assert!((0.25..0.65).contains(&driven_peak), "With the pedal: {driven_peak}");
         assert_eq!(driven[..96], plain[..96]);
 
         // Switched while it is pushed, the level moves without a step, and comes back
         let switched = run_driven(&[(LEN / 4, false), (LEN / 2, true), (LEN, false)], &pushed);
-        let steps = |signal: &[f32]| signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
+        let steps = |signal: &[f32]| {
+            signal.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max)
+        };
         assert!(steps(&switched) <= 1.01 * steps(&plain));
         assert_eq!(switched[..LEN / 4], plain[..LEN / 4]);
         let back = peak(&switched[LEN - 9600..]) / peak(&plain[LEN - 9600..]);
@@ -278,7 +300,8 @@ mod tests {
     fn test_offset_is_blocked_and_output_bounded() {
         for amp in Amp::ALL {
             let model = &amp.model().power;
-            let input: Vec<f32> = sine(440.0, 5.0, SAMPLE_RATE, LEN).iter().map(|s| s + 3.0).collect();
+            let input: Vec<f32> =
+                sine(440.0, 5.0, SAMPLE_RATE, LEN).iter().map(|s| s + 3.0).collect();
             let output = run(amp, 1.0, 1.0, &input);
             let limit = db_to_gain(model.volume_db[2]);
             assert!(output.iter().all(|s| s.abs() <= limit * 1.001));

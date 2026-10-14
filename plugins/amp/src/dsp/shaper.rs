@@ -203,10 +203,7 @@ struct Averager {
 
 impl Averager {
     fn new() -> Self {
-        Self {
-            last_input: 0.0,
-            last_integral: 0.0,
-        }
+        Self { last_input: 0.0, last_integral: 0.0 }
     }
 
     fn process(&mut self, input: f64, integral: f64, curve: impl Fn(f64) -> f64) -> f64 {
@@ -286,7 +283,8 @@ impl AsymClipper {
     }
 
     fn step(&mut self, input: f64) -> f64 {
-        let output = if self.second_order { self.second_order(input) } else { self.first_order(input) };
+        let output =
+            if self.second_order { self.second_order(input) } else { self.first_order(input) };
         self.last_input = input;
         output
     }
@@ -362,7 +360,9 @@ impl AsymClipper {
             let middle = 0.5 * (input + self.earlier_input);
             let offset = middle - self.last_input;
             if offset.abs() > MIN_STEP_2 {
-                2.0 / offset * (limits.integral(middle) + (self.last_integral - limits.second_integral(middle)) / offset)
+                2.0 / offset
+                    * (limits.integral(middle)
+                        + (self.last_integral - limits.second_integral(middle)) / offset)
             } else {
                 limits.curve(0.5 * (middle + self.last_input))
             }
@@ -397,10 +397,7 @@ impl FineClipper {
         let mut clipper = AsymClipper::new();
         clipper.set_second_order(true);
         clipper.reset(0.0);
-        Self {
-            clipper,
-            history: [0.0; 2],
-        }
+        Self { clipper, history: [0.0; 2] }
     }
 
     /// Call `reset` after this
@@ -423,7 +420,8 @@ impl FineClipper {
     pub fn process(&mut self, input: f32) -> f32 {
         let input = input as f64;
         // The two steps as a pair: see `AsymClipper::process_pair`
-        let steps = self.clipper.process_pair(Pair::new(0.5 * (self.clipper.last_input + input), input));
+        let steps =
+            self.clipper.process_pair(Pair::new(0.5 * (self.clipper.last_input + input), input));
         let (halfway, there) = (steps.first(), steps.second());
         let output = 0.125 * (there + 3.0 * (halfway + self.history[1]) + self.history[0]);
         self.history = [halfway, there];
@@ -441,10 +439,7 @@ pub struct PowerClipper {
 
 impl PowerClipper {
     pub fn new() -> Self {
-        Self {
-            averager: Averager::new(),
-            knee: 0.0,
-        }
+        Self { averager: Averager::new(), knee: 0.0 }
     }
 
     /// The share of the ceiling up to which the stage leaves the signal as it is, under
@@ -461,7 +456,8 @@ impl PowerClipper {
         let input = input as f64;
         let knee = self.knee;
         if knee > 0.0 {
-            self.averager.process(input, kneed_integral(input, knee), |x| kneed_curve(x, knee)) as f32
+            self.averager.process(input, kneed_integral(input, knee), |x| kneed_curve(x, knee))
+                as f32
         } else {
             self.averager.process(input, power_integral(input), power_curve) as f32
         }
@@ -512,13 +508,20 @@ mod tests {
         let step = 1e-5;
         for i in -40..=40 {
             let x = i as f64 * 0.1 + 0.013;
-            let asym_slope = (asym_integral(x + step, 1.2, 0.8) - asym_integral(x - step, 1.2, 0.8)) / (2.0 * step);
+            let asym_slope = (asym_integral(x + step, 1.2, 0.8)
+                - asym_integral(x - step, 1.2, 0.8))
+                / (2.0 * step);
             assert!((asym_slope - asym_curve(x, 1.2, 0.8)).abs() < 1e-6, "asym at {}", x);
             let power_slope = (power_integral(x + step) - power_integral(x - step)) / (2.0 * step);
             assert!((power_slope - power_curve(x)).abs() < 1e-6, "power at {}", x);
-            let second_slope =
-                (asym_second_integral(x + step, 1.2, 0.8) - asym_second_integral(x - step, 1.2, 0.8)) / (2.0 * step);
-            assert!((second_slope - asym_integral(x, 1.2, 0.8)).abs() < 1e-6, "asym, second, at {}", x);
+            let second_slope = (asym_second_integral(x + step, 1.2, 0.8)
+                - asym_second_integral(x - step, 1.2, 0.8))
+                / (2.0 * step);
+            assert!(
+                (second_slope - asym_integral(x, 1.2, 0.8)).abs() < 1e-6,
+                "asym, second, at {}",
+                x
+            );
         }
         assert_eq!(asym_second_integral(0.0, 1.2, 0.8), 0.0);
     }
@@ -564,7 +567,10 @@ mod tests {
             let mut second_next = second;
             let mut power_next = power;
             assert!((asym_next.process(pair[1]) - asym_clip(middle, 1.0, 1.6)).abs() < 1e-3);
-            assert!(index < 2 || (second_next.process(pair[1]) - asym_clip(pair[0], 1.0, 1.6)).abs() < 1e-3);
+            assert!(
+                index < 2
+                    || (second_next.process(pair[1]) - asym_clip(pair[0], 1.0, 1.6)).abs() < 1e-3
+            );
             assert!((power_next.process(pair[1]) - power_clip(middle)).abs() < 1e-3);
         }
     }
@@ -582,7 +588,8 @@ mod tests {
         // Where the steps are too small to divide by, and where they are just large enough
         for level in [1e-7, 1e-5, 1e-3, 0.1] {
             let mut asym = second_order_clipper(1.0, 1.6, 0.1);
-            let input: Vec<f32> = sine(220.0, level, 192_000.0, 4000).iter().map(|s| s + 0.1).collect();
+            let input: Vec<f32> =
+                sine(220.0, level, 192_000.0, 4000).iter().map(|s| s + 0.1).collect();
             // From the third sample on: until then the steps from rest are uneven
             for (index, pair) in input.windows(2).enumerate() {
                 asym.process(pair[0]);
@@ -607,7 +614,8 @@ mod tests {
         let input = sine(4186.0, 30.0, sample_rate, 38_400);
         let harmonics = harmonics_of(4186.0, sample_rate);
         // Where harmonics 42 to 47 land once folded: all in the audible range
-        let folded: Vec<f64> = (42..=47).map(|n| (n as f64 * 4186.0 - sample_rate as f64).abs()).collect();
+        let folded: Vec<f64> =
+            (42..=47).map(|n| (n as f64 * 4186.0 - sample_rate as f64).abs()).collect();
         let partials = [harmonics.clone(), folded].concat();
 
         let plain: Vec<f32> = input.iter().map(|&s| asym_clip(s, 1.0, 1.6)).collect();
@@ -623,7 +631,8 @@ mod tests {
         let mut second = second_order_clipper(1.0, 1.6, 0.0);
         let second: Vec<f32> = input.iter().map(|&s| second.process(s)).collect();
 
-        let (plain_db, antialiased_db, second_db) = (folded_db(&plain), folded_db(&antialiased), folded_db(&second));
+        let (plain_db, antialiased_db, second_db) =
+            (folded_db(&plain), folded_db(&antialiased), folded_db(&second));
         assert!(
             antialiased_db < plain_db - 15.0 && second_db < antialiased_db - 10.0,
             "Plain {:.1} dB, antialiased {:.1} dB, to the second order {:.1} dB",
@@ -683,7 +692,8 @@ mod tests {
         let input = sine(freq, 80.0, sample_rate, 35_280);
         let harmonics = harmonics_of(freq, sample_rate);
         // Where harmonics 42 to 47 land once folded: all of them can be heard
-        let folded: Vec<f64> = (42..=47).map(|n| (n as f64 * freq as f64 - sample_rate as f64).abs()).collect();
+        let folded: Vec<f64> =
+            (42..=47).map(|n| (n as f64 * freq as f64 - sample_rate as f64).abs()).collect();
         let partials = [harmonics.clone(), folded].concat();
         let folded_db = |output: &[f32]| {
             let (levels, _) = fit_partials(&output[4410..], sample_rate, &partials);
@@ -696,7 +706,10 @@ mod tests {
         let mut fine = fine_clipper(1.0, 1.4, 0.0);
         let fine: Vec<f32> = input.iter().map(|&s| fine.process(s)).collect();
         let (second_db, fine_db) = (folded_db(&second), folded_db(&fine));
-        assert!(fine_db < second_db - 10.0, "Second order {second_db:.1} dB, at twice the rate {fine_db:.1} dB");
+        assert!(
+            fine_db < second_db - 10.0,
+            "Second order {second_db:.1} dB, at twice the rate {fine_db:.1} dB"
+        );
     }
 
     #[test]
@@ -738,7 +751,22 @@ mod tests {
         signal.extend(sine(220.0, 0.3, 176_400.0, 600));
         signal.extend(sine(1000.0, 3e-6, 176_400.0, 300));
         signal.extend([0.0; 7]);
-        signal.extend([0.5, 0.5, 0.5, -0.2, 0.5, -0.2, 0.5, 0.5 + 4e-6, 0.5, 0.5 + 2e-5, 0.5, 1e-7, 0.0, -1e-7]);
+        signal.extend([
+            0.5,
+            0.5,
+            0.5,
+            -0.2,
+            0.5,
+            -0.2,
+            0.5,
+            0.5 + 4e-6,
+            0.5,
+            0.5 + 2e-5,
+            0.5,
+            1e-7,
+            0.0,
+            -1e-7,
+        ]);
         signal.extend(sine(82.0, 8.0, 176_400.0, 601));
         signal.iter().map(|sample| sample + 0.1).collect()
     }
@@ -754,14 +782,20 @@ mod tests {
                 single.set_second_order(second_order);
                 single.reset(0.1);
                 let mut paired = single;
-                let expected: Vec<f32> = signal.iter().map(|&sample| single.process(sample)).collect();
-                let mut output: Vec<f32> = signal[..lead].iter().map(|&sample| paired.process(sample)).collect();
+                let expected: Vec<f32> =
+                    signal.iter().map(|&sample| single.process(sample)).collect();
+                let mut output: Vec<f32> =
+                    signal[..lead].iter().map(|&sample| paired.process(sample)).collect();
                 for pair in signal[lead..].chunks_exact(2) {
                     let clipped = paired.process_pair(Pair::new(pair[0] as f64, pair[1] as f64));
                     output.extend([clipped.first() as f32, clipped.second() as f32]);
                 }
                 assert!(output.iter().all(|sample| sample.is_finite()));
-                assert_eq!(output[..], expected[..output.len()], "Second order: {second_order}, lead {lead}");
+                assert_eq!(
+                    output[..],
+                    expected[..output.len()],
+                    "Second order: {second_order}, lead {lead}"
+                );
             }
         }
 

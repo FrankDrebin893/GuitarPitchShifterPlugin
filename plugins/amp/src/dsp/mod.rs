@@ -38,12 +38,7 @@ pub struct Ramp {
 
 impl Ramp {
     pub fn new(value: f32) -> Self {
-        Self {
-            value,
-            target: value,
-            step: 0.0,
-            remaining: 0,
-        }
+        Self { value, target: value, step: 0.0, remaining: 0 }
     }
 
     pub fn set_target(&mut self, target: f32, steps: u32) {

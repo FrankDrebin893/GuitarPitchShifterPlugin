@@ -23,22 +23,10 @@ pub struct BiquadCoeffs {
 }
 
 impl BiquadCoeffs {
-    pub const IDENTITY: Self = Self {
-        b0: 1.0,
-        b1: 0.0,
-        b2: 0.0,
-        a1: 0.0,
-        a2: 0.0,
-    };
+    pub const IDENTITY: Self = Self { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 };
 
     fn normalised(b: [f64; 3], a: [f64; 3]) -> Self {
-        Self {
-            b0: b[0] / a[0],
-            b1: b[1] / a[0],
-            b2: b[2] / a[0],
-            a1: a[1] / a[0],
-            a2: a[2] / a[0],
-        }
+        Self { b0: b[0] / a[0], b1: b[1] / a[0], b2: b[2] / a[0], a1: a[1] / a[0], a2: a[2] / a[0] }
     }
 
     /// cos(w0) and alpha for a frequency and Q
@@ -133,12 +121,7 @@ impl BiquadCoeffs {
     /// The same filter with its output multiplied by `gain`
     pub fn scaled(self, gain: f32) -> Self {
         let gain = gain as f64;
-        Self {
-            b0: self.b0 * gain,
-            b1: self.b1 * gain,
-            b2: self.b2 * gain,
-            ..self
-        }
+        Self { b0: self.b0 * gain, b1: self.b1 * gain, b2: self.b2 * gain, ..self }
     }
 
     /// Gain of the filter at one frequency
@@ -165,11 +148,7 @@ pub struct Biquad {
 
 impl Biquad {
     pub fn new() -> Self {
-        Self {
-            coeffs: BiquadCoeffs::IDENTITY,
-            z1: 0.0,
-            z2: 0.0,
-        }
+        Self { coeffs: BiquadCoeffs::IDENTITY, z1: 0.0, z2: 0.0 }
     }
 
     pub fn set(&mut self, coeffs: BiquadCoeffs) {
@@ -257,7 +236,8 @@ impl OnePoleLp {
     }
 
     pub fn set(&mut self, freq_hz: f32, sample_rate: f32) {
-        self.coeff = (1.0 - (-TAU * clamp_freq(freq_hz, sample_rate) / sample_rate as f64).exp()) as f32;
+        self.coeff =
+            (1.0 - (-TAU * clamp_freq(freq_hz, sample_rate) / sample_rate as f64).exp()) as f32;
     }
 
     pub fn reset(&mut self) {
@@ -318,11 +298,7 @@ pub struct DcBlocker {
 
 impl DcBlocker {
     pub fn new() -> Self {
-        Self {
-            pole: 0.0,
-            last_input: 0.0,
-            last_output: 0.0,
-        }
+        Self { pole: 0.0, last_input: 0.0, last_output: 0.0 }
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
@@ -351,7 +327,8 @@ mod tests {
     /// Steady-state gain of a filter for a sine, in dB
     fn measured_db(mut filter: impl FnMut(f32) -> f32, freq_hz: f32, sample_rate: f32) -> f32 {
         let len = (sample_rate * 0.5) as usize;
-        let output: Vec<f32> = sine(freq_hz, 1.0, sample_rate, len).iter().map(|&s| filter(s)).collect();
+        let output: Vec<f32> =
+            sine(freq_hz, 1.0, sample_rate, len).iter().map(|&s| filter(s)).collect();
         to_db(rms(&output[len / 2..]) * std::f32::consts::SQRT_2)
     }
 
@@ -377,7 +354,8 @@ mod tests {
 
         // On the way every sample moves a little, none in a step
         gliding.set(to, 128);
-        let moving: Vec<f64> = input[4800..4928].iter().map(|&sample| gliding.process(sample as f64)).collect();
+        let moving: Vec<f64> =
+            input[4800..4928].iter().map(|&sample| gliding.process(sample as f64)).collect();
         assert_eq!(gliding.filter.coeffs, to);
         let largest = moving.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f64::max);
         assert!(largest < 0.02, "Step of {}", largest);

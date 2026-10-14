@@ -74,17 +74,18 @@ impl Tom {
             let level = if i == 0 {
                 1.0
             } else {
-                MODE_LEVELS[i] * preset.ring * (0.5 + 0.5 * hit.velocity) * (1.0 + 0.2 * self.noise.next())
+                MODE_LEVELS[i]
+                    * preset.ring
+                    * (0.5 + 0.5 * hit.velocity)
+                    * (1.0 + 0.2 * self.noise.next())
             };
-            self.modes
-                .set(i, freq * MODE_RATIOS[i], level, decay_ms / MODE_RATIOS[i], sample_rate);
+            self.modes.set(i, freq * MODE_RATIOS[i], level, decay_ms / MODE_RATIOS[i], sample_rate);
         }
 
         self.bend = semitones_to_ratio(preset.bend_semitones * hit.velocity) - 1.0;
         self.pitch_coeff = decay_coeff(BEND_MS, sample_rate);
         self.attack_coeff = decay_coeff(ATTACK_MS, sample_rate);
-        self.attack_filter
-            .set(ATTACK_BASE_HZ + freq * ATTACK_FREQ_RATIO, ATTACK_Q, sample_rate);
+        self.attack_filter.set(ATTACK_BASE_HZ + freq * ATTACK_FREQ_RATIO, ATTACK_Q, sample_rate);
         self.attack_filter.reset();
 
         self.level = hit.amplitude();
@@ -117,7 +118,9 @@ impl Voice for Tom {
         }
 
         let body = self.modes.process(1.0 + self.bend * self.pitch_env);
-        let attack = self.attack_filter.process(self.noise.next()).band * self.attack_env * self.attack_level;
+        let attack = self.attack_filter.process(self.noise.next()).band
+            * self.attack_env
+            * self.attack_level;
 
         self.pitch_env *= self.pitch_coeff;
         self.attack_env *= self.attack_coeff;

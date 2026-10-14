@@ -67,7 +67,9 @@ impl CabStage {
     /// Not for the audio thread: it may wait a moment for it
     pub fn offer(&self, taps: &[f32], sample_rate: f32) {
         let _loader = self.loaders.lock().unwrap_or_else(PoisonError::into_inner);
-        let claim = |from: u8| self.state.compare_exchange(from, WRITING, Ordering::AcqRel, Ordering::Acquire).is_ok();
+        let claim = |from: u8| {
+            self.state.compare_exchange(from, WRITING, Ordering::AcqRel, Ordering::Acquire).is_ok()
+        };
         // The audio thread holds the stage for as long as it takes to copy the taps
         while !claim(EMPTY) && !claim(READY) {
             std::thread::yield_now();
@@ -91,7 +93,8 @@ impl CabStage {
     /// amp's own cabinet), what `cab::tail_spectra` made of them, and the sample rate
     /// both are for. For the audio thread: it does not wait, allocate or free
     pub fn take(&self, receive: impl FnOnce(&[f32], &[f32], f32)) -> bool {
-        if self.state.compare_exchange(READY, TAKING, Ordering::AcqRel, Ordering::Acquire).is_err() {
+        if self.state.compare_exchange(READY, TAKING, Ordering::AcqRel, Ordering::Acquire).is_err()
+        {
             return false;
         }
         // SAFETY: the state is `TAKING` and this thread made it so
@@ -106,7 +109,10 @@ impl CabStage {
     pub fn buffer(&self) -> [(usize, usize); 2] {
         // SAFETY: only the addresses and the lengths are read, and none of them ever changes
         let held = unsafe { &*self.held.get() };
-        [(held.taps.as_ptr() as usize, held.taps.len()), (held.spectra.as_ptr() as usize, held.spectra.len())]
+        [
+            (held.taps.as_ptr() as usize, held.taps.len()),
+            (held.spectra.as_ptr() as usize, held.spectra.len()),
+        ]
     }
 }
 
@@ -170,7 +176,11 @@ impl CabLoader {
             CabStatus::Fine => user_cab::display_name(chosen, max_chars),
             CabStatus::Bad => user_cab::BAD_NAME.to_owned(),
             CabStatus::Missing => {
-                format!("{}{}", user_cab::MISSING_MARK, user_cab::display_name(chosen, max_chars.saturating_sub(1)))
+                format!(
+                    "{}{}",
+                    user_cab::MISSING_MARK,
+                    user_cab::display_name(chosen, max_chars.saturating_sub(1))
+                )
             }
         }
     }
@@ -198,7 +208,9 @@ impl CabLoader {
         } else {
             match dir() {
                 // A name from a saved project is not followed out of the folder
-                Some(dir) if user_cab::is_file_name(&chosen) => user_cab::load(&dir.join(&chosen), sample_rate),
+                Some(dir) if user_cab::is_file_name(&chosen) => {
+                    user_cab::load(&dir.join(&chosen), sample_rate)
+                }
                 _ => Err(LoadError::Missing),
             }
         };
@@ -285,7 +297,14 @@ mod tests {
     #[test]
     fn test_loader_leaves_the_chosen_file_or_the_amps_own() {
         let dir = test_dir("loader");
-        write_ir_wav(&dir.join("good.wav"), &whole_response(Amp::Brol, 48000.0, 0.02, 0.5), 1, 16, false, 48000);
+        write_ir_wav(
+            &dir.join("good.wav"),
+            &whole_response(Amp::Brol, 48000.0, 0.02, 0.5),
+            1,
+            16,
+            false,
+            48000,
+        );
         std::fs::write(dir.join("bad.wav"), b"not a recording").unwrap();
 
         let stage = Arc::new(CabStage::new());
@@ -301,18 +320,30 @@ mod tests {
 
         // Nothing chosen: the amp's own, which is no taps
         assert_eq!(choose(""), (Vec::new(), 48000.0));
-        assert_eq!((loader.status(), loader.display_name("", 10).as_str()), (CabStatus::Fine, "OWN"));
+        assert_eq!(
+            (loader.status(), loader.display_name("", 10).as_str()),
+            (CabStatus::Fine, "OWN")
+        );
 
         let (taps, sample_rate) = choose("good.wav");
         assert!(taps.len() > 100 && sample_rate == 48000.0);
-        assert_eq!((loader.status(), loader.display_name("good.wav", 10).as_str()), (CabStatus::Fine, "GOOD"));
+        assert_eq!(
+            (loader.status(), loader.display_name("good.wav", 10).as_str()),
+            (CabStatus::Fine, "GOOD")
+        );
 
         // A file that cannot be used and one that is not there: the amp's own, and the
         // display says which of the two it is
         assert_eq!(choose("bad.wav"), (Vec::new(), 48000.0));
-        assert_eq!((loader.status(), loader.display_name("bad.wav", 10).as_str()), (CabStatus::Bad, "BAD FILE"));
+        assert_eq!(
+            (loader.status(), loader.display_name("bad.wav", 10).as_str()),
+            (CabStatus::Bad, "BAD FILE")
+        );
         assert_eq!(choose("gone.wav"), (Vec::new(), 48000.0));
-        assert_eq!((loader.status(), loader.display_name("gone.wav", 10).as_str()), (CabStatus::Missing, "?GONE"));
+        assert_eq!(
+            (loader.status(), loader.display_name("gone.wav", 10).as_str()),
+            (CabStatus::Missing, "?GONE")
+        );
         assert_eq!(loader.display_name("a very long name.wav", 10), "?A VE~NAME");
         assert_eq!(loader.display_name("a very long name.wav", 10).chars().count(), 10);
 
@@ -323,7 +354,10 @@ mod tests {
         // Nor is anything read when there is no folder to read from
         *choice.lock().unwrap() = "good.wav".to_owned();
         loader.load_from(&choice, None);
-        assert_eq!((taken(&stage), loader.status()), (Some((Vec::new(), 48000.0)), CabStatus::Missing));
+        assert_eq!(
+            (taken(&stage), loader.status()),
+            (Some((Vec::new(), 48000.0)), CabStatus::Missing)
+        );
 
         // The same file at another sample rate comes out at that rate
         loader.set_sample_rate(96000.0);

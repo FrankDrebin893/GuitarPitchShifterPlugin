@@ -23,7 +23,10 @@ pub fn default_state() -> Arc<EguiState> {
     EguiState::from_size(WINDOW_WIDTH, WINDOW_HEIGHT)
 }
 
-pub fn create(params: Arc<GuitarPitchShifterParams>, editor_state: Arc<EguiState>) -> Option<Box<dyn Editor>> {
+pub fn create(
+    params: Arc<GuitarPitchShifterParams>,
+    editor_state: Arc<EguiState>,
+) -> Option<Box<dyn Editor>> {
     create_egui_editor(
         editor_state,
         (),
@@ -31,8 +34,24 @@ pub fn create(params: Arc<GuitarPitchShifterParams>, editor_state: Arc<EguiState
         move |egui_ctx, setter, _state| {
             ui::pedal(egui_ctx, &STYLE, |ui, origin| {
                 // Three knobs in a triangle
-                param_knob(ui, setter, &params.latency_ms, origin + vec2(83.0, 103.0), 27.0, "Max Latency", None);
-                param_knob(ui, setter, &params.smoothness_ms, origin + vec2(317.0, 103.0), 27.0, "Smoothness", None);
+                param_knob(
+                    ui,
+                    setter,
+                    &params.latency_ms,
+                    origin + vec2(83.0, 103.0),
+                    27.0,
+                    "Max Latency",
+                    None,
+                );
+                param_knob(
+                    ui,
+                    setter,
+                    &params.smoothness_ms,
+                    origin + vec2(317.0, 103.0),
+                    27.0,
+                    "Smoothness",
+                    None,
+                );
                 param_knob(
                     ui,
                     setter,

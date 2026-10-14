@@ -47,10 +47,7 @@ impl MetalCluster {
     const RATIOS: [f32; 6] = [1.0, 1.4827, 1.8003, 2.5460, 2.6303, 3.8967];
 
     fn new(base_hz: f32) -> Self {
-        Self {
-            freqs_hz: Self::RATIOS.map(|ratio| base_hz * ratio),
-            phases: [0.0; 6],
-        }
+        Self { freqs_hz: Self::RATIOS.map(|ratio| base_hz * ratio), phases: [0.0; 6] }
     }
 
     fn reset(&mut self) {
@@ -77,11 +74,7 @@ struct Comb {
 
 impl Comb {
     fn new() -> Self {
-        Self {
-            buffer: vec![0.0; 1],
-            position: 0,
-            filtered: 0.0,
-        }
+        Self { buffer: vec![0.0; 1], position: 0, filtered: 0.0 }
     }
 
     fn resize(&mut self, length: usize) {
@@ -114,10 +107,7 @@ struct AllPass {
 
 impl AllPass {
     fn new() -> Self {
-        Self {
-            buffer: vec![0.0; 1],
-            position: 0,
-        }
+        Self { buffer: vec![0.0; 1], position: 0 }
     }
 
     fn resize(&mut self, length: usize) {
@@ -215,10 +205,7 @@ struct BusDrive {
 
 impl BusDrive {
     fn new(gain: f32) -> Self {
-        Self {
-            gain,
-            makeup: 1.0 / gain.tanh(),
-        }
+        Self { gain, makeup: 1.0 / gain.tanh() }
     }
 
     fn process(&self, input: f32) -> f32 {
@@ -268,7 +255,8 @@ mod tests {
 
         assert!(output.iter().all(|sample| sample.abs() <= 1.0));
         // Seven levels, from all six squares low to all six high
-        let mut levels: Vec<i32> = output.iter().map(|sample| (sample * 3.0).round() as i32).collect();
+        let mut levels: Vec<i32> =
+            output.iter().map(|sample| (sample * 3.0).round() as i32).collect();
         levels.sort();
         levels.dedup();
         assert_eq!(levels, vec![-3, -2, -1, 0, 1, 2, 3]);

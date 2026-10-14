@@ -50,11 +50,7 @@ pub enum Motif {
 /// Paints `motif` on the top face `face` of a pedal painted `paint`. Call it over the paint
 /// and under the screws, the title and the controls
 pub(super) fn motif(painter: &Painter, face: Rect, paint: Color32, motif: Motif) {
-    let print = Print {
-        painter: painter.with_clip_rect(face.shrink(MARGIN)),
-        face,
-        paint,
-    };
+    let print = Print { painter: painter.with_clip_rect(face.shrink(MARGIN)), face, paint };
     match motif {
         Motif::Plain => {}
         Motif::Sluice => sluice(&print),
@@ -196,8 +192,13 @@ fn bonfire(print: &Print) {
     // Two tongues a side, each steep on one flank and full on the other
     print.fill_both(&[(14.0, 158.0), (38.0, 236.0), (44.0, 300.0), (-6.0, 300.0)], coat);
     print.fill_both(&[(50.0, 186.0), (54.0, 300.0), (22.0, 300.0), (30.0, 236.0)], coat);
-    for (x, y, size) in [(28.0, 156.0, 3.5), (48.0, 176.0, 2.5), (152.0, 152.0, 3.5), (132.0, 174.0, 2.5), (166.0, 180.0, 2.5)]
-    {
+    for (x, y, size) in [
+        (28.0, 156.0, 3.5),
+        (48.0, 176.0, 2.5),
+        (152.0, 152.0, 3.5),
+        (132.0, 174.0, 2.5),
+        (166.0, 180.0, 2.5),
+    ] {
         print.fill(&[(x, y - size), (x + size, y), (x, y + size), (x - size, y)], SILK);
     }
 }
@@ -249,13 +250,22 @@ fn swell(print: &Print) {
 
 fn aurora(print: &Print) {
     // One sweep from the lower left up to the right
-    let (from, pull_from, pull_to, to) = ((-10.0, 262.0), (40.0, 250.0), (60.0, 150.0), (120.0, 116.0));
+    let (from, pull_from, pull_to, to) =
+        ((-10.0, 262.0), (40.0, 250.0), (60.0, 150.0), (120.0, 116.0));
     let sweep: Vec<_> = (0..=24)
         .map(|step| {
             let t = step as f32 / 24.0;
-            let weights = [(1.0 - t).powi(3), 3.0 * (1.0 - t).powi(2) * t, 3.0 * (1.0 - t) * t * t, t.powi(3)];
+            let weights = [
+                (1.0 - t).powi(3),
+                3.0 * (1.0 - t).powi(2) * t,
+                3.0 * (1.0 - t) * t * t,
+                t.powi(3),
+            ];
             let along = |pick: fn((f32, f32)) -> f32| {
-                weights[0] * pick(from) + weights[1] * pick(pull_from) + weights[2] * pick(pull_to) + weights[3] * pick(to)
+                weights[0] * pick(from)
+                    + weights[1] * pick(pull_from)
+                    + weights[2] * pick(pull_to)
+                    + weights[3] * pick(to)
             };
             (along(|point| point.0), along(|point| point.1))
         })
@@ -281,7 +291,10 @@ fn aurora(print: &Print) {
 fn rain(print: &Print) {
     let right = print.width() + 10.0;
     for top in [196.0, 252.0, 308.0] {
-        print.fill(&[(-10.0, top), (right, top - 46.0), (right, top - 24.0), (-10.0, top + 22.0)], print.coat());
+        print.fill(
+            &[(-10.0, top), (right, top - 46.0), (right, top - 24.0), (-10.0, top + 22.0)],
+            print.coat(),
+        );
     }
     // Drops, long and short in turn
     for (row, y) in [150.0, 176.0, 202.0, 228.0].into_iter().enumerate() {
@@ -294,9 +307,33 @@ fn rain(print: &Print) {
 
 fn ridges(print: &Print) {
     // The same land three times, each nearer and darker
-    let far = [(0.0, 230.0), (30.0, 170.0), (62.0, 236.0), (96.0, 190.0), (132.0, 246.0), (160.0, 206.0), (180.0, 232.0)];
-    let middle = [(0.0, 262.0), (40.0, 214.0), (76.0, 268.0), (112.0, 232.0), (150.0, 276.0), (186.0, 246.0), (200.0, 280.0)];
-    let near = [(0.0, 284.0), (50.0, 252.0), (92.0, 290.0), (128.0, 266.0), (168.0, 294.0), (190.0, 280.0), (200.0, 300.0)];
+    let far = [
+        (0.0, 230.0),
+        (30.0, 170.0),
+        (62.0, 236.0),
+        (96.0, 190.0),
+        (132.0, 246.0),
+        (160.0, 206.0),
+        (180.0, 232.0),
+    ];
+    let middle = [
+        (0.0, 262.0),
+        (40.0, 214.0),
+        (76.0, 268.0),
+        (112.0, 232.0),
+        (150.0, 276.0),
+        (186.0, 246.0),
+        (200.0, 280.0),
+    ];
+    let near = [
+        (0.0, 284.0),
+        (50.0, 252.0),
+        (92.0, 290.0),
+        (128.0, 266.0),
+        (168.0, 294.0),
+        (190.0, 280.0),
+        (200.0, 300.0),
+    ];
     for (profile, depth) in [(far, 0.5), (middle, 1.0), (near, 1.5)] {
         print.peaks(&profile, shade(print.paint, COAT * depth));
     }
@@ -310,11 +347,15 @@ fn ridges(print: &Print) {
 fn fjord(print: &Print) {
     let coat = print.coat();
     // A wall down each side, in slabs from the edge to its outline
-    let wall = [(12.0, 0.0), (22.0, 60.0), (34.0, 120.0), (52.0, 150.0), (60.0, 230.0), (76.0, 300.0)];
+    let wall =
+        [(12.0, 0.0), (22.0, 60.0), (34.0, 120.0), (52.0, 150.0), (60.0, 230.0), (76.0, 300.0)];
     for slab in wall.windows(2) {
         let (upper, lower) = (slab[0], slab[1]);
         // A pixel into the slab below, so that the two overlap
-        print.fill_both(&[(-5.0, upper.1), upper, lower, (lower.0, lower.1 + 1.0), (-5.0, lower.1 + 1.0)], coat);
+        print.fill_both(
+            &[(-5.0, upper.1), upper, lower, (lower.0, lower.1 + 1.0), (-5.0, lower.1 + 1.0)],
+            coat,
+        );
     }
     for star in [(62.0, 56.0), (72.0, 92.0), (118.0, 60.0), (108.0, 98.0)] {
         print.disc(star, 1.6, SILK);

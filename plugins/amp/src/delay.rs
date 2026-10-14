@@ -63,12 +63,7 @@ pub struct DelaySettings {
 
 impl Default for DelaySettings {
     fn default() -> Self {
-        Self {
-            on: false,
-            time_ms: 350.0,
-            feedback: 0.35,
-            mix: 0.25,
-        }
+        Self { on: false, time_ms: 350.0, feedback: 0.35, mix: 0.25 }
     }
 }
 
@@ -214,7 +209,8 @@ impl Delay {
     /// True when the filters would put out nothing more by themselves
     fn filters_at_rest(&self) -> bool {
         let quiet = |state: f32| state.abs() < SILENCE;
-        self.highpass.iter().all(|filter| quiet(filter.state())) && self.lowpass.iter().all(|filter| quiet(filter.state()))
+        self.highpass.iter().all(|filter| quiet(filter.state()))
+            && self.lowpass.iter().all(|filter| quiet(filter.state()))
     }
 
     /// Address and capacity of every buffer, for checking that nothing is allocated anew
@@ -227,7 +223,8 @@ impl Delay {
     pub fn process(&mut self, settings: &DelaySettings, left: &mut [f32], right: &mut [f32]) {
         debug_assert_eq!(left.len(), right.len());
         let len = left.len().min(right.len());
-        let time = (settings.time_ms.clamp(TIME_MIN_MS, TIME_MAX_MS) * 0.001 * self.sample_rate) as f64;
+        let time =
+            (settings.time_ms.clamp(TIME_MIN_MS, TIME_MAX_MS) * 0.001 * self.sample_rate) as f64;
         let feedback = settings.feedback.clamp(0.0, FEEDBACK_MAX);
         let mix = settings.mix.clamp(0.0, 1.0);
 
@@ -238,7 +235,9 @@ impl Delay {
                 if !settings.on {
                     return;
                 }
-                let Some(first) = (start..len).find(|&index| (0.5 * (left[index] + right[index])).abs() >= SILENCE) else {
+                let Some(first) = (start..len)
+                    .find(|&index| (0.5 * (left[index] + right[index])).abs() >= SILENCE)
+                else {
                     return;
                 };
                 // Nothing is heard yet, so there is nothing to smooth
@@ -249,20 +248,38 @@ impl Delay {
                 self.idle = false;
                 start = first;
             }
-            start = self.run(settings.on, time, feedback, mix, &mut left[..len], &mut right[..len], start);
+            start = self.run(
+                settings.on,
+                time,
+                feedback,
+                mix,
+                &mut left[..len],
+                &mut right[..len],
+                start,
+            );
         }
     }
 
     /// Processes from `start` to the end of the block or to where the delay falls idle.
     /// Returns where it stopped
     #[allow(clippy::too_many_arguments)]
-    fn run(&mut self, on: bool, time: f64, feedback: f32, mix: f32, left: &mut [f32], right: &mut [f32], start: usize) -> usize {
+    fn run(
+        &mut self,
+        on: bool,
+        time: f64,
+        feedback: f32,
+        mix: f32,
+        left: &mut [f32],
+        right: &mut [f32],
+        start: usize,
+    ) -> usize {
         let feed_target = if on { 1.0 } else { 0.0 };
         let line_len = self.lines[0].len();
 
         for index in start..left.len() {
             if self.feed != feed_target {
-                self.feed = (self.feed + self.feed_step.copysign(feed_target - self.feed)).clamp(0.0, 1.0);
+                self.feed =
+                    (self.feed + self.feed_step.copysign(feed_target - self.feed)).clamp(0.0, 1.0);
             }
             if self.feedback != feedback {
                 self.feedback = follow(self.feedback, feedback, self.dial_coeff);
@@ -281,14 +298,21 @@ impl Delay {
 
             let spread = (self.time * SPREAD).min(self.spread_max);
             let mut repeats = [0.0f32; 2];
-            for (channel, delay) in [self.time - spread, self.time + spread].into_iter().enumerate() {
+            for (channel, delay) in [self.time - spread, self.time + spread].into_iter().enumerate()
+            {
                 let whole = delay as usize;
                 let read = if whole + READ_BEHIND <= self.valid {
-                    read_cubic(&self.lines[channel], self.write, whole, (delay - whole as f64) as f32)
+                    read_cubic(
+                        &self.lines[channel],
+                        self.write,
+                        whole,
+                        (delay - whole as f64) as f32,
+                    )
                 } else {
                     0.0
                 };
-                repeats[channel] = self.lowpass[channel].process(self.highpass[channel].process(read));
+                repeats[channel] =
+                    self.lowpass[channel].process(self.highpass[channel].process(read));
             }
 
             let input = 0.5 * (left[index] + right[index]) * self.feed;
@@ -352,23 +376,20 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn settings(time_ms: f32, feedback: f32, mix: f32) -> DelaySettings {
-        DelaySettings {
-            on: true,
-            time_ms,
-            feedback,
-            mix,
-        }
+        DelaySettings { on: true, time_ms, feedback, mix }
     }
 
     fn off() -> DelaySettings {
-        DelaySettings {
-            on: false,
-            ..settings(100.0, 0.5, 1.0)
-        }
+        DelaySettings { on: false, ..settings(100.0, 0.5, 1.0) }
     }
 
     /// Runs a mono signal through in blocks. Returns left and right
-    pub(crate) fn run_blocks(delay: &mut Delay, settings: &DelaySettings, input: &[f32], block: usize) -> (Vec<f32>, Vec<f32>) {
+    pub(crate) fn run_blocks(
+        delay: &mut Delay,
+        settings: &DelaySettings,
+        input: &[f32],
+        block: usize,
+    ) -> (Vec<f32>, Vec<f32>) {
         let (mut left, mut right) = (input.to_vec(), input.to_vec());
         for (l, r) in left.chunks_mut(block).zip(right.chunks_mut(block)) {
             delay.process(settings, l, r);
@@ -376,7 +397,11 @@ pub(crate) mod tests {
         (left, right)
     }
 
-    pub(crate) fn run(settings: &DelaySettings, input: &[f32], sample_rate: f32) -> (Vec<f32>, Vec<f32>) {
+    pub(crate) fn run(
+        settings: &DelaySettings,
+        input: &[f32],
+        sample_rate: f32,
+    ) -> (Vec<f32>, Vec<f32>) {
         run_blocks(&mut new_delay(sample_rate), settings, input, BLOCK)
     }
 
@@ -402,12 +427,23 @@ pub(crate) mod tests {
     #[test]
     fn test_echo_arrives_at_the_set_time() {
         for time_ms in [20.0, 250.0, 1000.0] {
-            let (left, right) = run(&settings(time_ms, 0.0, 1.0), &impulse(ms(time_ms) * 2), SAMPLE_RATE);
+            let (left, right) =
+                run(&settings(time_ms, 0.0, 1.0), &impulse(ms(time_ms) * 2), SAMPLE_RATE);
             let spread_ms = (time_ms * SPREAD as f32).min(SPREAD_MAX_MS as f32);
             let expected = |side: f32| (time_ms + side * spread_ms) * 0.001 * SAMPLE_RATE;
             let (at_left, at_right) = (peak_index(&left[1..]) + 1, peak_index(&right[1..]) + 1);
-            assert!((at_left as f32 - expected(-1.0)).abs() <= 1.5, "{} ms: left echo at sample {}", time_ms, at_left);
-            assert!((at_right as f32 - expected(1.0)).abs() <= 1.5, "{} ms: right echo at sample {}", time_ms, at_right);
+            assert!(
+                (at_left as f32 - expected(-1.0)).abs() <= 1.5,
+                "{} ms: left echo at sample {}",
+                time_ms,
+                at_left
+            );
+            assert!(
+                (at_right as f32 - expected(1.0)).abs() <= 1.5,
+                "{} ms: right echo at sample {}",
+                time_ms,
+                at_right
+            );
             // A single sample loses most of its height to the low-pass
             assert!(left[at_left] > 0.2 && right[at_right] > 0.2);
         }
@@ -418,7 +454,11 @@ pub(crate) mod tests {
         let (left, right) = run(&settings(100.0, 0.0, 1.0), &impulse(ms(600.0)), SAMPLE_RATE);
         for channel in [&left, &right] {
             assert!(peak(&channel[ms(90.0)..ms(110.0)]) > 0.2);
-            assert!(peak(&channel[ms(150.0)..]) < 1e-5, "more than one repeat: {}", peak(&channel[ms(150.0)..]));
+            assert!(
+                peak(&channel[ms(150.0)..]) < 1e-5,
+                "more than one repeat: {}",
+                peak(&channel[ms(150.0)..])
+            );
         }
     }
 
@@ -428,13 +468,23 @@ pub(crate) mod tests {
         let mut input = vec![0.0; ms(1800.0)];
         input[..ms(20.0)].copy_from_slice(&noise(0.5, ms(20.0)));
         let (left, _) = run(&settings(300.0, 0.6, 1.0), &input, SAMPLE_RATE);
-        let repeat = |number: usize| &left[ms(300.0 * number as f32 - 10.0)..ms(300.0 * number as f32 + 60.0)];
+        let repeat = |number: usize| {
+            &left[ms(300.0 * number as f32 - 10.0)..ms(300.0 * number as f32 + 60.0)]
+        };
 
         let levels: Vec<f32> = (1..=5).map(|number| rms(repeat(number))).collect();
         assert!(levels.windows(2).all(|pair| pair[1] < pair[0] * 0.7), "{:?}", levels);
-        let highs: Vec<f32> = (1..=5).map(|number| band_level_db(repeat(number), SAMPLE_RATE, Some(4000.0), None)).collect();
-        assert!(highs.windows(2).all(|pair| pair[1] < pair[0] - 1.0), "highs per repeat: {:?}", highs);
-        let lows: Vec<f32> = (1..=5).map(|number| band_level_db(repeat(number), SAMPLE_RATE, None, Some(120.0))).collect();
+        let highs: Vec<f32> = (1..=5)
+            .map(|number| band_level_db(repeat(number), SAMPLE_RATE, Some(4000.0), None))
+            .collect();
+        assert!(
+            highs.windows(2).all(|pair| pair[1] < pair[0] - 1.0),
+            "highs per repeat: {:?}",
+            highs
+        );
+        let lows: Vec<f32> = (1..=5)
+            .map(|number| band_level_db(repeat(number), SAMPLE_RATE, None, Some(120.0)))
+            .collect();
         assert!(lows[4] < lows[0] - 3.0, "lows per repeat: {:?}", lows);
     }
 
@@ -485,10 +535,16 @@ pub(crate) mod tests {
         assert_eq!(left[..first], input[..first]);
         assert_eq!(right[..first], input[..first]);
 
-        let wet = |channel: &[f32]| -> Vec<f32> { channel.iter().zip(&input).map(|(out, dry)| out - dry).collect() };
+        let wet = |channel: &[f32]| -> Vec<f32> {
+            channel.iter().zip(&input).map(|(out, dry)| out - dry).collect()
+        };
         let (wet_left, wet_right) = (wet(&left), wet(&right));
         assert!(rms(&wet_left) > 0.01);
-        assert!(correlation(&wet_left, &wet_right) < 0.9, "wet correlation {}", correlation(&wet_left, &wet_right));
+        assert!(
+            correlation(&wet_left, &wet_right) < 0.9,
+            "wet correlation {}",
+            correlation(&wet_left, &wet_right)
+        );
         let balance = to_db(rms(&wet_left) / rms(&wet_right));
         assert!(balance.abs() < 1.0, "left against right {} dB", balance);
     }
@@ -510,15 +566,24 @@ pub(crate) mod tests {
         let input = sine(220.0, 0.5, SAMPLE_RATE, ms(4000.0));
         for (from_ms, to_ms) in [(300.0, 450.0), (450.0, 300.0), (20.0, 1000.0), (1000.0, 20.0)] {
             let mut delay = new_delay(SAMPLE_RATE);
-            let (mut left, mut right) = run_blocks(&mut delay, &settings(from_ms, 0.5, 1.0), &input[..ms(2000.0)], BLOCK);
-            let after = run_blocks(&mut delay, &settings(to_ms, 0.5, 1.0), &input[ms(2000.0)..], BLOCK);
+            let (mut left, mut right) =
+                run_blocks(&mut delay, &settings(from_ms, 0.5, 1.0), &input[..ms(2000.0)], BLOCK);
+            let after =
+                run_blocks(&mut delay, &settings(to_ms, 0.5, 1.0), &input[ms(2000.0)..], BLOCK);
             left.extend(after.0);
             right.extend(after.1);
             // The dry sine, and repeats of twice its level a fifth up
             let limit = 0.5 * (1.0 + 2.0 * 1.6) * std::f32::consts::TAU * 220.0 / SAMPLE_RATE;
             for channel in [&left, &right] {
                 let step = largest_step(&channel[ms(1999.0)..]);
-                assert!(step < limit, "{} to {} ms: step {} against {}", from_ms, to_ms, step, limit);
+                assert!(
+                    step < limit,
+                    "{} to {} ms: step {} against {}",
+                    from_ms,
+                    to_ms,
+                    step,
+                    limit
+                );
             }
         }
     }
@@ -579,11 +644,23 @@ pub(crate) mod tests {
                 // Full scale, and a square at a frequency the short loop is in tune with
                 let mut signal = noise(1.0, (sample_rate * 1.5) as usize);
                 let period = (time_ms * 0.001 * sample_rate) as usize;
-                signal.extend((0..(sample_rate * 2.5) as usize).map(|i| if (i / period) % 2 == 0 { 1.0 } else { -1.0 }));
+                signal.extend((0..(sample_rate * 2.5) as usize).map(|i| {
+                    if (i / period) % 2 == 0 {
+                        1.0
+                    } else {
+                        -1.0
+                    }
+                }));
                 let (left, right) = run(&settings(time_ms, 1.0, 1.0), &signal, sample_rate);
                 for channel in [&left, &right] {
                     assert!(channel.iter().all(|sample| sample.is_finite()));
-                    assert!(peak(channel) < 4.0, "{} Hz, {} ms: peak {}", sample_rate, time_ms, peak(channel));
+                    assert!(
+                        peak(channel) < 4.0,
+                        "{} Hz, {} ms: peak {}",
+                        sample_rate,
+                        time_ms,
+                        peak(channel)
+                    );
                 }
             }
         }
@@ -594,7 +671,13 @@ pub(crate) mod tests {
         for sample_rate in [44100.0, 192000.0] {
             let mut delay = new_delay(sample_rate);
             assert!(delay.lines[0].len() as f32 > 1.004 * sample_rate);
-            let layout = |delay: &Delay| delay.lines.iter().map(|line| (line.as_ptr() as usize, line.len(), line.capacity())).collect::<Vec<_>>();
+            let layout = |delay: &Delay| {
+                delay
+                    .lines
+                    .iter()
+                    .map(|line| (line.as_ptr() as usize, line.len(), line.capacity()))
+                    .collect::<Vec<_>>()
+            };
             let before = layout(&delay);
             let input = noise(0.5, 48_000);
             for (index, block) in input.chunks(BLOCK).enumerate() {
@@ -648,7 +731,12 @@ pub(crate) mod tests {
         for _ in 0..3 {
             slowest = slowest.max(block_time_us(&mut delay, &setting, &silence));
         }
-        assert!(slowest < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us in the tail", playing, slowest);
+        assert!(
+            slowest < playing * SLOWED_DOWN,
+            "{:.1} us per block playing, {:.1} us in the tail",
+            playing,
+            slowest
+        );
 
         let (left, right) = run_blocks(&mut delay, &setting, &vec![0.0; ms(1200.0)], BLOCK);
         assert!(delay.is_idle());
@@ -684,7 +772,12 @@ pub(crate) mod tests {
             assert!(idle_at >= ms(time_ms), "{} ms: idle after {} samples", time_ms, idle_at);
             assert!(idle_at < ms(time_ms + 40.0), "{} ms: idle after {} samples", time_ms, idle_at);
             // What was still coming out when it stopped is nothing
-            assert!(peak(&left[idle_at - 48..idle_at]) < 2.0 * SILENCE, "{} ms: cut at {}", time_ms, peak(&left[idle_at - 48..idle_at]));
+            assert!(
+                peak(&left[idle_at - 48..idle_at]) < 2.0 * SILENCE,
+                "{} ms: cut at {}",
+                time_ms,
+                peak(&left[idle_at - 48..idle_at])
+            );
         }
     }
 
@@ -725,6 +818,9 @@ pub(crate) mod tests {
         assert!(moving == run_blocks(&mut fresh, &short, &input[..ms(100.0)], BLOCK));
         let long = settings(1000.0, 0.5, 1.0);
         let silence = vec![0.0; ms(3000.0)];
-        assert!(run_blocks(&mut delay, &long, &silence, BLOCK) == run_blocks(&mut fresh, &long, &silence, BLOCK));
+        assert!(
+            run_blocks(&mut delay, &long, &silence, BLOCK)
+                == run_blocks(&mut fresh, &long, &silence, BLOCK)
+        );
     }
 }

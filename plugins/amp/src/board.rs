@@ -10,7 +10,9 @@
 use nih_plug_egui::egui::{vec2, Id, Pos2, Rect, Ui};
 use suite_common::ui::{self, BENCH_MARGIN, SLIM_PEDAL_WIDTH};
 
-use crate::editor::{Pedals, CAB_SLOT, GATE_SLOT, HEAD_HEIGHT, PEDAL_HEIGHT, PEDAL_TOP, PEDAL_WIDTH};
+use crate::editor::{
+    Pedals, CAB_SLOT, GATE_SLOT, HEAD_HEIGHT, PEDAL_HEIGHT, PEDAL_TOP, PEDAL_WIDTH,
+};
 use crate::order::{self, ChainOrder};
 
 const PEDALS: usize = 10;
@@ -56,7 +58,9 @@ impl Pedal {
             Pedal::Gate | Pedal::Cab => Zone::Fixed,
             Pedal::Drive => Zone::Front,
             Pedal::Delay | Pedal::Reverb => Zone::Back,
-            Pedal::Comp | Pedal::Phaser | Pedal::Chorus | Pedal::Flanger | Pedal::Tremolo => Zone::Either,
+            Pedal::Comp | Pedal::Phaser | Pedal::Chorus | Pedal::Flanger | Pedal::Tremolo => {
+                Zone::Either
+            }
         }
     }
 
@@ -124,7 +128,10 @@ struct Order {
 impl Default for Order {
     fn default() -> Self {
         use Pedal::*;
-        Self { pedals: [Gate, Comp, Drive, Phaser, Cab, Chorus, Flanger, Tremolo, Delay, Reverb], front: 4 }
+        Self {
+            pedals: [Gate, Comp, Drive, Phaser, Cab, Chorus, Flanger, Tremolo, Delay, Reverb],
+            front: 4,
+        }
     }
 }
 
@@ -134,7 +141,10 @@ impl Order {
     fn of_chain(chain: &ChainOrder) -> Order {
         let front = chain.front().iter().map(|&pedal| Pedal::of_chain(pedal));
         let back = chain.back().iter().map(|&pedal| Pedal::of_chain(pedal));
-        let row = std::iter::once(Pedal::Gate).chain(front).chain(std::iter::once(Pedal::Cab)).chain(back);
+        let row = std::iter::once(Pedal::Gate)
+            .chain(front)
+            .chain(std::iter::once(Pedal::Cab))
+            .chain(back);
         let mut pedals = [Pedal::Gate; PEDALS];
         for (place, pedal) in pedals.iter_mut().zip(row) {
             *place = pedal;
@@ -144,10 +154,11 @@ impl Order {
 
     /// The chain's order for this row
     fn chain(&self) -> ChainOrder {
-        let ids = self.pedals.iter().enumerate().filter_map(|(place, pedal)| match pedal.in_chain() {
-            Some(pedal) => Some(pedal.id()),
-            None => (place == self.front).then_some(order::AMP_ID),
-        });
+        let ids =
+            self.pedals.iter().enumerate().filter_map(|(place, pedal)| match pedal.in_chain() {
+                Some(pedal) => Some(pedal.id()),
+                None => (place == self.front).then_some(order::AMP_ID),
+            });
         ChainOrder::from_ids(ids)
     }
 
@@ -204,7 +215,10 @@ impl Order {
     /// the places it may have, the one nearest to there
     fn nearest(&self, pedal: Pedal, left: f32) -> Order {
         let distance = |order: &Order| (order.places().0[pedal as usize] - left).abs();
-        self.moves(pedal).into_iter().min_by(|a, b| distance(a).total_cmp(&distance(b))).unwrap_or(*self)
+        self.moves(pedal)
+            .into_iter()
+            .min_by(|a, b| distance(a).total_cmp(&distance(b)))
+            .unwrap_or(*self)
     }
 }
 
@@ -241,7 +255,8 @@ pub fn board(ui: &mut Ui, window: Pos2, pedals: &Pedals, chain: &order::StoredOr
     // Read every frame: a preset or the host may have changed it
     let order = Order::of_chain(&chain.get());
     let id = Id::new("board");
-    let mut board: Board = ui.data(|data| data.get_temp(id)).unwrap_or_else(|| Board::at_rest(&order));
+    let mut board: Board =
+        ui.data(|data| data.get_temp(id)).unwrap_or_else(|| Board::at_rest(&order));
     let held = board.held.map(|held| held.pedal);
 
     // The others stand where they would if the held pedal were let go now
@@ -274,7 +289,8 @@ pub fn board(ui: &mut Ui, window: Pos2, pedals: &Pedals, chain: &order::StoredOr
     let in_turn = shown.pedals.into_iter().filter(|&pedal| Some(pedal) != held).chain(held);
     for pedal in in_turn {
         let left = board.lefts[pedal as usize];
-        let mut rect = Rect::from_min_size(window + vec2(left, PEDAL_TOP), vec2(pedal.width(), PEDAL_HEIGHT));
+        let mut rect =
+            Rect::from_min_size(window + vec2(left, PEDAL_TOP), vec2(pedal.width(), PEDAL_HEIGHT));
         if Some(pedal) == held {
             rect = ui::lifted(ui.painter(), rect);
         }
@@ -286,7 +302,8 @@ pub fn board(ui: &mut Ui, window: Pos2, pedals: &Pedals, chain: &order::StoredOr
         let grip = ui::title_grip(ui, face, &format!("{pedal:?}"));
         if grip.drag_started() {
             // Where the button went down, not where the drag was noticed
-            let taken = ui.input(|input| input.pointer.press_origin()).map_or(face.center().x, |pos| pos.x);
+            let taken =
+                ui.input(|input| input.pointer.press_origin()).map_or(face.center().x, |pos| pos.x);
             board.held = Some(Held { pedal, grip: taken - rect.left(), left });
         }
         if let (Some(held), Some(pointer)) = (&mut board.held, grip.interact_pointer_pos()) {
@@ -340,16 +357,26 @@ mod tests {
         // Every order that is two moves away from the default one
         let mut orders = vec![Order::default()];
         for _ in 0..2 {
-            orders = orders.iter().flat_map(|order| MOVABLE.iter().flat_map(|&pedal| order.moves(pedal))).collect();
+            orders = orders
+                .iter()
+                .flat_map(|order| MOVABLE.iter().flat_map(|&pedal| order.moves(pedal)))
+                .collect();
         }
         assert!(orders.len() > 1000);
         for order in orders {
             assert_eq!(order.pedals[0], Pedal::Gate, "{order:?}");
             assert_eq!(order.pedals[order.front], Pedal::Cab, "{order:?}");
             assert!(in_front(&order, Pedal::Drive), "{order:?}");
-            assert!(!in_front(&order, Pedal::Delay) && !in_front(&order, Pedal::Reverb), "{order:?}");
+            assert!(
+                !in_front(&order, Pedal::Delay) && !in_front(&order, Pedal::Reverb),
+                "{order:?}"
+            );
             for pedal in MOVABLE {
-                assert_eq!(order.pedals.iter().filter(|&&other| other == pedal).count(), 1, "{order:?}");
+                assert_eq!(
+                    order.pedals.iter().filter(|&&other| other == pedal).count(),
+                    1,
+                    "{order:?}"
+                );
             }
         }
     }
@@ -361,7 +388,10 @@ mod tests {
         assert_eq!(Order::of_chain(&ChainOrder::default()), Order::default());
         let mut orders = vec![Order::default()];
         for _ in 0..2 {
-            orders = orders.iter().flat_map(|order| MOVABLE.iter().flat_map(|&pedal| order.moves(pedal))).collect();
+            orders = orders
+                .iter()
+                .flat_map(|order| MOVABLE.iter().flat_map(|&pedal| order.moves(pedal)))
+                .collect();
         }
         for order in orders {
             assert_eq!(Order::of_chain(&order.chain()), order, "{order:?}");
@@ -388,19 +418,31 @@ mod tests {
         }
         // The chorus across the amp to right behind the gate
         let moved = order.nearest(Chorus, 0.0);
-        assert_eq!(moved.pedals, [Gate, Chorus, Comp, Drive, Phaser, Cab, Flanger, Tremolo, Delay, Reverb]);
+        assert_eq!(
+            moved.pedals,
+            [Gate, Chorus, Comp, Drive, Phaser, Cab, Flanger, Tremolo, Delay, Reverb]
+        );
         assert_eq!(moved.front, 5);
         // The drive as far right as it goes: last in front of the amp
         let moved = order.nearest(Drive, WINDOW_WIDTH as f32);
-        assert_eq!(moved.pedals, [Gate, Comp, Phaser, Drive, Cab, Chorus, Flanger, Tremolo, Delay, Reverb]);
+        assert_eq!(
+            moved.pedals,
+            [Gate, Comp, Phaser, Drive, Cab, Chorus, Flanger, Tremolo, Delay, Reverb]
+        );
         assert_eq!(moved.front, 4);
         // The reverb as far left as it goes: first behind the cabinet
         let moved = order.nearest(Reverb, 0.0);
-        assert_eq!(moved.pedals, [Gate, Comp, Drive, Phaser, Cab, Reverb, Chorus, Flanger, Tremolo, Delay]);
+        assert_eq!(
+            moved.pedals,
+            [Gate, Comp, Drive, Phaser, Cab, Reverb, Chorus, Flanger, Tremolo, Delay]
+        );
         assert_eq!(moved.front, 4);
         // The phaser to the far end
         let moved = order.nearest(Phaser, WINDOW_WIDTH as f32);
-        assert_eq!(moved.pedals, [Gate, Comp, Drive, Cab, Chorus, Flanger, Tremolo, Delay, Reverb, Phaser]);
+        assert_eq!(
+            moved.pedals,
+            [Gate, Comp, Drive, Cab, Chorus, Flanger, Tremolo, Delay, Reverb, Phaser]
+        );
         assert_eq!(moved.front, 3);
     }
 }

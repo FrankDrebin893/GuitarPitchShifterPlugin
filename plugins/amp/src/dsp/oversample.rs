@@ -25,13 +25,8 @@ pub fn factor_for(sample_rate: f32) -> usize {
 // First doubling: 5 sections, transition 0.0833, 80 dB rejection. Passband to 20 kHz and
 // stopband from 28 kHz at a 48 kHz host rate. The only doubling at the high host rates:
 // passband to 40 kHz and stopband from 56 kHz at 96 kHz
-const STAGE_1: [f32; 5] = [
-    0.061_106_325,
-    0.221_113_243,
-    0.430_533_776,
-    0.651_029_500,
-    0.876_685_896,
-];
+const STAGE_1: [f32; 5] =
+    [0.061_106_325, 0.221_113_243, 0.430_533_776, 0.651_029_500, 0.876_685_896];
 
 // Second doubling: 2 sections, transition 0.3, 72 dB rejection. It can be this gentle
 // because at this rate the audio band (to 19 kHz) and its image (from 77 kHz) are far apart
@@ -45,11 +40,7 @@ struct HalfBand<const N: usize> {
 
 impl<const N: usize> HalfBand<N> {
     fn new(coeffs: [f32; N]) -> Self {
-        Self {
-            coeffs,
-            last_input: [0.0; N],
-            last_output: [0.0; N],
-        }
+        Self { coeffs, last_input: [0.0; N], last_output: [0.0; N] }
     }
 
     fn reset(&mut self) {
@@ -62,8 +53,9 @@ impl<const N: usize> HalfBand<N> {
         let mut signal = input;
         let mut index = first;
         while index < N {
-            let output =
-                self.coeffs[index] * (signal - self.last_output[index]) + self.last_input[index] + ANTI_DENORMAL;
+            let output = self.coeffs[index] * (signal - self.last_output[index])
+                + self.last_input[index]
+                + ANTI_DENORMAL;
             self.last_input[index] = signal;
             self.last_output[index] = output;
             signal = output;
@@ -183,7 +175,8 @@ mod tests {
     fn decimated_db<const N: usize>(coeffs: [f32; N], freq_ratio: f32) -> f32 {
         let mut filter = HalfBand::new(coeffs);
         let input = sine(freq_ratio, 1.0, 1.0, LEN);
-        let output: Vec<f32> = input.chunks_exact(2).map(|pair| filter.down(pair[0], pair[1])).collect();
+        let output: Vec<f32> =
+            input.chunks_exact(2).map(|pair| filter.down(pair[0], pair[1])).collect();
         to_db(rms(&output[LEN / 4..]) / rms(&input))
     }
 
@@ -285,7 +278,8 @@ mod tests {
 
         // Centre of energy of the impulse response
         let energy: f32 = output.iter().map(|s| s * s).sum();
-        let centre: f32 = output.iter().enumerate().map(|(i, s)| i as f32 * s * s).sum::<f32>() / energy;
+        let centre: f32 =
+            output.iter().enumerate().map(|(i, s)| i as f32 * s * s).sum::<f32>() / energy;
         assert!(centre < 6.0, "Delay: {:.2} samples", centre);
         assert!((energy - 1.0).abs() < 0.05, "Energy: {}", energy);
     }
@@ -302,7 +296,8 @@ mod tests {
             oversampler.upsample(&[0.0; 64], &mut high);
             oversampler.downsample(&high, &mut low);
             let states = oversampler.up_1.last_output.iter().chain(&oversampler.down_1.last_output);
-            let states = states.chain(&oversampler.up_2.last_output).chain(&oversampler.down_2.last_output);
+            let states =
+                states.chain(&oversampler.up_2.last_output).chain(&oversampler.down_2.last_output);
             for state in states {
                 assert!(*state == 0.0 || state.is_normal(), "State: {:e}", state);
             }

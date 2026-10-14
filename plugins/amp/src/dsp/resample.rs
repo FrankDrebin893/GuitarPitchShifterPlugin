@@ -54,7 +54,8 @@ pub fn resample(input: &[f32], from_rate: f64, to_rate: f64) -> Vec<f32> {
             for (offset, &sample) in input[first..=last].iter().enumerate() {
                 let distance = centre - (first + offset) as f64;
                 let position = distance / half_width;
-                let window = bessel_i0(KAISER_BETA * (1.0 - position * position).max(0.0).sqrt()) * window_scale;
+                let window = bessel_i0(KAISER_BETA * (1.0 - position * position).max(0.0).sqrt())
+                    * window_scale;
                 sum += sample as f64 * cutoff * sinc(cutoff * distance) * window;
             }
             sum as f32

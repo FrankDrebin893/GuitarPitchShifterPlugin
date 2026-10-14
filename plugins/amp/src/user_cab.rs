@@ -78,7 +78,8 @@ pub struct Recording {
 pub fn cabinets_dir() -> Option<PathBuf> {
     match std::env::var_os(FOLDER_ENV) {
         Some(folder) if !folder.is_empty() => Some(PathBuf::from(folder)),
-        _ => documents_dir().map(|documents| FOLDER.iter().fold(documents, |path, part| path.join(part))),
+        _ => documents_dir()
+            .map(|documents| FOLDER.iter().fold(documents, |path, part| path.join(part))),
     }
 }
 
@@ -86,12 +87,16 @@ pub fn cabinets_dir() -> Option<PathBuf> {
 /// (to a cloud drive, for one). Failing that, the one in the profile
 #[cfg(windows)]
 fn documents_dir() -> Option<PathBuf> {
-    known_documents_dir().or_else(|| std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join("Documents")))
+    known_documents_dir().or_else(|| {
+        std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join("Documents"))
+    })
 }
 
 #[cfg(not(windows))]
 fn documents_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").filter(|home| !home.is_empty()).map(|home| PathBuf::from(home).join("Documents"))
+    std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(|home| PathBuf::from(home).join("Documents"))
 }
 
 #[cfg(windows)]
@@ -104,7 +109,12 @@ fn known_documents_dir() -> Option<PathBuf> {
 
     #[link(name = "shell32")]
     extern "system" {
-        fn SHGetKnownFolderPath(id: *const Guid, flags: u32, token: *mut c_void, path: *mut *mut u16) -> i32;
+        fn SHGetKnownFolderPath(
+            id: *const Guid,
+            flags: u32,
+            token: *mut c_void,
+            path: *mut *mut u16,
+        ) -> i32;
     }
     #[link(name = "ole32")]
     extern "system" {
@@ -112,7 +122,8 @@ fn known_documents_dir() -> Option<PathBuf> {
     }
 
     // FOLDERID_Documents
-    const DOCUMENTS: Guid = Guid(0xFDD3_9AD0, 0x238F, 0x46AF, [0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7]);
+    const DOCUMENTS: Guid =
+        Guid(0xFDD3_9AD0, 0x238F, 0x46AF, [0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7]);
     // KF_FLAG_DONT_VERIFY: the path as configured, without touching the folder
     const DONT_VERIFY: u32 = 0x4000;
 
@@ -145,7 +156,11 @@ pub fn list(dir: &Path) -> Vec<String> {
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_ok_and(|kind| !kind.is_dir()))
         .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|name| Path::new(name).extension().is_some_and(|extension| extension.eq_ignore_ascii_case(EXTENSION)))
+        .filter(|name| {
+            Path::new(name)
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case(EXTENSION))
+        })
         .collect();
     files.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b)));
     files
@@ -169,14 +184,20 @@ pub fn neighbour(files: &[String], current: &str, forward: bool) -> String {
 /// display's font has, and no longer than `max_chars`
 pub fn display_name(file: &str, max_chars: usize) -> String {
     let path = Path::new(file);
-    let has_extension = path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case(EXTENSION));
-    let stem = if has_extension { path.file_stem().and_then(|stem| stem.to_str()).unwrap_or(file) } else { file };
+    let has_extension =
+        path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case(EXTENSION));
+    let stem = if has_extension {
+        path.file_stem().and_then(|stem| stem.to_str()).unwrap_or(file)
+    } else {
+        file
+    };
     let shown: Vec<char> = stem
         .to_uppercase()
         .chars()
         .map(|letter| {
             // The font has Latin letters with their accents, digits and the usual signs
-            let printable = (letter.is_alphanumeric() && (letter as u32) < 0x180) || " -_.+#&()".contains(letter);
+            let printable = (letter.is_alphanumeric() && (letter as u32) < 0x180)
+                || " -_.+#&()".contains(letter);
             if printable {
                 letter
             } else {
@@ -223,10 +244,7 @@ pub fn read_wav(path: &Path) -> Result<Recording, LoadError> {
         }
         _ => return Err(LoadError::Bad),
     };
-    Ok(Recording {
-        samples,
-        sample_rate: spec.sample_rate,
-    })
+    Ok(Recording { samples, sample_rate: spec.sample_rate })
 }
 
 fn peak(samples: &[f32]) -> f32 {
@@ -275,7 +293,8 @@ pub fn trim_and_level(response: &[f32], sample_rate: f32) -> Result<Vec<f32>, Lo
             *tap *= (0.5 + 0.5 * (std::f64::consts::PI * position).cos()) as f32;
         }
     }
-    let last = taps.iter().rposition(|sample| sample.abs() >= top * END_GAIN).ok_or(LoadError::Bad)?;
+    let last =
+        taps.iter().rposition(|sample| sample.abs() >= top * END_GAIN).ok_or(LoadError::Bad)?;
     taps.truncate(last + 1);
 
     let gain = level_gain(|freq_hz| ir_magnitude(&taps, freq_hz, sample_rate));
@@ -295,7 +314,10 @@ pub fn prepare(recording: &Recording, sample_rate: f32) -> Result<Vec<f32>, Load
         return Err(LoadError::Bad);
     }
     let top = peak(source);
-    let first = source.iter().position(|sample| top > 0.0 && sample.abs() >= top * START_GAIN).ok_or(LoadError::Bad)?;
+    let first = source
+        .iter()
+        .position(|sample| top > 0.0 && sample.abs() >= top * START_GAIN)
+        .ok_or(LoadError::Bad)?;
     if recording.sample_rate as f32 == sample_rate {
         return trim_and_level(&source[first..], sample_rate);
     }
@@ -303,7 +325,8 @@ pub fn prepare(recording: &Recording, sample_rate: f32) -> Result<Vec<f32>, Load
     // Only what can end up in the cabinet is resampled, with some room around it
     let from_rate = recording.sample_rate as f64;
     let begin = first.saturating_sub((LEAD_MS * 0.001 * from_rate) as usize);
-    let end = (first + ((USER_IR_MS as f64 + TAIL_MS) * 0.001 * from_rate) as usize).min(source.len());
+    let end =
+        (first + ((USER_IR_MS as f64 + TAIL_MS) * 0.001 * from_rate) as usize).min(source.len());
     trim_and_level(&resample(&source[begin..end], from_rate, sample_rate as f64), sample_rate)
 }
 
@@ -322,7 +345,8 @@ pub mod tests {
 
     /// A folder for the files of one test, below `target`, empty
     pub fn test_dir(name: &str) -> PathBuf {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/test_cabinets").join(name);
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/test_cabinets").join(name);
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -330,12 +354,23 @@ pub mod tests {
 
     /// Writes a WAV file with the same samples in every channel but the first, which
     /// gets `left`: the others are there to be ignored
-    pub fn write_ir_wav(path: &Path, left: &[f32], channels: u16, bits: u16, float: bool, sample_rate: u32) {
+    pub fn write_ir_wav(
+        path: &Path,
+        left: &[f32],
+        channels: u16,
+        bits: u16,
+        float: bool,
+        sample_rate: u32,
+    ) {
         let spec = hound::WavSpec {
             channels,
             sample_rate,
             bits_per_sample: bits,
-            sample_format: if float { hound::SampleFormat::Float } else { hound::SampleFormat::Int },
+            sample_format: if float {
+                hound::SampleFormat::Float
+            } else {
+                hound::SampleFormat::Int
+            },
         };
         let mut writer = hound::WavWriter::create(path, spec).unwrap();
         for &sample in left {
@@ -345,7 +380,9 @@ pub mod tests {
                     writer.write_sample(sample).unwrap();
                 } else {
                     let scale = ((1_i64 << (bits - 1)) - 1) as f64;
-                    writer.write_sample((sample.clamp(-1.0, 1.0) as f64 * scale).round() as i32).unwrap();
+                    writer
+                        .write_sample((sample.clamp(-1.0, 1.0) as f64 * scale).round() as i32)
+                        .unwrap();
                 }
             }
         }
@@ -372,10 +409,16 @@ pub mod tests {
 
     /// Largest difference in dB between two responses, given as their gain at a frequency,
     /// over `probes` frequencies from 60 Hz to `top_hz`, and the frequency it is at
-    fn largest_gap_db(a: impl Fn(f32) -> f32, b: impl Fn(f32) -> f32, top_hz: f32, probes: usize) -> (f32, f32) {
+    fn largest_gap_db(
+        a: impl Fn(f32) -> f32,
+        b: impl Fn(f32) -> f32,
+        top_hz: f32,
+        probes: usize,
+    ) -> (f32, f32) {
         let mut worst = (0.0f32, 0.0);
         for probe in 0..probes {
-            let freq_hz = BAND_HZ[0] * (top_hz / BAND_HZ[0]).powf(probe as f32 / (probes - 1) as f32);
+            let freq_hz =
+                BAND_HZ[0] * (top_hz / BAND_HZ[0]).powf(probe as f32 / (probes - 1) as f32);
             let difference = to_db(a(freq_hz) / b(freq_hz));
             if difference.abs() > worst.0.abs() {
                 worst = (difference, freq_hz);
@@ -385,12 +428,28 @@ pub mod tests {
     }
 
     /// The same for two impulse responses, each at its own sample rate
-    pub fn largest_difference_db(a: (&[f32], f32), b: (&[f32], f32), top_hz: f32, probes: usize) -> (f32, f32) {
-        largest_gap_db(|freq_hz| ir_magnitude(a.0, freq_hz, a.1), |freq_hz| ir_magnitude(b.0, freq_hz, b.1), top_hz, probes)
+    pub fn largest_difference_db(
+        a: (&[f32], f32),
+        b: (&[f32], f32),
+        top_hz: f32,
+        probes: usize,
+    ) -> (f32, f32) {
+        largest_gap_db(
+            |freq_hz| ir_magnitude(a.0, freq_hz, a.1),
+            |freq_hz| ir_magnitude(b.0, freq_hz, b.1),
+            top_hz,
+            probes,
+        )
     }
 
     /// And for what a file gives once loaded, against the built-in cabinet with its filter
-    fn off_the_built_in_db(taps: &[f32], amp: Amp, sample_rate: f32, top_hz: f32, probes: usize) -> (f32, f32) {
+    fn off_the_built_in_db(
+        taps: &[f32],
+        amp: Amp,
+        sample_rate: f32,
+        top_hz: f32,
+        probes: usize,
+    ) -> (f32, f32) {
         let built_in: CabIr = design_ir(&amp.model().cab, sample_rate);
         largest_gap_db(
             |freq_hz| ir_magnitude(taps, freq_hz, sample_rate),
@@ -421,14 +480,33 @@ pub mod tests {
                 write_ir_wav(&path, &response, channels, bits, float, 48000);
                 let recording = read_wav(&path).unwrap();
                 assert_eq!(recording.sample_rate, 48000);
-                assert_eq!(recording.samples.len(), response.len(), "{} bit, {} channels", bits, channels);
+                assert_eq!(
+                    recording.samples.len(),
+                    response.len(),
+                    "{} bit, {} channels",
+                    bits,
+                    channels
+                );
                 // The left channel, and not its mix with the other one
-                let off = recording.samples.iter().zip(&response).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+                let off = recording
+                    .samples
+                    .iter()
+                    .zip(&response)
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0, f32::max);
                 assert!(off < 2.0 / 32768.0, "{} bit, {} channels: off by {}", bits, channels, off);
 
                 let taps = load(&path, 48000.0).unwrap();
-                let (difference, freq_hz) = largest_difference_db((&taps, 48000.0), (&reference, 48000.0), BAND_HZ[1], 60);
-                assert!(difference.abs() < 0.2, "{} bit, {} channels: {:.2} dB at {:.0} Hz", bits, channels, difference, freq_hz);
+                let (difference, freq_hz) =
+                    largest_difference_db((&taps, 48000.0), (&reference, 48000.0), BAND_HZ[1], 60);
+                assert!(
+                    difference.abs() < 0.2,
+                    "{} bit, {} channels: {:.2} dB at {:.0} Hz",
+                    bits,
+                    channels,
+                    difference,
+                    freq_hz
+                );
             }
         }
     }
@@ -486,9 +564,18 @@ pub mod tests {
             let original = design_ir(&amp.model().cab, 48000.0).taps;
             for to_rate in [44100.0, 88200.0, 96000.0, 192000.0] {
                 let resampled = resample(&original, 48000.0, to_rate as f64);
-                let scaled: Vec<f32> = resampled.iter().map(|sample| sample * 48000.0 / to_rate).collect();
-                let (difference, freq_hz) = largest_difference_db((&scaled, to_rate), (&original, 48000.0), BAND_HZ[1], 80);
-                assert!(difference.abs() < 0.05, "{:?} to {} Hz: {:.3} dB at {:.0} Hz", amp, to_rate, difference, freq_hz);
+                let scaled: Vec<f32> =
+                    resampled.iter().map(|sample| sample * 48000.0 / to_rate).collect();
+                let (difference, freq_hz) =
+                    largest_difference_db((&scaled, to_rate), (&original, 48000.0), BAND_HZ[1], 80);
+                assert!(
+                    difference.abs() < 0.05,
+                    "{:?} to {} Hz: {:.3} dB at {:.0} Hz",
+                    amp,
+                    to_rate,
+                    difference,
+                    freq_hz
+                );
             }
         }
     }
@@ -500,9 +587,22 @@ pub mod tests {
             for to_rate in [44100.0, 96000.0, 192000.0] {
                 let native = design_ir(&amp.model().cab, to_rate).taps;
                 let native = trim_and_level(&native, to_rate).unwrap();
-                let resampled = trim_and_level(&resample(&original, 48000.0, to_rate as f64), to_rate).unwrap();
-                let (difference, freq_hz) = largest_difference_db((&resampled, to_rate), (&native, to_rate), BAND_HZ[1], 80);
-                assert!(difference.abs() < 0.1, "{:?} to {} Hz: {:.2} dB at {:.0} Hz", amp, to_rate, difference, freq_hz);
+                let resampled =
+                    trim_and_level(&resample(&original, 48000.0, to_rate as f64), to_rate).unwrap();
+                let (difference, freq_hz) = largest_difference_db(
+                    (&resampled, to_rate),
+                    (&native, to_rate),
+                    BAND_HZ[1],
+                    80,
+                );
+                assert!(
+                    difference.abs() < 0.1,
+                    "{:?} to {} Hz: {:.2} dB at {:.0} Hz",
+                    amp,
+                    to_rate,
+                    difference,
+                    freq_hz
+                );
             }
         }
     }
@@ -511,21 +611,38 @@ pub mod tests {
     fn test_resampler_goes_down_as_well_as_up() {
         // From a high rate what is above the new half rate has to go, not fold back
         let mut noise = Noise::new(3);
-        let wide: Vec<f32> = (0..9600).map(|index| if index < 4800 { noise.next() } else { 0.0 }).collect();
+        let wide: Vec<f32> =
+            (0..9600).map(|index| if index < 4800 { noise.next() } else { 0.0 }).collect();
         let down = resample(&wide, 192000.0, 48000.0);
         assert_eq!(down.len(), 2400);
         // A tone the lower rate cannot hold leaves next to nothing
-        let tone = |freq_hz: f64, sample_rate: f64, index: usize| (std::f64::consts::TAU * freq_hz * index as f64 / sample_rate).sin() as f32;
+        let tone = |freq_hz: f64, sample_rate: f64, index: usize| {
+            (std::f64::consts::TAU * freq_hz * index as f64 / sample_rate).sin() as f32
+        };
         let high: Vec<f32> = (0..9600).map(|index| tone(30000.0, 192000.0, index)).collect();
         let folded = resample(&high, 192000.0, 48000.0);
-        assert!(to_db(peak(&folded[300..2100])) < -80.0, "{:.1} dB", to_db(peak(&folded[300..2100])));
+        assert!(
+            to_db(peak(&folded[300..2100])) < -80.0,
+            "{:.1} dB",
+            to_db(peak(&folded[300..2100]))
+        );
         // And one it can hold comes through as it was
         let low: Vec<f32> = (0..9600).map(|index| tone(5000.0, 192000.0, index)).collect();
         let kept = resample(&low, 192000.0, 48000.0);
-        assert!(to_db(peak(&kept[300..2100])).abs() < 0.01, "{:.3} dB", to_db(peak(&kept[300..2100])));
+        assert!(
+            to_db(peak(&kept[300..2100])).abs() < 0.01,
+            "{:.3} dB",
+            to_db(peak(&kept[300..2100]))
+        );
         for (index, &sample) in kept.iter().enumerate().take(2100).skip(300).step_by(37) {
             let expected = tone(5000.0, 48000.0, index);
-            assert!((sample - expected).abs() < 1e-4, "Sample {}: {} for {}", index, sample, expected);
+            assert!(
+                (sample - expected).abs() < 1e-4,
+                "Sample {}: {} for {}",
+                index,
+                sample,
+                expected
+            );
         }
     }
 
@@ -541,7 +658,13 @@ pub mod tests {
             for sample_rate in [44100.0, 48000.0, 192000.0] {
                 let taps = load(&path, sample_rate).unwrap();
                 let limit = (PRE_MS * 0.001 * sample_rate).round() as usize;
-                assert!(arrival(&taps) <= limit, "{} to {} Hz: arrives at sample {}", from_rate, sample_rate, arrival(&taps));
+                assert!(
+                    arrival(&taps) <= limit,
+                    "{} to {} Hz: arrives at sample {}",
+                    from_rate,
+                    sample_rate,
+                    arrival(&taps)
+                );
             }
         }
     }
@@ -554,7 +677,10 @@ pub mod tests {
         let response: Vec<f32> = (0..961)
             .map(|index| {
                 let distance = index as f64 - centre as f64;
-                (0.35 * sinc(0.35 * distance) * (0.5 + 0.5 * (std::f64::consts::PI * distance / 481.0).cos())) as f32
+                (0.35
+                    * sinc(0.35 * distance)
+                    * (0.5 + 0.5 * (std::f64::consts::PI * distance / 481.0).cos()))
+                    as f32
             })
             .collect();
         let taps = trim_and_level(&response, sample_rate).unwrap();
@@ -576,18 +702,27 @@ pub mod tests {
         for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0] {
             // Noise that dies away over a quarter of a second: far longer than the cabinet holds
             let mut noise = Noise::new(9);
-            let long: Vec<f32> =
-                (0..(0.3 * sample_rate) as usize).map(|index| noise.next() * (-(index as f32) / (0.05 * sample_rate)).exp()).collect();
+            let long: Vec<f32> = (0..(0.3 * sample_rate) as usize)
+                .map(|index| noise.next() * (-(index as f32) / (0.05 * sample_rate)).exp())
+                .collect();
             let mut long = long;
             long[0] = 1.0;
             let taps = trim_and_level(&long, sample_rate).unwrap();
-            assert!(taps.len() <= user_ir_len(sample_rate), "{} taps at {} Hz", taps.len(), sample_rate);
+            assert!(
+                taps.len() <= user_ir_len(sample_rate),
+                "{} taps at {} Hz",
+                taps.len(),
+                sample_rate
+            );
             assert!(taps.len() > user_ir_len(sample_rate) * 9 / 10);
             assert!(taps.last().unwrap().abs() < 1e-3 * peak(&taps));
             // The first three quarters are the file's own
             let gain = taps[0] / long[0];
             let untouched = user_ir_len(sample_rate) * 3 / 4;
-            assert!(taps[..untouched].iter().zip(&long).all(|(tap, sample)| (tap - sample * gain).abs() < 1e-4 * gain));
+            assert!(taps[..untouched]
+                .iter()
+                .zip(&long)
+                .all(|(tap, sample)| (tap - sample * gain).abs() < 1e-4 * gain));
         }
 
         // A short one keeps its length, but not the silence behind it
@@ -604,16 +739,20 @@ pub mod tests {
             for amp in Amp::ALL {
                 for level in [0.02, 1.0] {
                     let response = whole_response(amp, 48000.0, 0.1, level);
-                    let recording = Recording {
-                        samples: response,
-                        sample_rate: 48000,
-                    };
+                    let recording = Recording { samples: response, sample_rate: 48000 };
                     let taps = prepare(&recording, sample_rate).unwrap();
                     let level_db = level_db(&taps, sample_rate);
-                    assert!(level_db.abs() < 0.01, "{:?} at {} Hz: {:.3} dB", amp, sample_rate, level_db);
+                    assert!(
+                        level_db.abs() < 0.01,
+                        "{:?} at {} Hz: {:.3} dB",
+                        amp,
+                        sample_rate,
+                        level_db
+                    );
                     // Which is the level of the cabinet it was made from, as designed
                     let designed = design_ir(&amp.model().cab, sample_rate);
-                    let designed_db = -to_db(level_gain(|freq_hz| designed.magnitude(freq_hz, sample_rate)));
+                    let designed_db =
+                        -to_db(level_gain(|freq_hz| designed.magnitude(freq_hz, sample_rate)));
                     assert!(designed_db.abs() < 0.01);
                 }
             }
@@ -622,10 +761,7 @@ pub mod tests {
 
     #[test]
     fn test_a_single_sample_is_a_cabinet_that_does_nothing() {
-        let recording = Recording {
-            samples: vec![0.0, 0.0, 0.25, 0.0, 0.0],
-            sample_rate: 48000,
-        };
+        let recording = Recording { samples: vec![0.0, 0.0, 0.25, 0.0, 0.0], sample_rate: 48000 };
         assert_eq!(prepare(&recording, 48000.0).unwrap(), vec![1.0]);
     }
 
@@ -635,11 +771,26 @@ pub mod tests {
         let dir = test_dir("round_trip");
         for amp in Amp::ALL {
             let path = dir.join(format!("{}.wav", amp.model().name));
-            write_ir_wav(&path, &whole_response(amp, 48000.0, EXPORT_S, EXPORT_LEVEL), 1, 24, false, 48000);
+            write_ir_wav(
+                &path,
+                &whole_response(amp, 48000.0, EXPORT_S, EXPORT_LEVEL),
+                1,
+                24,
+                false,
+                48000,
+            );
             for sample_rate in [44100.0, 48000.0, 96000.0] {
                 let taps = load(&path, sample_rate).unwrap();
-                let (difference, freq_hz) = off_the_built_in_db(&taps, amp, sample_rate, BAND_HZ[1], 80);
-                assert!(difference.abs() < 0.25, "{:?} at {} Hz: {:.2} dB at {:.0} Hz", amp, sample_rate, difference, freq_hz);
+                let (difference, freq_hz) =
+                    off_the_built_in_db(&taps, amp, sample_rate, BAND_HZ[1], 80);
+                assert!(
+                    difference.abs() < 0.25,
+                    "{:?} at {} Hz: {:.2} dB at {:.0} Hz",
+                    amp,
+                    sample_rate,
+                    difference,
+                    freq_hz
+                );
             }
         }
     }
@@ -691,7 +842,9 @@ pub mod tests {
     #[test]
     fn test_only_plain_file_names_are_accepted() {
         assert!(is_file_name("cab.wav") && is_file_name("my cab 2.wav"));
-        for name in ["", "..", "../cab.wav", "sub/cab.wav", "sub\\cab.wav", "C:\\cab.wav", "/cab.wav"] {
+        for name in
+            ["", "..", "../cab.wav", "sub/cab.wav", "sub\\cab.wav", "C:\\cab.wav", "/cab.wav"]
+        {
             assert!(!is_file_name(name) || cfg!(not(windows)) && name.contains('\\'), "{:?}", name);
         }
     }
@@ -722,9 +875,20 @@ pub mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         for amp in Amp::ALL {
             let path = dir.join(format!("{} cabinet.wav", amp.model().name));
-            write_ir_wav(&path, &whole_response(amp, 48000.0, EXPORT_S, EXPORT_LEVEL), 1, 24, false, 48000);
+            write_ir_wav(
+                &path,
+                &whole_response(amp, 48000.0, EXPORT_S, EXPORT_LEVEL),
+                1,
+                24,
+                false,
+                48000,
+            );
             let taps = load(&path, 48000.0).unwrap();
-            println!("{:<28}{:>6} taps when loaded at 48 kHz", path.file_name().unwrap().to_string_lossy(), taps.len());
+            println!(
+                "{:<28}{:>6} taps when loaded at 48 kHz",
+                path.file_name().unwrap().to_string_lossy(),
+                taps.len()
+            );
         }
         println!("Wrote cabinets to {}", dir.display());
     }
@@ -743,8 +907,14 @@ pub mod tests {
             print!("{:<8}", amp.model().name);
             for to_rate in [44100.0, 88200.0, 96000.0, 192000.0f32] {
                 let resampled = resample(&original, 48000.0, to_rate as f64);
-                let scaled: Vec<f32> = resampled.iter().map(|sample| sample * 48000.0 / to_rate).collect();
-                let (difference, freq_hz) = largest_difference_db((&scaled, to_rate), (&original, 48000.0), BAND_HZ[1], 600);
+                let scaled: Vec<f32> =
+                    resampled.iter().map(|sample| sample * 48000.0 / to_rate).collect();
+                let (difference, freq_hz) = largest_difference_db(
+                    (&scaled, to_rate),
+                    (&original, 48000.0),
+                    BAND_HZ[1],
+                    600,
+                );
                 print!("{:>8.4} at {:>4.0} Hz", difference, freq_hz);
             }
             println!();
@@ -758,9 +928,18 @@ pub mod tests {
                 let original = design_ir(&amp.model().cab, 48000.0).taps;
                 print!("{:<8}", amp.model().name);
                 for to_rate in [44100.0, 96000.0, 192000.0f32] {
-                    let native = trim_and_level(&design_ir(&amp.model().cab, to_rate).taps, to_rate).unwrap();
-                    let resampled = trim_and_level(&resample(&original, 48000.0, to_rate as f64), to_rate).unwrap();
-                    let (difference, freq_hz) = largest_difference_db((&resampled, to_rate), (&native, to_rate), top_hz, 600);
+                    let native =
+                        trim_and_level(&design_ir(&amp.model().cab, to_rate).taps, to_rate)
+                            .unwrap();
+                    let resampled =
+                        trim_and_level(&resample(&original, 48000.0, to_rate as f64), to_rate)
+                            .unwrap();
+                    let (difference, freq_hz) = largest_difference_db(
+                        (&resampled, to_rate),
+                        (&native, to_rate),
+                        top_hz,
+                        600,
+                    );
                     print!("{:>8.3} at {:>4.0} Hz", difference, freq_hz);
                 }
                 println!();
@@ -777,11 +956,19 @@ pub mod tests {
             println!("{:<8}{:>26}{:>26}{:>26}{:>26}", "", 44100, 48000, 96000, 192000);
             for amp in Amp::ALL {
                 let path = dir.join(format!("{}.wav", amp.model().name));
-                write_ir_wav(&path, &whole_response(amp, 48000.0, EXPORT_S, EXPORT_LEVEL), 1, 24, false, 48000);
+                write_ir_wav(
+                    &path,
+                    &whole_response(amp, 48000.0, EXPORT_S, EXPORT_LEVEL),
+                    1,
+                    24,
+                    false,
+                    48000,
+                );
                 print!("{:<8}", amp.model().name);
                 for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0f32] {
                     let taps = load(&path, sample_rate).unwrap();
-                    let (difference, freq_hz) = off_the_built_in_db(&taps, amp, sample_rate, top_hz, 600);
+                    let (difference, freq_hz) =
+                        off_the_built_in_db(&taps, amp, sample_rate, top_hz, 600);
                     print!("{:>6} taps{:>7.2} at {:>4.0} Hz", taps.len(), difference, freq_hz);
                 }
                 println!();

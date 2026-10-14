@@ -119,7 +119,8 @@ mod tests {
 
     #[test]
     fn test_retrigger_fades_previous_voice_without_a_jump() {
-        let mut pair = VoicePair::new(ConstantVoice { active: false }, ConstantVoice { active: false });
+        let mut pair =
+            VoicePair::new(ConstantVoice { active: false }, ConstantVoice { active: false });
         pair.set_sample_rate(44100.0);
 
         pair.next_voice().active = true;

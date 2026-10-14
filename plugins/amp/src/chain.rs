@@ -411,7 +411,8 @@ impl AmpChain {
         self.delay.set_sample_rate(sample_rate);
         self.reverb.set_sample_rate(sample_rate);
 
-        self.cab_irs = Amp::ALL.iter().map(|amp| design_ir(&amp.model().cab, sample_rate)).collect();
+        self.cab_irs =
+            Amp::ALL.iter().map(|amp| design_ir(&amp.model().cab, sample_rate)).collect();
         self.cabinet.set_sample_rate(sample_rate);
         // A cabinet of the player's own was made for the rate before: it has to be left
         // on the stage again for this one. Until then the amp plays through its own
@@ -522,16 +523,8 @@ impl AmpChain {
             return;
         }
         let unheard = !self.primed || self.wet == 0.0;
-        let Self {
-            cab_stage,
-            cabinet,
-            cab_irs,
-            user_cab,
-            cabinet_busy,
-            amp,
-            sample_rate,
-            ..
-        } = self;
+        let Self { cab_stage, cabinet, cab_irs, user_cab, cabinet_busy, amp, sample_rate, .. } =
+            self;
         cab_stage.take(|taps, spectra, made_for| {
             // One made for another sample rate is of no use: its successor is on its way.
             // And the amp's own cabinet is not swapped for itself
@@ -647,7 +640,12 @@ impl AmpChain {
     /// With one channel the output is the left one of those two. Their sum would keep the amp
     /// as it is as well, but the tail and the repeats come out 3 dB lower in it, and the
     /// repeats hollow: left and right repeat a few milliseconds apart, which is a comb
-    pub fn process(&mut self, settings: &AmpSettings, left: &mut [f32], mut right: Option<&mut [f32]>) {
+    pub fn process(
+        &mut self,
+        settings: &AmpSettings,
+        left: &mut [f32],
+        mut right: Option<&mut [f32]>,
+    ) {
         self.wanted_amp = settings.amp;
         let wet_target = if settings.bypass { 0.0 } else { 1.0 };
         if !self.primed {
@@ -668,7 +666,8 @@ impl AmpChain {
             if self.wanted_amp != self.amp {
                 // The piece ends where the amp has faded to silence, or where the cabinet is
                 // ready for the next amp, so the switch falls on that sample
-                let wait = if self.amp_fade > 0 { self.amp_fade as usize } else { self.cabinet_busy };
+                let wait =
+                    if self.amp_fade > 0 { self.amp_fade as usize } else { self.cabinet_busy };
                 if wait > 0 {
                     len = len.min(wait);
                 }
@@ -788,7 +787,10 @@ impl AmpChain {
         let steps = if snap { 0 } else { self.oversampled_chunk() };
         let tone = [self.dials.bass, self.dials.mid, self.dials.treble];
         if tone != self.tone_applied {
-            self.tone.set(&ToneCurve::new(&model.tone, tone[0], tone[1], tone[2], oversampled_rate), steps);
+            self.tone.set(
+                &ToneCurve::new(&model.tone, tone[0], tone[1], tone[2], oversampled_rate),
+                steps,
+            );
             self.tone_applied = tone;
         }
         if self.dials.presence != self.presence_applied {
@@ -929,10 +931,18 @@ impl AmpChain {
                 Pedal::Comp => self.comp.process_stereo(&self.comp_settings, wide_left, wide_right),
                 Pedal::Delay => self.delay.process(&self.delay_settings, wide_left, wide_right),
                 Pedal::Reverb => self.reverb.process(&self.reverb_settings, wide_left, wide_right),
-                Pedal::Chorus => self.chorus.process_stereo(&self.chorus_settings, wide_left, wide_right),
-                Pedal::Phaser => self.phaser.process_stereo(&self.phaser_settings, wide_left, wide_right),
-                Pedal::Flanger => self.flanger.process_stereo(&self.flanger_settings, wide_left, wide_right),
-                Pedal::Tremolo => self.tremolo.process_stereo(&self.tremolo_settings, wide_left, wide_right),
+                Pedal::Chorus => {
+                    self.chorus.process_stereo(&self.chorus_settings, wide_left, wide_right)
+                }
+                Pedal::Phaser => {
+                    self.phaser.process_stereo(&self.phaser_settings, wide_left, wide_right)
+                }
+                Pedal::Flanger => {
+                    self.flanger.process_stereo(&self.flanger_settings, wide_left, wide_right)
+                }
+                Pedal::Tremolo => {
+                    self.tremolo.process_stereo(&self.tremolo_settings, wide_left, wide_right)
+                }
                 // Never behind the cabinet
                 Pedal::Drive => {}
             }
@@ -959,7 +969,8 @@ impl AmpChain {
         for index in 0..len {
             let level = self.out_level.next();
             if self.wet != wet_target {
-                self.wet = (self.wet + self.wet_step.copysign(wet_target - self.wet)).clamp(0.0, 1.0);
+                self.wet =
+                    (self.wet + self.wet_step.copysign(wet_target - self.wet)).clamp(0.0, 1.0);
             }
 
             let driven = wide_left[index] * level;
@@ -1034,18 +1045,11 @@ mod tests {
     }
 
     fn with_gain(gain: f32) -> AmpSettings {
-        AmpSettings {
-            gain,
-            ..AmpSettings::default()
-        }
+        AmpSettings { gain, ..AmpSettings::default() }
     }
 
     fn with_amp(amp: Amp, gain: f32) -> AmpSettings {
-        AmpSettings {
-            amp,
-            gain,
-            ..AmpSettings::default()
-        }
+        AmpSettings { amp, gain, ..AmpSettings::default() }
     }
 
     fn with_all_dials(amp: Amp, value: f32, out_level: f32) -> AmpSettings {
@@ -1063,7 +1067,12 @@ mod tests {
     }
 
     /// Mono, in blocks of `block` samples
-    fn run_blocks(chain: &mut AmpChain, settings: &AmpSettings, input: &[f32], block: usize) -> Vec<f32> {
+    fn run_blocks(
+        chain: &mut AmpChain,
+        settings: &AmpSettings,
+        input: &[f32],
+        block: usize,
+    ) -> Vec<f32> {
         let mut output = input.to_vec();
         for chunk in output.chunks_mut(block) {
             chain.process(settings, chunk, None);
@@ -1098,7 +1107,8 @@ mod tests {
         quiet.resize(at + 2048, 0.0);
         let mut struck = quiet.clone();
         struck[at] += 0.05;
-        let (quiet, struck) = (run(settings, &quiet, sample_rate), run(settings, &struck, sample_rate));
+        let (quiet, struck) =
+            (run(settings, &quiet, sample_rate), run(settings, &struck, sample_rate));
         let added: Vec<f32> = struck[at..].iter().zip(&quiet[at..]).map(|(a, b)| a - b).collect();
         let top = peak(&added);
         added.iter().position(|s| s.abs() >= 0.5 * top).unwrap()
@@ -1108,11 +1118,7 @@ mod tests {
     fn everything_on(amp: Amp, gain: f32) -> AmpSettings {
         AmpSettings {
             gate_on: true,
-            comp: CompSettings {
-                on: true,
-                sustain: 0.6,
-                level: 0.55,
-            },
+            comp: CompSettings { on: true, sustain: 0.6, level: 0.55 },
             drive_on: true,
             cab_mic: 0.7,
             cab_res: 0.7,
@@ -1131,57 +1137,39 @@ mod tests {
     }
 
     fn delay_on(time_ms: f32, feedback: f32, mix: f32) -> DelaySettings {
-        DelaySettings {
-            on: true,
-            time_ms,
-            feedback,
-            mix,
-        }
+        DelaySettings { on: true, time_ms, feedback, mix }
     }
 
     fn reverb_on(decay_s: f32, mix: f32) -> ReverbSettings {
-        ReverbSettings {
-            on: true,
-            decay_s,
-            mix,
-        }
+        ReverbSettings { on: true, decay_s, mix }
     }
 
     /// Delay and reverb on, both short: heard within a fraction of a second and soon over
     fn with_effects(base: AmpSettings) -> AmpSettings {
-        AmpSettings {
-            delay: delay_on(60.0, 0.4, 0.5),
-            reverb: reverb_on(0.4, 0.5),
-            ..base
-        }
+        AmpSettings { delay: delay_on(60.0, 0.4, 0.5), reverb: reverb_on(0.4, 0.5), ..base }
     }
 
     /// Both effects as loud and as long as they go
     fn with_effects_at_most(base: AmpSettings) -> AmpSettings {
-        AmpSettings {
-            delay: delay_on(350.0, 0.9, 1.0),
-            reverb: reverb_on(6.0, 1.0),
-            ..base
-        }
+        AmpSettings { delay: delay_on(350.0, 0.9, 1.0), reverb: reverb_on(6.0, 1.0), ..base }
     }
 
     /// Both effects switched on and otherwise as the plugin starts
     fn with_default_effects(base: AmpSettings) -> AmpSettings {
         AmpSettings {
-            delay: DelaySettings {
-                on: true,
-                ..DelaySettings::default()
-            },
-            reverb: ReverbSettings {
-                on: true,
-                ..ReverbSettings::default()
-            },
+            delay: DelaySettings { on: true, ..DelaySettings::default() },
+            reverb: ReverbSettings { on: true, ..ReverbSettings::default() },
             ..base
         }
     }
 
     /// The stereo layout with the same input on both channels, in blocks of `block` samples
-    fn run_stereo_blocks(chain: &mut AmpChain, settings: &AmpSettings, input: &[f32], block: usize) -> (Vec<f32>, Vec<f32>) {
+    fn run_stereo_blocks(
+        chain: &mut AmpChain,
+        settings: &AmpSettings,
+        input: &[f32],
+        block: usize,
+    ) -> (Vec<f32>, Vec<f32>) {
         let (mut left, mut right) = (input.to_vec(), input.to_vec());
         for (l, r) in left.chunks_mut(block).zip(right.chunks_mut(block)) {
             chain.process(settings, l, Some(r));
@@ -1204,7 +1192,8 @@ mod tests {
     /// Address and capacity of every buffer the chain points to
     fn buffer_layout(chain: &AmpChain) -> Vec<(usize, usize)> {
         let mut layout = vec![(chain.cab_irs.as_ptr() as usize, chain.cab_irs.capacity())];
-        layout.extend(chain.cab_irs.iter().map(|ir| (ir.taps.as_ptr() as usize, ir.taps.capacity())));
+        layout
+            .extend(chain.cab_irs.iter().map(|ir| (ir.taps.as_ptr() as usize, ir.taps.capacity())));
         layout.extend(chain.cabinet.buffers());
         layout.extend(chain.cab_stage.buffer());
         layout.extend(chain.delay.buffers());
@@ -1230,7 +1219,14 @@ mod tests {
     }
 
     /// The six dials that are filters, with a tone each one moves
-    const SWEPT_DIALS: [(&str, f32); 6] = [("bass", 110.0), ("mid", 550.0), ("treble", 5000.0), ("presence", 6000.0), ("cab_mic", 5000.0), ("cab_res", 80.0)];
+    const SWEPT_DIALS: [(&str, f32); 6] = [
+        ("bass", 110.0),
+        ("mid", 550.0),
+        ("treble", 5000.0),
+        ("presence", 6000.0),
+        ("cab_mic", 5000.0),
+        ("cab_res", 80.0),
+    ];
 
     /// Zipper noise of a dial swept from 0 to 10 in `sweep_s` seconds while a sine plays
     /// through Klar at Gain 0: the dials are read once per `CHUNK` samples, and what that
@@ -1262,7 +1258,8 @@ mod tests {
     }
 
     const STAGE_NAMES: [&str; 11] = [
-        "gate", "up", "drive", "preamp", "tone", "power", "down", "cabinet", "delay", "reverb", "output",
+        "gate", "up", "drive", "preamp", "tone", "power", "down", "cabinet", "delay", "reverb",
+        "output",
     ];
 
     /// Time each stage of the chain takes by itself over `input`, in the order of
@@ -1296,7 +1293,9 @@ mod tests {
             }
         });
         timed(&mut || high.chunks_mut(CHUNK * factor).for_each(|chunk| chain.drive.process(chunk)));
-        timed(&mut || high.chunks_mut(CHUNK * factor).for_each(|chunk| chain.preamp.process(chunk)));
+        timed(&mut || {
+            high.chunks_mut(CHUNK * factor).for_each(|chunk| chain.preamp.process(chunk))
+        });
         timed(&mut || high.chunks_mut(CHUNK * factor).for_each(|chunk| chain.tone.process(chunk)));
         timed(&mut || high.chunks_mut(CHUNK * factor).for_each(|chunk| chain.power.process(chunk)));
         timed(&mut || {
@@ -1355,7 +1354,16 @@ mod tests {
         preamp.reset();
         preamp.set_gain(model, settings.gain, 0);
         let mut tone = ToneStack::new();
-        tone.set(&ToneCurve::new(&model.tone, settings.bass, settings.mid, settings.treble, oversampled_rate), 0);
+        tone.set(
+            &ToneCurve::new(
+                &model.tone,
+                settings.bass,
+                settings.mid,
+                settings.treble,
+                oversampled_rate,
+            ),
+            0,
+        );
         let mut power = PowerAmp::new();
         power.configure(&model.power, oversampled_rate);
         power.reset();
@@ -1401,13 +1409,25 @@ mod tests {
         for sample_rate in [44100.0, 48000.0, 88200.0, 96000.0, 192000.0] {
             let len = (sample_rate * 0.05) as usize;
             let mut noise = Noise::new(3);
-            let input: Vec<f32> = sine(97.0, 1.0, sample_rate, len).iter().map(|s| s + noise.next()).collect();
+            let input: Vec<f32> =
+                sine(97.0, 1.0, sample_rate, len).iter().map(|s| s + noise.next()).collect();
 
             for amp in Amp::ALL {
                 for (value, out_level) in [(0.0, 0.0), (0.0, 2.0), (1.0, 2.0)] {
                     let output = run(&with_all_dials(amp, value, out_level), &input, sample_rate);
-                    assert!(output.iter().all(|s| s.is_finite()), "{:?} not finite at {} Hz", amp, sample_rate);
-                    assert!(peak(&output) <= 1.0, "{:?} peak {} at {} Hz", amp, peak(&output), sample_rate);
+                    assert!(
+                        output.iter().all(|s| s.is_finite()),
+                        "{:?} not finite at {} Hz",
+                        amp,
+                        sample_rate
+                    );
+                    assert!(
+                        peak(&output) <= 1.0,
+                        "{:?} peak {} at {} Hz",
+                        amp,
+                        peak(&output),
+                        sample_rate
+                    );
                 }
                 let loud = run(&with_all_dials(amp, 1.0, 2.0), &input, sample_rate);
                 assert!(rms(&loud) > 0.05, "{:?} gives no output at {} Hz", amp, sample_rate);
@@ -1429,8 +1449,19 @@ mod tests {
                         ..with_all_dials(amp, value, 2.0)
                     };
                     let output = run(&settings, &input, sample_rate);
-                    assert!(output.iter().all(|s| s.is_finite()), "{:?} not finite at {} Hz", amp, sample_rate);
-                    assert!(peak(&output) <= 1.0, "{:?} peak {} at {} Hz", amp, peak(&output), sample_rate);
+                    assert!(
+                        output.iter().all(|s| s.is_finite()),
+                        "{:?} not finite at {} Hz",
+                        amp,
+                        sample_rate
+                    );
+                    assert!(
+                        peak(&output) <= 1.0,
+                        "{:?} peak {} at {} Hz",
+                        amp,
+                        peak(&output),
+                        sample_rate
+                    );
                 }
             }
         }
@@ -1442,39 +1473,38 @@ mod tests {
         // softly and one played hard come out closer together
         let recording = clean_di(SAMPLE_RATE);
         let apart = |settings: &AmpSettings| {
-            let heard = |level_db: f32| loudness_lufs(&[&run(settings, &at_rms_db(&recording, level_db), SAMPLE_RATE)], SAMPLE_RATE);
+            let heard = |level_db: f32| {
+                loudness_lufs(
+                    &[&run(settings, &at_rms_db(&recording, level_db), SAMPLE_RATE)],
+                    SAMPLE_RATE,
+                )
+            };
             heard(REFERENCE_DI_DB) - heard(REFERENCE_DI_DB - 12.0)
         };
         let plain = with_amp(Amp::Klar, 0.5);
-        let squeezed = AmpSettings {
-            comp: CompSettings {
-                on: true,
-                sustain: 0.7,
-                level: 0.5,
-            },
-            ..plain
-        };
+        let squeezed =
+            AmpSettings { comp: CompSettings { on: true, sustain: 0.7, level: 0.5 }, ..plain };
         let (without, with) = (apart(&plain), apart(&squeezed));
-        assert!(without > 9.0 && with < without - 3.0, "12 dB of guitar: {without:.1} LU without, {with:.1} LU with the pedal");
+        assert!(
+            without > 9.0 && with < without - 3.0,
+            "12 dB of guitar: {without:.1} LU without, {with:.1} LU with the pedal"
+        );
 
         for amp in Amp::ALL {
             for sample_rate in [44100.0, 96000.0] {
                 let plain = with_amp(amp, 0.5);
                 let pedal = AmpSettings { comp: squeezed.comp, ..plain };
-                assert_eq!(latency_samples_with(&pedal, sample_rate), latency_samples_with(&plain, sample_rate));
+                assert_eq!(
+                    latency_samples_with(&pedal, sample_rate),
+                    latency_samples_with(&plain, sample_rate)
+                );
             }
         }
 
         // Switched off it leaves no trace, whatever its dials say
         let input = power_chords(SAMPLE_RATE, 0.5);
-        let off = AmpSettings {
-            comp: CompSettings {
-                on: false,
-                sustain: 1.0,
-                level: 1.0,
-            },
-            ..plain
-        };
+        let off =
+            AmpSettings { comp: CompSettings { on: false, sustain: 1.0, level: 1.0 }, ..plain };
         assert_eq!(run(&off, &input, SAMPLE_RATE), run(&plain, &input, SAMPLE_RATE));
     }
 
@@ -1485,16 +1515,18 @@ mod tests {
             for amp in [Amp::Klar, Amp::Torden] {
                 let off = with_amp(amp, 0.5);
                 let on = AmpSettings {
-                    comp: CompSettings {
-                        on: true,
-                        sustain: 0.7,
-                        level: 0.5,
-                    },
+                    comp: CompSettings { on: true, sustain: 0.7, level: 0.5 },
                     ..off
                 };
                 for (before, after) in [(&off, &on), (&on, &off)] {
                     let ratio = step_ratio(&run_change(before, after, &input, at), at);
-                    assert!(ratio < 1.3, "{:?}, pedal on {}: step {} times its own", amp, after.comp.on, ratio);
+                    assert!(
+                        ratio < 1.3,
+                        "{:?}, pedal on {}: step {} times its own",
+                        amp,
+                        after.comp.on,
+                        ratio
+                    );
                 }
             }
         }
@@ -1517,7 +1549,13 @@ mod tests {
             tremolo: tremolo.tremolo,
             ..base
         };
-        vec![("chorus", chorus), ("phaser", phaser), ("flanger", flanger), ("tremolo", tremolo), ("all four", all)]
+        vec![
+            ("chorus", chorus),
+            ("phaser", phaser),
+            ("flanger", flanger),
+            ("tremolo", tremolo),
+            ("all four", all),
+        ]
     }
 
     #[test]
@@ -1528,9 +1566,13 @@ mod tests {
             let (dry_left, _) = run_stereo(&plain, &input, SAMPLE_RATE);
             for (name, settings) in with_mods(plain) {
                 let (left, right) = run_stereo(&settings, &input, SAMPLE_RATE);
-                let changed = left.iter().zip(&dry_left).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+                let changed =
+                    left.iter().zip(&dry_left).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
                 assert!(changed > 0.01, "{amp:?} with {name}: nothing is heard of it");
-                assert!(left.iter().chain(&right).all(|sample| sample.is_finite() && sample.abs() <= 1.0));
+                assert!(left
+                    .iter()
+                    .chain(&right)
+                    .all(|sample| sample.is_finite() && sample.abs() <= 1.0));
 
                 // The phaser stands in front of the amp, where it has one channel; the others
                 // behind the cabinet, where all but the tremolo make the two sides differ
@@ -1539,11 +1581,17 @@ mod tests {
 
                 // No later; the phaser turns the phase, which can bring the first half of the
                 // peak a sample forward
-                assert!(latency_samples_with(&settings, SAMPLE_RATE) <= latency_samples_with(&plain, SAMPLE_RATE), "{name}");
+                assert!(
+                    latency_samples_with(&settings, SAMPLE_RATE)
+                        <= latency_samples_with(&plain, SAMPLE_RATE),
+                    "{name}"
+                );
 
-                let reference = run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, input.len());
+                let reference =
+                    run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, input.len());
                 for block in [1, 7, 33, 64, 480] {
-                    let output = run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, block);
+                    let output =
+                        run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, block);
                     assert!(output == reference, "{amp:?} with {name} in blocks of {block}");
                 }
             }
@@ -1564,7 +1612,10 @@ mod tests {
             // Once the guitar stops and the pedal has nothing left in it, the chain is idle
             let mut chain = new_chain(SAMPLE_RATE);
             run_stereo_blocks(&mut chain, &on, &input[..24_000], BLOCK);
-            assert!(name == "phaser" || name == "tremolo" || !chain.is_idle(), "{name} has no tail");
+            assert!(
+                name == "phaser" || name == "tremolo" || !chain.is_idle(),
+                "{name} has no tail"
+            );
             run_stereo_blocks(&mut chain, &on, &vec![0.0; 48_000], BLOCK);
             assert!(chain.is_idle(), "{name} never falls idle");
         }
@@ -1609,11 +1660,17 @@ mod tests {
         let reference = run_stereo(&default, &input, SAMPLE_RATE);
         for (name, order) in other_orders() {
             let settings = AmpSettings { order, ..default };
-            let whole = run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, input.len());
+            let whole =
+                run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, input.len());
             assert!(whole != reference, "{name} sounds like the default order");
-            assert!(whole.0.iter().chain(&whole.1).all(|sample| sample.is_finite() && sample.abs() <= 1.0));
+            assert!(whole
+                .0
+                .iter()
+                .chain(&whole.1)
+                .all(|sample| sample.is_finite() && sample.abs() <= 1.0));
             for block in [1, 7, 33, 64, 480] {
-                let output = run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, block);
+                let output =
+                    run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, block);
                 assert!(output == whole, "{name} in blocks of {block}");
             }
             // A pedal in front of the amp runs at the amp's rate, which is another multiple
@@ -1621,9 +1678,15 @@ mod tests {
             for sample_rate in [44100.0, 96000.0] {
                 let chords = power_chords(sample_rate, 0.3);
                 let (left, right) = run_stereo(&settings, &chords, sample_rate);
-                assert!(left.iter().chain(&right).all(|sample| sample.is_finite() && sample.abs() <= 1.0));
+                assert!(left
+                    .iter()
+                    .chain(&right)
+                    .all(|sample| sample.is_finite() && sample.abs() <= 1.0));
                 assert_eq!(
-                    latency_samples_with(&AmpSettings { order, ..with_amp(Amp::Brol, 0.5) }, sample_rate),
+                    latency_samples_with(
+                        &AmpSettings { order, ..with_amp(Amp::Brol, 0.5) },
+                        sample_rate
+                    ),
                     latency_samples_with(&with_amp(Amp::Brol, 0.5), sample_rate),
                     "{name} at {sample_rate} Hz"
                 );
@@ -1656,7 +1719,10 @@ mod tests {
                 }
                 // The output is silent where the pedals change places
                 let silent = at + (ORDER_FADE_MS * 0.001 * SAMPLE_RATE) as usize + CHUNK;
-                assert!(peak(&left[silent - 40..silent - 30]) < 0.3 * peak(&left[at - 4800..at]), "{name}");
+                assert!(
+                    peak(&left[silent - 40..silent - 30]) < 0.3 * peak(&left[at - 4800..at]),
+                    "{name}"
+                );
 
                 // And ends up about as loud as a chain that stood in the new order all along.
                 // Not the same: a pedal that changed sides starts its sweep again
@@ -1680,13 +1746,21 @@ mod tests {
         let bypassed = AmpSettings { bypass: true, order: ChainOrder::default(), ..moved };
         let mut chain = new_chain(SAMPLE_RATE);
         run_stereo_blocks(&mut chain, &bypassed, &input, BLOCK);
-        run_stereo_blocks(&mut chain, &AmpSettings { bypass: true, ..moved }, &input[..BLOCK], BLOCK);
+        run_stereo_blocks(
+            &mut chain,
+            &AmpSettings { bypass: true, ..moved },
+            &input[..BLOCK],
+            BLOCK,
+        );
         assert_eq!(chain.order, order);
         assert_eq!(chain.order_fade, chain.order_fade_len);
 
         // The order a project from before has: nothing in the output says it can be changed
         let plain = with_effects(everything_on(Amp::Torden, 0.6));
-        let named = AmpSettings { order: ChainOrder::from_ids(["drive", "amp", "delay", "reverb"]), ..plain };
+        let named = AmpSettings {
+            order: ChainOrder::from_ids(["drive", "amp", "delay", "reverb"]),
+            ..plain
+        };
         assert_eq!(named.order, ChainOrder::default());
         assert!(run_stereo(&named, &input, SAMPLE_RATE) == run_stereo(&plain, &input, SAMPLE_RATE));
     }
@@ -1701,17 +1775,25 @@ mod tests {
                 gate_release_ms: 20.0,
                 ..everything_on(amp, 0.7)
             };
-            let no_cabinet = AmpSettings {
-                cab_on: false,
-                ..pedals
-            };
+            let no_cabinet = AmpSettings { cab_on: false, ..pedals };
             for settings in [with_amp(amp, 0.7), pedals, no_cabinet] {
-                let reference = run_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, input.len());
+                let reference =
+                    run_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, input.len());
 
                 for block in [1, 7, 32, 64, 1000] {
                     let output = run_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, block);
-                    let difference = reference.iter().zip(&output).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
-                    assert!(difference < 1e-5, "{:?} in blocks of {}: off by {}", amp, block, difference);
+                    let difference = reference
+                        .iter()
+                        .zip(&output)
+                        .map(|(a, b)| (a - b).abs())
+                        .fold(0.0, f32::max);
+                    assert!(
+                        difference < 1e-5,
+                        "{:?} in blocks of {}: off by {}",
+                        amp,
+                        block,
+                        difference
+                    );
                 }
             }
         }
@@ -1720,7 +1802,9 @@ mod tests {
     #[test]
     fn test_gain_dial_adds_distortion() {
         let input = sine(220.0, 0.178, SAMPLE_RATE, 19_200);
-        let distortion = |gain: f32| thd_db(&run(&with_gain(gain), &input, SAMPLE_RATE)[9600..], SAMPLE_RATE, 220.0);
+        let distortion = |gain: f32| {
+            thd_db(&run(&with_gain(gain), &input, SAMPLE_RATE)[9600..], SAMPLE_RATE, 220.0)
+        };
         let (clean, crunch, full) = (distortion(0.0), distortion(0.5), distortion(1.0));
 
         assert!(clean < -26.0, "Gain 0 is not clean: {:.1} dB", clean);
@@ -1739,7 +1823,12 @@ mod tests {
             let loudest = levels.iter().cloned().fold(f32::MIN, f32::max);
             let quietest = levels.iter().cloned().fold(f32::MAX, f32::min);
             assert!(loudest - quietest < 6.0, "{:?} levels: {:?}", amp, levels);
-            assert!((-19.0..=-13.0).contains(&levels[2]), "{:?} at the defaults: {:.1} dBFS", amp, levels[2]);
+            assert!(
+                (-19.0..=-13.0).contains(&levels[2]),
+                "{:?} at the defaults: {:.1} dBFS",
+                amp,
+                levels[2]
+            );
         }
     }
 
@@ -1766,7 +1855,9 @@ mod tests {
             let input = at_rms_db(recording, level_db);
             let heard: Vec<f32> = Amp::ALL
                 .iter()
-                .map(|&amp| loudness_lufs(&[&run(&with_amp(amp, 0.5), &input, SAMPLE_RATE)], SAMPLE_RATE))
+                .map(|&amp| {
+                    loudness_lufs(&[&run(&with_amp(amp, 0.5), &input, SAMPLE_RATE)], SAMPLE_RATE)
+                })
                 .collect();
             let loudest = heard.iter().cloned().fold(f32::MIN, f32::max);
             let quietest = heard.iter().cloned().fold(f32::MAX, f32::min);
@@ -1788,10 +1879,19 @@ mod tests {
         // Klar anywhere on its Gain dial and Brøl at the bottom of its own, against Brøl
         // and Torden at the centre
         let recording = at_rms_db(&clean_di(SAMPLE_RATE), REFERENCE_DI_DB);
-        let heard = |amp: Amp, gain: f32| loudness_lufs(&[&run(&with_amp(amp, gain), &recording, SAMPLE_RATE)], SAMPLE_RATE);
+        let heard = |amp: Amp, gain: f32| {
+            loudness_lufs(&[&run(&with_amp(amp, gain), &recording, SAMPLE_RATE)], SAMPLE_RATE)
+        };
         let (crunch, high_gain) = (heard(Amp::Brol, 0.5), heard(Amp::Torden, 0.5));
         let (low, high) = (crunch.min(high_gain), crunch.max(high_gain));
-        for (amp, gain) in [(Amp::Klar, 0.0), (Amp::Klar, 0.25), (Amp::Klar, 0.5), (Amp::Klar, 0.75), (Amp::Brol, 0.0), (Amp::Brol, 0.25)] {
+        for (amp, gain) in [
+            (Amp::Klar, 0.0),
+            (Amp::Klar, 0.25),
+            (Amp::Klar, 0.5),
+            (Amp::Klar, 0.75),
+            (Amp::Brol, 0.0),
+            (Amp::Brol, 0.25),
+        ] {
             let clean = heard(amp, gain);
             assert!(
                 clean > low - 2.0 && clean < high + 2.0,
@@ -1823,7 +1923,13 @@ mod tests {
             let tone = sine(220.0, level, SAMPLE_RATE, 19_200);
             Amp::ALL
                 .iter()
-                .map(|&amp| thd_db(&run(&with_amp(amp, gain), &tone, SAMPLE_RATE)[9600..], SAMPLE_RATE, 220.0))
+                .map(|&amp| {
+                    thd_db(
+                        &run(&with_amp(amp, gain), &tone, SAMPLE_RATE)[9600..],
+                        SAMPLE_RATE,
+                        220.0,
+                    )
+                })
                 .collect()
         };
         // A held note with the gain low, and a sine at -36 dBFS RMS with the gain at
@@ -1837,24 +1943,42 @@ mod tests {
         // Klar is the cleanest wherever the dial is
         for gain in [0.5, 1.0] {
             let amps = distortion(gain, HELD_NOTE);
-            assert!(amps[0] < amps[1] - 6.0 && amps[0] < amps[2] - 6.0, "Gain {}: {:?}", gain * 10.0, amps);
+            assert!(
+                amps[0] < amps[1] - 6.0 && amps[0] < amps[2] - 6.0,
+                "Gain {}: {:?}",
+                gain * 10.0,
+                amps
+            );
         }
 
         let spectra: Vec<Vec<f32>> = Amp::ALL
             .iter()
-            .map(|&amp| band_levels_db(&run(&with_amp(amp, 0.5), &chords, SAMPLE_RATE), SAMPLE_RATE))
+            .map(|&amp| {
+                band_levels_db(&run(&with_amp(amp, 0.5), &chords, SAMPLE_RATE), SAMPLE_RATE)
+            })
             .collect();
         for (first, second) in [(0, 1), (1, 2), (0, 2)] {
-            let apart = spectra[first].iter().zip(&spectra[second]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
-            assert!(apart > 2.0, "{:?} and {:?} are {:.1} dB apart", Amp::ALL[first], Amp::ALL[second], apart);
+            let apart = spectra[first]
+                .iter()
+                .zip(&spectra[second])
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f32::max);
+            assert!(
+                apart > 2.0,
+                "{:?} and {:?} are {:.1} dB apart",
+                Amp::ALL[first],
+                Amp::ALL[second],
+                apart
+            );
         }
     }
 
     #[test]
     fn test_klar_stays_clean_until_gain_is_high() {
         let tone = sine(220.0, HELD_NOTE, SAMPLE_RATE, 19_200);
-        let distortion =
-            |gain: f32| thd_db(&run(&with_amp(Amp::Klar, gain), &tone, SAMPLE_RATE)[9600..], SAMPLE_RATE, 220.0);
+        let distortion = |gain: f32| {
+            thd_db(&run(&with_amp(Amp::Klar, gain), &tone, SAMPLE_RATE)[9600..], SAMPLE_RATE, 220.0)
+        };
         for gain in [0.0, 0.25, 0.5] {
             assert!(distortion(gain) < -40.0, "Gain {}: {:.1} dB", gain * 10.0, distortion(gain));
         }
@@ -1866,11 +1990,18 @@ mod tests {
     #[test]
     fn test_soft_playing_cleans_up_klar_and_brol() {
         // -36 and -12 dBFS RMS
-        let (soft, hard) = (sine(220.0, 0.0224, SAMPLE_RATE, 19_200), sine(220.0, 0.355, SAMPLE_RATE, 19_200));
+        let (soft, hard) =
+            (sine(220.0, 0.0224, SAMPLE_RATE, 19_200), sine(220.0, 0.355, SAMPLE_RATE, 19_200));
         for amp in [Amp::Klar, Amp::Brol] {
-            let distortion =
-                |input: &[f32]| thd_db(&run(&with_amp(amp, 0.5), input, SAMPLE_RATE)[9600..], SAMPLE_RATE, 220.0);
-            assert!(distortion(&soft) < -30.0, "{:?} played softly: {:.1} dB", amp, distortion(&soft));
+            let distortion = |input: &[f32]| {
+                thd_db(&run(&with_amp(amp, 0.5), input, SAMPLE_RATE)[9600..], SAMPLE_RATE, 220.0)
+            };
+            assert!(
+                distortion(&soft) < -30.0,
+                "{:?} played softly: {:.1} dB",
+                amp,
+                distortion(&soft)
+            );
             assert!(distortion(&soft) < distortion(&hard) - 12.0);
         }
 
@@ -1878,7 +2009,9 @@ mod tests {
         let squeezed: Vec<f32> = Amp::ALL
             .iter()
             .map(|&amp| {
-                let level = |input: &[f32]| to_db(rms(&run(&with_amp(amp, 0.5), input, SAMPLE_RATE)[9600..]));
+                let level = |input: &[f32]| {
+                    to_db(rms(&run(&with_amp(amp, 0.5), input, SAMPLE_RATE)[9600..]))
+                };
                 24.0 - (level(&hard) - level(&soft))
             })
             .collect();
@@ -1886,10 +2019,15 @@ mod tests {
         // it follows what it is given
         assert!(squeezed[0] < 8.0, "Klar squeezes by {:.1} dB", squeezed[0]);
         let held = sine(220.0, HELD_NOTE, SAMPLE_RATE, 19_200);
-        let level = |input: &[f32]| to_db(rms(&run(&with_amp(Amp::Klar, 0.5), input, SAMPLE_RATE)[9600..]));
+        let level =
+            |input: &[f32]| to_db(rms(&run(&with_amp(Amp::Klar, 0.5), input, SAMPLE_RATE)[9600..]));
         let followed = level(&held) - level(&soft);
         assert!((followed - 12.0).abs() < 0.5, "Klar follows 12 dB more with {followed:.1} dB");
-        assert!(squeezed[1] > squeezed[0] + 3.0 && squeezed[2] > squeezed[1] + 6.0, "Squeezed: {:?}", squeezed);
+        assert!(
+            squeezed[1] > squeezed[0] + 3.0 && squeezed[2] > squeezed[1] + 6.0,
+            "Squeezed: {:?}",
+            squeezed
+        );
     }
 
     /// Level below 100 Hz against the level from 400 to 1600 Hz, in dB
@@ -1908,9 +2046,21 @@ mod tests {
         let input = palm_mutes(SAMPLE_RATE, 2.4);
         for gain in [0.5, 1.0] {
             let brol = lows_against_mids_db(&run(&with_amp(Amp::Brol, gain), &input, SAMPLE_RATE));
-            let torden = lows_against_mids_db(&run(&with_amp(Amp::Torden, gain), &input, SAMPLE_RATE));
-            assert!(torden < brol - 1.0, "Gain {}: Torden {:.1} dB, Brøl {:.1} dB", gain * 10.0, torden, brol);
-            assert!(torden < -15.0, "Gain {}: lows at {:.1} dB against the mids", gain * 10.0, torden);
+            let torden =
+                lows_against_mids_db(&run(&with_amp(Amp::Torden, gain), &input, SAMPLE_RATE));
+            assert!(
+                torden < brol - 1.0,
+                "Gain {}: Torden {:.1} dB, Brøl {:.1} dB",
+                gain * 10.0,
+                torden,
+                brol
+            );
+            assert!(
+                torden < -15.0,
+                "Gain {}: lows at {:.1} dB against the mids",
+                gain * 10.0,
+                torden
+            );
         }
     }
 
@@ -1930,16 +2080,39 @@ mod tests {
         assert!(mid(1.0) > mid(0.0) + 6.0, "Mid: {:.1} to {:.1} dB", mid(0.0), mid(1.0));
 
         let treble = |value| level(&AmpSettings { treble: value, ..base }, 4000.0);
-        assert!(treble(1.0) > treble(0.0) + 6.0, "Treble: {:.1} to {:.1} dB", treble(0.0), treble(1.0));
+        assert!(
+            treble(1.0) > treble(0.0) + 6.0,
+            "Treble: {:.1} to {:.1} dB",
+            treble(0.0),
+            treble(1.0)
+        );
 
         let presence = |value| level(&AmpSettings { presence: value, ..base }, 5000.0);
-        assert!(presence(1.0) > presence(0.0) + 3.0, "Presence: {:.1} to {:.1} dB", presence(0.0), presence(1.0));
+        assert!(
+            presence(1.0) > presence(0.0) + 3.0,
+            "Presence: {:.1} to {:.1} dB",
+            presence(0.0),
+            presence(1.0)
+        );
 
         // And each leaves the far end of the spectrum mostly alone
-        let far = |low: AmpSettings, high: AmpSettings, freq_hz| (level(&high, freq_hz) - level(&low, freq_hz)).abs();
-        assert!(far(AmpSettings { bass: 0.0, ..base }, AmpSettings { bass: 1.0, ..base }, 4000.0) < 3.0);
-        assert!(far(AmpSettings { treble: 0.0, ..base }, AmpSettings { treble: 1.0, ..base }, 100.0) < 3.0);
-        assert!(far(AmpSettings { presence: 0.0, ..base }, AmpSettings { presence: 1.0, ..base }, 100.0) < 1.0);
+        let far = |low: AmpSettings, high: AmpSettings, freq_hz| {
+            (level(&high, freq_hz) - level(&low, freq_hz)).abs()
+        };
+        assert!(
+            far(AmpSettings { bass: 0.0, ..base }, AmpSettings { bass: 1.0, ..base }, 4000.0) < 3.0
+        );
+        assert!(
+            far(AmpSettings { treble: 0.0, ..base }, AmpSettings { treble: 1.0, ..base }, 100.0)
+                < 3.0
+        );
+        assert!(
+            far(
+                AmpSettings { presence: 0.0, ..base },
+                AmpSettings { presence: 1.0, ..base },
+                100.0
+            ) < 1.0
+        );
     }
 
     #[test]
@@ -1972,7 +2145,13 @@ mod tests {
         };
         let (low, high) = (measure(SAMPLE_RATE), measure(96000.0));
         for (index, (a, b)) in low.iter().zip(&high).enumerate() {
-            assert!((a - b).abs() < 0.25, "Level {}: {:.2} dB at 48 kHz, {:.2} dB at 96 kHz", index, a, b);
+            assert!(
+                (a - b).abs() < 0.25,
+                "Level {}: {:.2} dB at 48 kHz, {:.2} dB at 96 kHz",
+                index,
+                a,
+                b
+            );
         }
 
         let aliasing = aliasing_db_at(&settings, ALIAS_TONES_HZ[1], 96000.0);
@@ -1988,12 +2167,16 @@ mod tests {
 
                 // The pedals add next to nothing, the gate nothing at all
                 for tone in [0.0, 0.5, 1.0] {
-                    let settings = AmpSettings {
-                        drive_tone: tone,
-                        ..everything_on(amp, 0.0)
-                    };
-                    let with_pedals = latency_samples_with(&settings, sample_rate) as f32 / sample_rate * 1000.0;
-                    assert!(with_pedals < 0.5, "{:?} at {} Hz with pedals: {:.2} ms", amp, sample_rate, with_pedals);
+                    let settings = AmpSettings { drive_tone: tone, ..everything_on(amp, 0.0) };
+                    let with_pedals =
+                        latency_samples_with(&settings, sample_rate) as f32 / sample_rate * 1000.0;
+                    assert!(
+                        with_pedals < 0.5,
+                        "{:?} at {} Hz with pedals: {:.2} ms",
+                        amp,
+                        sample_rate,
+                        with_pedals
+                    );
                 }
             }
         }
@@ -2007,10 +2190,7 @@ mod tests {
         let right_in: Vec<f32> = (0..4800).map(|_| noise.next() * 0.3).collect();
         let (mut left, mut right) = (left_in.clone(), right_in.clone());
 
-        let settings = AmpSettings {
-            bypass: true,
-            ..AmpSettings::default()
-        };
+        let settings = AmpSettings { bypass: true, ..AmpSettings::default() };
         for (l, r) in left.chunks_mut(BLOCK).zip(right.chunks_mut(BLOCK)) {
             chain.process(&settings, l, Some(r));
         }
@@ -2024,10 +2204,7 @@ mod tests {
         let input = sine(220.0, 0.3, SAMPLE_RATE, 28_800);
         let (mut left, mut right) = (input.clone(), input.clone());
         let playing = AmpSettings::default();
-        let bypassed = AmpSettings {
-            bypass: true,
-            ..playing
-        };
+        let bypassed = AmpSettings { bypass: true, ..playing };
 
         // Playing, bypassed, playing again
         for (index, (l, r)) in left.chunks_mut(BLOCK).zip(right.chunks_mut(BLOCK)).enumerate() {
@@ -2044,17 +2221,24 @@ mod tests {
         let own_step = largest_step(&left[4800..off]).max(largest_step(&input));
         let step_off = largest_step(&left[off - 1..off + fade + 1]);
         let step_on = largest_step(&left[on - 1..on + 2400]);
-        assert!(step_off < own_step * 1.2, "Step of {} into bypass, {} while playing", step_off, own_step);
-        assert!(step_on < own_step * 1.2, "Step of {} out of bypass, {} while playing", step_on, own_step);
+        assert!(
+            step_off < own_step * 1.2,
+            "Step of {} into bypass, {} while playing",
+            step_off,
+            own_step
+        );
+        assert!(
+            step_on < own_step * 1.2,
+            "Step of {} out of bypass, {} while playing",
+            step_on,
+            own_step
+        );
     }
 
     #[test]
     fn test_dial_jumps_do_not_click() {
         let input = sine(220.0, 0.178, SAMPLE_RATE, 24_000);
-        let low = AmpSettings {
-            out_level: 0.25,
-            ..with_all_dials(Amp::Brol, 0.2, 0.25)
-        };
+        let low = AmpSettings { out_level: 0.25, ..with_all_dials(Amp::Brol, 0.2, 0.25) };
         let jumps = [
             AmpSettings { gain: 1.0, ..low },
             AmpSettings { bass: 1.0, ..low },
@@ -2080,7 +2264,8 @@ mod tests {
 
             // The waveform's own steepest slope, before the jump and once it has settled
             let jump = 150 * BLOCK;
-            let own_step = largest_step(&output[4800..jump]).max(largest_step(&output[jump + 9600..]));
+            let own_step =
+                largest_step(&output[4800..jump]).max(largest_step(&output[jump + 9600..]));
             let step = largest_step(&output[jump - 1..jump + 9600]);
             assert!(step < own_step * 1.3, "Step of {} against {} for {:?}", step, own_step, high);
         }
@@ -2125,7 +2310,14 @@ mod tests {
     }
 
     /// Plays `input` and changes from one amp to the other at sample `at`
-    fn run_switch(chain: &mut AmpChain, from: Amp, to: Amp, gain: f32, input: &[f32], at: usize) -> Vec<f32> {
+    fn run_switch(
+        chain: &mut AmpChain,
+        from: Amp,
+        to: Amp,
+        gain: f32,
+        input: &[f32],
+        at: usize,
+    ) -> Vec<f32> {
         let mut output = input.to_vec();
         let (before, after) = output.split_at_mut(at);
         for block in before.chunks_mut(BLOCK) {
@@ -2167,11 +2359,13 @@ mod tests {
         for input in [sine(220.0, 0.178, SAMPLE_RATE, 48_000), power_chords(SAMPLE_RATE, 1.0)] {
             for gain in [0.3, 1.0] {
                 for (from, to) in transitions() {
-                    let output = run_switch(&mut new_chain(SAMPLE_RATE), from, to, gain, &input, at);
+                    let output =
+                        run_switch(&mut new_chain(SAMPLE_RATE), from, to, gain, &input, at);
 
                     // The steepest slope either amp makes by itself, against the steepest
                     // one around the switch
-                    let own_step = largest_step(&output[4800..at]).max(largest_step(&output[at + settle..]));
+                    let own_step =
+                        largest_step(&output[4800..at]).max(largest_step(&output[at + settle..]));
                     let step = largest_step(&output[at - 1..at + settle]);
                     assert!(
                         step < own_step * from_rest(to),
@@ -2228,7 +2422,14 @@ mod tests {
                 .map(|(a, b)| (a - b).abs())
                 .fold(0.0, f32::max);
             let level = rms(&reference[settled..]);
-            assert!(difference < 0.01 * level, "{:?} to {:?}: off by {} at a level of {}", from, to, difference, level);
+            assert!(
+                difference < 0.01 * level,
+                "{:?} to {:?}: off by {} at a level of {}",
+                from,
+                to,
+                difference,
+                level
+            );
         }
     }
 
@@ -2239,7 +2440,8 @@ mod tests {
         let mut chain = new_chain(SAMPLE_RATE);
         let mut output = input.clone();
         for (index, block) in output.chunks_mut(BLOCK).enumerate() {
-            let amp = if (150..450).contains(&index) { Amp::ALL[(index / 2) % 3] } else { Amp::Torden };
+            let amp =
+                if (150..450).contains(&index) { Amp::ALL[(index / 2) % 3] } else { Amp::Torden };
             chain.process(&with_amp(amp, 0.7), block, None);
         }
         let own_step = largest_step(&output[4800..150 * BLOCK]);
@@ -2247,17 +2449,18 @@ mod tests {
         assert!(step < own_step * 1.2, "Step of {} against {}", step, own_step);
 
         let reference = run(&with_amp(Amp::Torden, 0.7), &input, SAMPLE_RATE);
-        let difference = output[43_200..].iter().zip(&reference[43_200..]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        let difference = output[43_200..]
+            .iter()
+            .zip(&reference[43_200..])
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
         assert!(difference < 0.01 * rms(&reference[43_200..]), "Off by {}", difference);
     }
 
     #[test]
     fn test_switch_while_bypassed_or_before_playing_is_at_once() {
         let input = power_chords(SAMPLE_RATE, 0.5);
-        let bypassed = |amp: Amp| AmpSettings {
-            bypass: true,
-            ..with_amp(amp, 0.5)
-        };
+        let bypassed = |amp: Amp| AmpSettings { bypass: true, ..with_amp(amp, 0.5) };
 
         for (from, to) in transitions() {
             // Bypassed on one amp, then on the other, then playing
@@ -2284,7 +2487,13 @@ mod tests {
             let mut chain = new_chain(SAMPLE_RATE);
             chain.process(&with_amp(from, 0.5), &mut [], None);
             let late = run_blocks(&mut chain, &with_amp(to, 0.5), &input, BLOCK);
-            assert_eq!(late, run(&with_amp(to, 0.5), &input, SAMPLE_RATE), "{:?} to {:?}", from, to);
+            assert_eq!(
+                late,
+                run(&with_amp(to, 0.5), &input, SAMPLE_RATE),
+                "{:?} to {:?}",
+                from,
+                to
+            );
         }
     }
 
@@ -2312,10 +2521,18 @@ mod tests {
         for input in [sine(220.0, 0.178, SAMPLE_RATE, 48_000), power_chords(SAMPLE_RATE, 2.0)] {
             for (from, to) in transitions() {
                 for (before, after) in [(0.2, 0.9), (0.9, 0.2)] {
-                    let (before, after) = (with_all_dials(from, before, 0.5), with_all_dials(to, after, 0.5));
+                    let (before, after) =
+                        (with_all_dials(from, before, 0.5), with_all_dials(to, after, 0.5));
                     let output = run_change(&before, &after, &input, at);
                     let ratio = step_ratio(&output, at);
-                    assert!(ratio < 1.2, "{:?} to {:?}, dials to {}: step {} times its own", from, to, after.gain, ratio);
+                    assert!(
+                        ratio < 1.2,
+                        "{:?} to {:?}, dials to {}: step {} times its own",
+                        from,
+                        to,
+                        after.gain,
+                        ratio
+                    );
 
                     // The amp is silent in between, as when only the amp changes
                     let silent = at + (AMP_FADE_MS * 0.001 * SAMPLE_RATE) as usize;
@@ -2329,7 +2546,9 @@ mod tests {
     fn test_amp_switched_to_starts_at_its_own_dials() {
         let input = power_chords(SAMPLE_RATE, 2.0);
         let at = 300 * BLOCK;
-        let amp_dials = |dials: &Dials| [dials.gain, dials.bass, dials.mid, dials.treble, dials.presence, dials.master];
+        let amp_dials = |dials: &Dials| {
+            [dials.gain, dials.bass, dials.mid, dials.treble, dials.presence, dials.master]
+        };
         for (from, to) in transitions() {
             let before = with_all_dials(from, 0.2, 0.5);
             let after = AmpSettings {
@@ -2356,14 +2575,21 @@ mod tests {
                     switched_at = Some(index);
                     // The new amp is at its dials from its first sample. The other dials
                     // are heard through the switch, so they go on gliding
-                    assert_eq!(amp_dials(&chain.dials), amp_dials(&Dials::from_settings(&after)), "{from:?} to {to:?}");
+                    assert_eq!(
+                        amp_dials(&chain.dials),
+                        amp_dials(&Dials::from_settings(&after)),
+                        "{from:?} to {to:?}"
+                    );
                     assert!(chain.dials.cab_mic > 0.2 && chain.dials.cab_mic < 0.9);
                 } else if switched_at.is_none() {
                     assert!(index == 0 || chain.dials.gain < 0.9);
                 }
             }
             let fade = (AMP_FADE_MS * 0.001 * SAMPLE_RATE) as usize;
-            assert!(switched_at.is_some_and(|index| index <= fade + 1), "{from:?} to {to:?}: {switched_at:?}");
+            assert!(
+                switched_at.is_some_and(|index| index <= fade + 1),
+                "{from:?} to {to:?}: {switched_at:?}"
+            );
 
             // What block size the host uses makes no difference to any of it
             let mut chain = new_chain(SAMPLE_RATE);
@@ -2382,7 +2608,12 @@ mod tests {
         }
     }
 
-    fn run_blocks_in_place(chain: &mut AmpChain, settings: &AmpSettings, samples: &mut [f32], block: usize) {
+    fn run_blocks_in_place(
+        chain: &mut AmpChain,
+        settings: &AmpSettings,
+        samples: &mut [f32],
+        block: usize,
+    ) {
         for chunk in samples.chunks_mut(block) {
             chain.process(settings, chunk, None);
         }
@@ -2423,26 +2654,40 @@ mod tests {
                     drive_gain: 1.0,
                     drive_tone: 0.0,
                     drive_level: 1.0,
-                    delay: DelaySettings {
-                        on: false,
-                        ..delay_on(20.0, 0.9, 1.0)
-                    },
-                    reverb: ReverbSettings {
-                        on: false,
-                        ..reverb_on(6.0, 1.0)
-                    },
+                    delay: DelaySettings { on: false, ..delay_on(20.0, 0.9, 1.0) },
+                    reverb: ReverbSettings { on: false, ..reverb_on(6.0, 1.0) },
                     ..with_amp(amp, gain)
                 };
                 let reference = amp_alone(&settings, &input, SAMPLE_RATE);
-                assert_eq!(run(&settings, &input, SAMPLE_RATE), reference, "{:?} at gain {}", amp, gain * 10.0);
+                assert_eq!(
+                    run(&settings, &input, SAMPLE_RATE),
+                    reference,
+                    "{:?} at gain {}",
+                    amp,
+                    gain * 10.0
+                );
                 let (left, right) = run_stereo(&settings, &input, SAMPLE_RATE);
-                assert!(left == reference && right == reference, "{:?} at gain {} in stereo", amp, gain * 10.0);
+                assert!(
+                    left == reference && right == reference,
+                    "{:?} at gain {} in stereo",
+                    amp,
+                    gain * 10.0
+                );
 
                 // The gate, open, changes nothing but the half millisecond in which it opens
                 let gated = run(&with_amp(amp, gain), &input, SAMPLE_RATE);
-                let difference =
-                    gated[12_000..].iter().zip(&reference[12_000..]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
-                assert!(difference < 1e-5, "{:?} at gain {}: off by {} with the gate on", amp, gain * 10.0, difference);
+                let difference = gated[12_000..]
+                    .iter()
+                    .zip(&reference[12_000..])
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0, f32::max);
+                assert!(
+                    difference < 1e-5,
+                    "{:?} at gain {}: off by {} with the gate on",
+                    amp,
+                    gain * 10.0,
+                    difference
+                );
             }
         }
     }
@@ -2453,21 +2698,22 @@ mod tests {
         let input = power_chords(SAMPLE_RATE, 3.0);
         let at = 300 * BLOCK;
         for amp in Amp::ALL {
-            let plain = AmpSettings {
-                gate_on: false,
-                ..with_amp(amp, 0.5)
-            };
-            let pedals = AmpSettings {
-                in_gain_db: 6.0,
-                cab_on: false,
-                ..everything_on(amp, 0.5)
-            };
+            let plain = AmpSettings { gate_on: false, ..with_amp(amp, 0.5) };
+            let pedals = AmpSettings { in_gain_db: 6.0, cab_on: false, ..everything_on(amp, 0.5) };
             let output = run_change(&pedals, &plain, &input, at);
             let reference = run(&plain, &input, SAMPLE_RATE);
             let settled = input.len() - 24_000;
-            let difference =
-                output[settled..].iter().zip(&reference[settled..]).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
-            assert!(difference < 0.01 * rms(&reference[settled..]), "{:?}: off by {}", amp, difference);
+            let difference = output[settled..]
+                .iter()
+                .zip(&reference[settled..])
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f32::max);
+            assert!(
+                difference < 0.01 * rms(&reference[settled..]),
+                "{:?}: off by {}",
+                amp,
+                difference
+            );
         }
     }
 
@@ -2476,38 +2722,40 @@ mod tests {
         // Quiet and with little gain, so the amp is close to linear
         let input = sine(440.0, 0.002, SAMPLE_RATE, 19_200);
         let level = |in_gain_db: f32| {
-            let settings = AmpSettings {
-                in_gain_db,
-                gate_on: false,
-                ..with_amp(Amp::Klar, 0.2)
-            };
+            let settings = AmpSettings { in_gain_db, gate_on: false, ..with_amp(Amp::Klar, 0.2) };
             to_db(rms(&run(&settings, &input, SAMPLE_RATE)[9600..]))
         };
         let unity = level(0.0);
         for in_gain_db in [-24.0, -6.0, 12.0, 24.0] {
             let change = level(in_gain_db) - unity;
-            assert!((change - in_gain_db).abs() < 0.5, "{} dB at the input gives {:.2} dB", in_gain_db, change);
+            assert!(
+                (change - in_gain_db).abs() < 0.5,
+                "{} dB at the input gives {:.2} dB",
+                in_gain_db,
+                change
+            );
         }
     }
 
     #[test]
     fn test_gate_opens_on_a_note_and_closes_after_it() {
         let mut input = hiss(-75.0, 96_000);
-        for (sample, note) in input[24_000..48_000].iter_mut().zip(sine(110.0, 0.2, SAMPLE_RATE, 24_000)) {
+        for (sample, note) in
+            input[24_000..48_000].iter_mut().zip(sine(110.0, 0.2, SAMPLE_RATE, 24_000))
+        {
             *sample += note;
         }
         for amp in Amp::ALL {
             let gated = run(&with_amp(amp, 1.0), &input, SAMPLE_RATE);
-            let open = run(
-                &AmpSettings {
-                    gate_on: false,
-                    ..with_amp(amp, 1.0)
-                },
-                &input,
-                SAMPLE_RATE,
-            );
+            let open =
+                run(&AmpSettings { gate_on: false, ..with_amp(amp, 1.0) }, &input, SAMPLE_RATE);
             // Silent before the note, the note as without the gate, silent again after
-            assert!(peak(&gated[..24_000]) < 1e-9, "{:?} before the note: {}", amp, peak(&gated[..24_000]));
+            assert!(
+                peak(&gated[..24_000]) < 1e-9,
+                "{:?} before the note: {}",
+                amp,
+                peak(&gated[..24_000])
+            );
             assert!(peak(&open[12_000..24_000]) > 1e-4, "{:?} has no hiss to gate", amp);
             let playing = 28_800..48_000;
             let difference = gated[playing.clone()]
@@ -2515,8 +2763,18 @@ mod tests {
                 .zip(&open[playing.clone()])
                 .map(|(a, b)| (a - b).abs())
                 .fold(0.0, f32::max);
-            assert!(difference < 0.02 * rms(&open[playing]), "{:?}: the note differs by {}", amp, difference);
-            assert!(peak(&gated[60_000..]) < 1e-6, "{:?} after the note: {}", amp, peak(&gated[60_000..]));
+            assert!(
+                difference < 0.02 * rms(&open[playing]),
+                "{:?}: the note differs by {}",
+                amp,
+                difference
+            );
+            assert!(
+                peak(&gated[60_000..]) < 1e-6,
+                "{:?} after the note: {}",
+                amp,
+                peak(&gated[60_000..])
+            );
         }
     }
 
@@ -2526,11 +2784,8 @@ mod tests {
         let mut input = vec![0.0; 4800];
         input.extend(sine(110.0, 0.2, SAMPLE_RATE, 24_000));
         input.resize(72_000, 0.0);
-        let settings = AmpSettings {
-            gate_thresh_db: -50.0,
-            gate_release_ms: 100.0,
-            ..AmpSettings::default()
-        };
+        let settings =
+            AmpSettings { gate_thresh_db: -50.0, gate_release_ms: 100.0, ..AmpSettings::default() };
         let mut chain = new_chain(SAMPLE_RATE);
         let lamps = chain.lamp_reading();
         assert_eq!(lamps.gate_gain(), 0.0);
@@ -2602,7 +2857,8 @@ mod tests {
 
         // The right channel alone is enough, and one channel counts as well as two
         let mut chain = new_chain(SAMPLE_RATE);
-        let settings = with_effects_at_most(AmpSettings { out_level: 2.0, ..with_amp(Amp::Brol, 0.5) });
+        let settings =
+            with_effects_at_most(AmpSettings { out_level: 2.0, ..with_amp(Amp::Brol, 0.5) });
         let mut mono = input.clone();
         for block in mono.chunks_mut(BLOCK) {
             chain.process(&settings, block, None);
@@ -2620,7 +2876,8 @@ mod tests {
     fn test_reading_the_lamps_does_not_change_the_sound() {
         // The editor reads while the audio thread plays. The chain only ever writes
         let input = power_chords(SAMPLE_RATE, 1.0);
-        let settings = with_effects(AmpSettings { out_level: 2.0, ..everything_on(Amp::Torden, 0.8) });
+        let settings =
+            with_effects(AmpSettings { out_level: 2.0, ..everything_on(Amp::Torden, 0.8) });
         let alone = run_stereo(&settings, &input, SAMPLE_RATE);
 
         let mut chain = new_chain(SAMPLE_RATE);
@@ -2650,19 +2907,13 @@ mod tests {
     fn test_gate_threshold_is_the_level_at_the_plugin_input() {
         // The input gain may not open the gate: 24 dB more of a hiss under the threshold
         let input = hiss(-75.0, 24_000);
-        let settings = AmpSettings {
-            in_gain_db: 24.0,
-            ..with_amp(Amp::Torden, 1.0)
-        };
+        let settings = AmpSettings { in_gain_db: 24.0, ..with_amp(Amp::Torden, 1.0) };
         let output = run(&settings, &input, SAMPLE_RATE);
         assert!(peak(&output) < 1e-9, "Peak: {}", peak(&output));
 
         // And a note over the threshold opens it however far the input gain is turned down
         let note = sine(220.0, 0.1, SAMPLE_RATE, 24_000);
-        let settings = AmpSettings {
-            in_gain_db: -24.0,
-            ..with_amp(Amp::Torden, 1.0)
-        };
+        let settings = AmpSettings { in_gain_db: -24.0, ..with_amp(Amp::Torden, 1.0) };
         assert!(rms(&run(&settings, &note, SAMPLE_RATE)) > 0.01);
     }
 
@@ -2680,13 +2931,24 @@ mod tests {
                 // Heard from the start, quiet once, and quiet from there on
                 let heard: Vec<bool> = output.chunks(480).map(|piece| peak(piece) > 1e-6).collect();
                 let changes = heard.windows(2).filter(|pair| pair[0] != pair[1]).count();
-                assert!(heard[0] && !heard[heard.len() - 1], "{:?} at {} ms release", amp, release_ms);
+                assert!(
+                    heard[0] && !heard[heard.len() - 1],
+                    "{:?} at {} ms release",
+                    amp,
+                    release_ms
+                );
                 assert_eq!(changes, 1, "{:?} at {} ms release", amp, release_ms);
                 // And closing makes no step larger than the note makes while it rings
                 let last = output.iter().rposition(|s| s.abs() > 1e-6).unwrap();
                 let own_step = largest_step(&output[4800..48_000]);
                 let closing = largest_step(&output[last - 24_000..]);
-                assert!(closing <= own_step, "{:?}: step of {} while closing, {} while ringing", amp, closing, own_step);
+                assert!(
+                    closing <= own_step,
+                    "{:?}: step of {} while closing, {} while ringing",
+                    amp,
+                    closing,
+                    own_step
+                );
             }
         }
     }
@@ -2695,14 +2957,8 @@ mod tests {
     fn test_gate_switches_without_a_click() {
         // A tone under the threshold: the gate is all that decides whether it is heard
         let input = sine(220.0, 0.005, SAMPLE_RATE, 48_000);
-        let closed = AmpSettings {
-            gate_thresh_db: -30.0,
-            ..with_amp(Amp::Brol, 0.5)
-        };
-        let off = AmpSettings {
-            gate_on: false,
-            ..closed
-        };
+        let closed = AmpSettings { gate_thresh_db: -30.0, ..with_amp(Amp::Brol, 0.5) };
+        let off = AmpSettings { gate_on: false, ..closed };
         let at = 300 * BLOCK;
         let opened = run_change(&closed, &off, &input, at);
         assert!(peak(&opened[..at]) < 1e-9);
@@ -2718,7 +2974,9 @@ mod tests {
     #[test]
     fn test_drive_adds_distortion_and_cuts_lows() {
         let tone = sine(220.0, HELD_NOTE, SAMPLE_RATE, 19_200);
-        let distortion = |settings: &AmpSettings| thd_db(&run(settings, &tone, SAMPLE_RATE)[9600..], SAMPLE_RATE, 220.0);
+        let distortion = |settings: &AmpSettings| {
+            thd_db(&run(settings, &tone, SAMPLE_RATE)[9600..], SAMPLE_RATE, 220.0)
+        };
         let clean = distortion(&with_amp(Amp::Klar, 0.3));
         let low = distortion(&with_drive(Amp::Klar, 0.3, 0.0, 0.5, 0.5));
         let centre = distortion(&with_drive(Amp::Klar, 0.3, 0.5, 0.5, 0.5));
@@ -2731,8 +2989,18 @@ mod tests {
         let mutes = palm_mutes(SAMPLE_RATE, 2.4);
         for (amp, gain) in [(Amp::Klar, 0.3), (Amp::Torden, 0.5)] {
             let plain = lows_against_mids_db(&run(&with_amp(amp, gain), &mutes, SAMPLE_RATE));
-            let driven = lows_against_mids_db(&run(&with_drive(amp, gain, 0.2, 0.5, 0.8), &mutes, SAMPLE_RATE));
-            assert!(driven < plain - 2.0, "{:?}: lows at {:.1} dB without, {:.1} dB with the drive", amp, plain, driven);
+            let driven = lows_against_mids_db(&run(
+                &with_drive(amp, gain, 0.2, 0.5, 0.8),
+                &mutes,
+                SAMPLE_RATE,
+            ));
+            assert!(
+                driven < plain - 2.0,
+                "{:?}: lows at {:.1} dB without, {:.1} dB with the drive",
+                amp,
+                plain,
+                driven
+            );
         }
     }
 
@@ -2741,14 +3009,25 @@ mod tests {
         let mutes = palm_mutes(SAMPLE_RATE, 2.4);
         for gain in [0.5, 1.0] {
             let brol = lows_against_mids_db(&run(&with_amp(Amp::Brol, gain), &mutes, SAMPLE_RATE));
-            let torden =
-                lows_against_mids_db(&run(&with_drive(Amp::Torden, gain, 0.2, 0.5, 0.8), &mutes, SAMPLE_RATE));
-            assert!(torden < brol - 5.0, "Gain {}: Torden with drive {:.1} dB, Brøl {:.1} dB", gain * 10.0, torden, brol);
+            let torden = lows_against_mids_db(&run(
+                &with_drive(Amp::Torden, gain, 0.2, 0.5, 0.8),
+                &mutes,
+                SAMPLE_RATE,
+            ));
+            assert!(
+                torden < brol - 5.0,
+                "Gain {}: Torden with drive {:.1} dB, Brøl {:.1} dB",
+                gain * 10.0,
+                torden,
+                brol
+            );
         }
 
         // A single low E still has its fundamental: the drive takes little of what the amp leaves
         let note = pluck(82.41, Pluck::OPEN, 3, SAMPLE_RATE, 48_000);
-        let fundamental = |settings: &AmpSettings| fundamental_db(&run(settings, &note, SAMPLE_RATE)[4800..28_800], 82.41);
+        let fundamental = |settings: &AmpSettings| {
+            fundamental_db(&run(settings, &note, SAMPLE_RATE)[4800..28_800], 82.41)
+        };
         let (plain, driven) = (
             fundamental(&with_amp(Amp::Torden, 0.5)),
             fundamental(&with_drive(Amp::Torden, 0.5, 0.2, 0.5, 0.8)),
@@ -2771,7 +3050,13 @@ mod tests {
         let (dark, centre, bright) = (top(0.0), top(0.5), top(1.0));
         // Less at the top of the dial: the brighter the pedal, the more the power stage of
         // the amp behind it gives way
-        assert!(centre > dark + 1.5 && bright > centre + 1.0, "Above 3 kHz: {:.1}, {:.1}, {:.1} dB", dark, centre, bright);
+        assert!(
+            centre > dark + 1.5 && bright > centre + 1.0,
+            "Above 3 kHz: {:.1}, {:.1}, {:.1} dB",
+            dark,
+            centre,
+            bright
+        );
 
         // Klar turned down so far that it follows its input
         let quiet: Vec<f32> = chords.iter().map(|s| s * 0.05).collect();
@@ -2805,7 +3090,13 @@ mod tests {
                         // 20 ms that takes, the amp is louder than it is once it has settled
                         let pushed = amp == Amp::Klar && after.drive_on && level > 0.5;
                         let limit = if pushed { 1.5 } else { 1.2 };
-                        assert!(ratio < limit, "{:?}, drive on {}: step {} times its own", amp, after.drive_on, ratio);
+                        assert!(
+                            ratio < limit,
+                            "{:?}, drive on {}: step {} times its own",
+                            amp,
+                            after.drive_on,
+                            ratio
+                        );
                     }
                 }
             }
@@ -2841,7 +3132,13 @@ mod tests {
                 for (before, after) in [(&off, &on), (&on, &off)] {
                     let output = run_change(before, after, &input, at);
                     let ratio = step_ratio(&output, at);
-                    assert!(ratio < 1.3, "{:?}, cabinet on {}: step {} times its own", amp, after.cab_on, ratio);
+                    assert!(
+                        ratio < 1.3,
+                        "{:?}, cabinet on {}: step {} times its own",
+                        amp,
+                        after.cab_on,
+                        ratio
+                    );
                     // Ends up as if it had been that way all along: the cabinet kept its history
                     let reference = run(after, &input, SAMPLE_RATE);
                     let settled = at + 4800;
@@ -2850,7 +3147,13 @@ mod tests {
                         .zip(&reference[settled..])
                         .map(|(a, b)| (a - b).abs())
                         .fold(0.0, f32::max);
-                    assert!(difference < 1e-4, "{:?}, cabinet on {}: off by {}", amp, after.cab_on, difference);
+                    assert!(
+                        difference < 1e-4,
+                        "{:?}, cabinet on {}: off by {}",
+                        amp,
+                        after.cab_on,
+                        difference
+                    );
                 }
             }
         }
@@ -2859,21 +3162,26 @@ mod tests {
         let chords = power_chords(SAMPLE_RATE, 2.0);
         for amp in Amp::ALL {
             let with = run(&with_amp(amp, 0.5), &chords, SAMPLE_RATE);
-            let without = run(
-                &AmpSettings {
-                    cab_on: false,
-                    ..with_amp(amp, 0.5)
-                },
-                &chords,
-                SAMPLE_RATE,
-            );
+            let without =
+                run(&AmpSettings { cab_on: false, ..with_amp(amp, 0.5) }, &chords, SAMPLE_RATE);
             let fizz = |output: &[f32]| band_level_db(output, SAMPLE_RATE, Some(8000.0), None);
             if amp != Amp::Klar {
                 let (with, without) = (fizz(&with), fizz(&without));
-                assert!(without > with + 6.0, "{:?}: {:.1} dB and {:.1} dB above 8 kHz", amp, with, without);
+                assert!(
+                    without > with + 6.0,
+                    "{:?}: {:.1} dB and {:.1} dB above 8 kHz",
+                    amp,
+                    with,
+                    without
+                );
             }
             let difference = to_db(rms(&without) / rms(&with));
-            assert!(difference.abs() < 3.0, "{:?}: {:.1} dB louder without the cabinet", amp, difference);
+            assert!(
+                difference.abs() < 3.0,
+                "{:?}: {:.1} dB louder without the cabinet",
+                amp,
+                difference
+            );
         }
     }
 
@@ -2885,28 +3193,47 @@ mod tests {
             to_db(rms(&run(settings, &input, SAMPLE_RATE)[4800..]))
         };
         for amp in Amp::ALL {
-            let base = AmpSettings {
-                gate_on: false,
-                ..with_amp(amp, 0.2)
-            };
+            let base = AmpSettings { gate_on: false, ..with_amp(amp, 0.2) };
             let resonance_hz = amp.model().cab.resonance_hz;
             // What the dial does at a frequency, at its dark and at its bright end
             let mic = |freq_hz: f32| {
-                [0.0, 1.0].map(|value| level(&AmpSettings { cab_mic: value, ..base }, freq_hz) - level(&base, freq_hz))
+                [0.0, 1.0].map(|value| {
+                    level(&AmpSettings { cab_mic: value, ..base }, freq_hz) - level(&base, freq_hz)
+                })
             };
             let res = |freq_hz: f32| {
-                [0.0, 1.0].map(|value| level(&AmpSettings { cab_res: value, ..base }, freq_hz) - level(&base, freq_hz))
+                [0.0, 1.0].map(|value| {
+                    level(&AmpSettings { cab_res: value, ..base }, freq_hz) - level(&base, freq_hz)
+                })
             };
 
             let top = mic(4000.0);
-            assert!(top[0] < -3.0 && top[1] > 3.0, "{:?} mic at 4 kHz: {:.1}, {:.1} dB", amp, top[0], top[1]);
+            assert!(
+                top[0] < -3.0 && top[1] > 3.0,
+                "{:?} mic at 4 kHz: {:.1}, {:.1} dB",
+                amp,
+                top[0],
+                top[1]
+            );
             let lows = mic(150.0);
-            assert!(lows[0] > 0.3 && lows[1] < -0.3, "{:?} mic at 150 Hz: {:.1}, {:.1} dB", amp, lows[0], lows[1]);
+            assert!(
+                lows[0] > 0.3 && lows[1] < -0.3,
+                "{:?} mic at 150 Hz: {:.1}, {:.1} dB",
+                amp,
+                lows[0],
+                lows[1]
+            );
             let mids = mic(800.0);
             assert!(mids[0].abs() < 1.5 && mids[1].abs() < 1.5);
 
             let thump = res(resonance_hz);
-            assert!(thump[0] < -4.5 && thump[1] > 4.5, "{:?} resonance: {:.1}, {:.1} dB", amp, thump[0], thump[1]);
+            assert!(
+                thump[0] < -4.5 && thump[1] > 4.5,
+                "{:?} resonance: {:.1}, {:.1} dB",
+                amp,
+                thump[0],
+                thump[1]
+            );
             let mids = res(1000.0);
             assert!(mids[0].abs() < 0.5 && mids[1].abs() < 0.5);
         }
@@ -2920,11 +3247,23 @@ mod tests {
             let base = with_amp(amp, 0.5);
             for mic in [0.0, 1.0] {
                 let change = level(&AmpSettings { cab_mic: mic, ..base }) - level(&base);
-                assert!(change.abs() < 1.5, "{:?} with Mic at {}: {:.1} dB", amp, mic * 10.0, change);
+                assert!(
+                    change.abs() < 1.5,
+                    "{:?} with Mic at {}: {:.1} dB",
+                    amp,
+                    mic * 10.0,
+                    change
+                );
             }
             for res in [0.0, 1.0] {
                 let change = level(&AmpSettings { cab_res: res, ..base }) - level(&base);
-                assert!(change.abs() < 2.5, "{:?} with Resonance at {}: {:.1} dB", amp, res * 10.0, change);
+                assert!(
+                    change.abs() < 2.5,
+                    "{:?} with Resonance at {}: {:.1} dB",
+                    amp,
+                    res * 10.0,
+                    change
+                );
             }
         }
     }
@@ -2964,7 +3303,13 @@ mod tests {
             for freq_hz in [220.0, ALIAS_TONES_HZ[1]] {
                 let output = run(&settings, &sine(freq_hz, 0.178, sample_rate, len), sample_rate);
                 let top = peak(&output[len / 3..]);
-                assert!(top < OUTPUT_CLIP_KNEE, "Gain {}, {} Hz: peak {:.1} dBFS", gain * 10.0, freq_hz, to_db(top));
+                assert!(
+                    top < OUTPUT_CLIP_KNEE,
+                    "Gain {}, {} Hz: peak {:.1} dBFS",
+                    gain * 10.0,
+                    freq_hz,
+                    to_db(top)
+                );
             }
             let aliasing = aliasing_db_at(&settings, ALIAS_TONES_HZ[1], sample_rate);
             assert!(aliasing < -72.0, "Gain {}: {:.1} dB", gain * 10.0, aliasing);
@@ -3023,8 +3368,18 @@ mod tests {
         assert!(peak(&tail[24_000..]) < 1e-6, "The gate is not closed: {}", peak(&tail[24_000..]));
         let closed = block_time_us(&mut chain, &settings, &hiss(-75.0, 12_000));
         let silent = block_time_us(&mut chain, &settings, &vec![0.0; 12_000]);
-        assert!(closed < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us with the gate closed", playing, closed);
-        assert!(silent < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us silent", playing, silent);
+        assert!(
+            closed < playing * SLOWED_DOWN,
+            "{:.1} us per block playing, {:.1} us with the gate closed",
+            playing,
+            closed
+        );
+        assert!(
+            silent < playing * SLOWED_DOWN,
+            "{:.1} us per block playing, {:.1} us silent",
+            playing,
+            silent
+        );
     }
 
     /// Median time to process one block, in microseconds
@@ -3052,7 +3407,12 @@ mod tests {
         let playing = block_time_us(&mut chain, &settings, &power_chords(SAMPLE_RATE, 0.25));
         run_blocks(&mut chain, &settings, &vec![0.0; 24_000], BLOCK);
         let silent = block_time_us(&mut chain, &settings, &vec![0.0; 12_000]);
-        assert!(silent < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us silent", playing, silent);
+        assert!(
+            silent < playing * SLOWED_DOWN,
+            "{:.1} us per block playing, {:.1} us silent",
+            playing,
+            silent
+        );
     }
 
     #[test]
@@ -3063,14 +3423,8 @@ mod tests {
         for amp in Amp::ALL {
             let plain = everything_on(amp, 0.6);
             let off = AmpSettings {
-                delay: DelaySettings {
-                    on: false,
-                    ..delay_on(1000.0, 0.9, 1.0)
-                },
-                reverb: ReverbSettings {
-                    on: false,
-                    ..reverb_on(6.0, 1.0)
-                },
+                delay: DelaySettings { on: false, ..delay_on(1000.0, 0.9, 1.0) },
+                reverb: ReverbSettings { on: false, ..reverb_on(6.0, 1.0) },
                 ..plain
             };
             let reference = run(&plain, &input, SAMPLE_RATE);
@@ -3086,14 +3440,8 @@ mod tests {
     fn test_delay_makes_left_and_right_differ_around_the_same_amp() {
         // Turned down, so the safety clip stays out of it
         let input = power_chords(SAMPLE_RATE, 0.5);
-        let plain = AmpSettings {
-            out_level: 0.25,
-            ..with_amp(Amp::Klar, 0.5)
-        };
-        let delayed = AmpSettings {
-            delay: delay_on(100.0, 0.4, 0.5),
-            ..plain
-        };
+        let plain = AmpSettings { out_level: 0.25, ..with_amp(Amp::Klar, 0.5) };
+        let delayed = AmpSettings { delay: delay_on(100.0, 0.4, 0.5), ..plain };
         let dry = run(&plain, &input, SAMPLE_RATE);
         let (left, right) = run_stereo(&delayed, &input, SAMPLE_RATE);
 
@@ -3104,7 +3452,12 @@ mod tests {
         // From there on the repeats are added to it, and they are not the same on both sides
         let (repeats_left, repeats_right) = (difference(&left, &dry), difference(&right, &dry));
         for repeats in [&repeats_left, &repeats_right] {
-            assert!(rms(&repeats[first..]) > 0.1 * rms(&dry), "Repeats at {}, amp at {}", rms(repeats), rms(&dry));
+            assert!(
+                rms(&repeats[first..]) > 0.1 * rms(&dry),
+                "Repeats at {}, amp at {}",
+                rms(repeats),
+                rms(&dry)
+            );
         }
         let alike = correlation(&repeats_left[first..], &repeats_right[first..]);
         assert!(alike < 0.9, "Left and right repeats correlate by {}", alike);
@@ -3117,31 +3470,40 @@ mod tests {
         // until the first of the tail and the first repeat arrive
         let input = power_chords(SAMPLE_RATE, 0.1);
         let plain = everything_on(Amp::Brol, 0.5);
-        let effects = AmpSettings {
-            delay: delay_on(20.0, 0.9, 1.0),
-            reverb: reverb_on(6.0, 1.0),
-            ..plain
-        };
+        let effects =
+            AmpSettings { delay: delay_on(20.0, 0.9, 1.0), reverb: reverb_on(6.0, 1.0), ..plain };
         let dry = run(&plain, &input, SAMPLE_RATE);
         let (left, right) = run_stereo(&effects, &input, SAMPLE_RATE);
         let before = (0.014 * SAMPLE_RATE) as usize;
         assert!(left[..before] == dry[..before] && right[..before] == dry[..before]);
         assert!(left[before..] != dry[before..]);
 
-        for (amp, sample_rate) in [(Amp::Klar, 48000.0), (Amp::Brol, 48000.0), (Amp::Torden, 48000.0), (Amp::Torden, 44100.0)] {
+        for (amp, sample_rate) in [
+            (Amp::Klar, 48000.0),
+            (Amp::Brol, 48000.0),
+            (Amp::Torden, 48000.0),
+            (Amp::Torden, 44100.0),
+        ] {
             let plain = everything_on(amp, 0.0);
             let effects = AmpSettings {
                 delay: delay_on(20.0, 0.9, 1.0),
                 reverb: reverb_on(6.0, 1.0),
                 ..plain
             };
-            let (without, with) = (latency_samples_with(&plain, sample_rate), latency_samples_with(&effects, sample_rate));
+            let (without, with) = (
+                latency_samples_with(&plain, sample_rate),
+                latency_samples_with(&effects, sample_rate),
+            );
             assert_eq!(with, without, "{:?} at {} Hz", amp, sample_rate);
         }
     }
 
     /// Plays `input` block by block and tells after which blocks the chain was idle
-    fn run_watching(chain: &mut AmpChain, settings: &AmpSettings, input: &[f32]) -> (Vec<f32>, Vec<f32>, Vec<bool>) {
+    fn run_watching(
+        chain: &mut AmpChain,
+        settings: &AmpSettings,
+        input: &[f32],
+    ) -> (Vec<f32>, Vec<f32>, Vec<bool>) {
         let (mut left, mut right) = (input.to_vec(), input.to_vec());
         let mut idle = Vec::new();
         for (l, r) in left.chunks_mut(BLOCK).zip(right.chunks_mut(BLOCK)) {
@@ -3156,14 +3518,8 @@ mod tests {
         let playing = 192 * BLOCK;
         let mut input = power_chords(SAMPLE_RATE, 0.3)[..playing].to_vec();
         input.resize(playing + 72_000, 0.0);
-        let plain = AmpSettings {
-            out_level: 0.25,
-            ..with_amp(Amp::Klar, 0.5)
-        };
-        let settings = AmpSettings {
-            reverb: reverb_on(0.3, 0.5),
-            ..plain
-        };
+        let plain = AmpSettings { out_level: 0.25, ..with_amp(Amp::Klar, 0.5) };
+        let settings = AmpSettings { reverb: reverb_on(0.3, 0.5), ..plain };
         let dry = run(&plain, &input, SAMPLE_RATE);
         let mut chain = new_chain(SAMPLE_RATE);
         assert!(chain.is_idle());
@@ -3171,8 +3527,16 @@ mod tests {
 
         // A tenth of a second after the last note: nothing of the amp, a tail on both sides
         let after = playing + 4800..playing + 9600;
-        assert!(peak(&dry[after.clone()]) < 1e-6, "The amp alone is still at {}", peak(&dry[after.clone()]));
-        assert!(rms(&left[after.clone()]) > 1e-4 && rms(&right[after.clone()]) > 1e-4, "No tail: {}", rms(&left[after.clone()]));
+        assert!(
+            peak(&dry[after.clone()]) < 1e-6,
+            "The amp alone is still at {}",
+            peak(&dry[after.clone()])
+        );
+        assert!(
+            rms(&left[after.clone()]) > 1e-4 && rms(&right[after.clone()]) > 1e-4,
+            "No tail: {}",
+            rms(&left[after.clone()])
+        );
         assert!(left[after.clone()] != right[after.clone()]);
         assert!(!idle[playing / BLOCK - 1] && !idle[(playing + 4800) / BLOCK]);
 
@@ -3180,7 +3544,11 @@ mod tests {
         // ended in there is nothing but the amp, which is silent
         let ended = idle.iter().rposition(|idle| !idle).map_or(0, |last| (last + 2) * BLOCK);
         assert!(ended < playing + 72_000, "Never idle");
-        assert!(ended > playing && ended < playing + (1.5 * SAMPLE_RATE) as usize, "Idle after {} samples", ended - playing);
+        assert!(
+            ended > playing && ended < playing + (1.5 * SAMPLE_RATE) as usize,
+            "Idle after {} samples",
+            ended - playing
+        );
         assert!(left[ended..] == dry[ended..] && right[ended..] == dry[ended..]);
         assert!(peak(&dry[ended..]) < 1e-6);
     }
@@ -3199,16 +3567,17 @@ mod tests {
         // The delay is idle as soon as its last repeats have fallen silent and its read
         // positions, 20 ms back, have nothing but silence ahead of them: within half a
         // second here. From the block after that there is nothing but the amp
-        let settings = AmpSettings {
-            delay: delay_on(20.0, 0.3, 0.5),
-            ..plain
-        };
+        let settings = AmpSettings { delay: delay_on(20.0, 0.3, 0.5), ..plain };
         let dry = run(&plain, &input, SAMPLE_RATE);
         let (left, right, idle) = run_watching(&mut new_chain(SAMPLE_RATE), &settings, &input);
         assert!(idle[..(playing + 2400) / BLOCK].iter().all(|&idle| !idle));
         let ended = idle.iter().rposition(|idle| !idle).map_or(0, |last| (last + 2) * BLOCK);
         assert!(ended < playing + 84_000, "Never idle");
-        assert!(ended < playing + (0.5 * SAMPLE_RATE) as usize, "Idle after {} samples", ended - playing);
+        assert!(
+            ended < playing + (0.5 * SAMPLE_RATE) as usize,
+            "Idle after {} samples",
+            ended - playing
+        );
         assert!(left[ended..] == dry[ended..] && right[ended..] == dry[ended..]);
         assert!(peak(&dry[ended..]) < 1e-6);
     }
@@ -3238,7 +3607,14 @@ mod tests {
             let tail = rms(&stayed[at..]);
             assert!(tail > 1e-3, "{:?}: no tail to keep, {}", from, tail);
             let off = largest_difference(&left[at..], &stayed[at..]);
-            assert!(off < 0.01 * tail, "{:?} to {:?}: tail off by {} at a level of {}", from, to, off, tail);
+            assert!(
+                off < 0.01 * tail,
+                "{:?} to {:?}: tail off by {} at a level of {}",
+                from,
+                to,
+                off,
+                tail
+            );
             assert!(rms(&right[at..]) > 0.5 * tail);
         }
     }
@@ -3265,10 +3641,7 @@ mod tests {
     fn test_bypass_with_effects_does_not_click_and_comes_back_clean() {
         let input = sine(220.0, 0.3, SAMPLE_RATE, 28_800);
         let playing = with_effects(with_amp(Amp::Klar, 0.5));
-        let bypassed = AmpSettings {
-            bypass: true,
-            ..playing
-        };
+        let bypassed = AmpSettings { bypass: true, ..playing };
         let (off, on) = (150 * BLOCK, 300 * BLOCK);
         let fade = (BYPASS_FADE_MS * 0.001 * SAMPLE_RATE) as usize + 1;
 
@@ -3290,8 +3663,18 @@ mod tests {
             let own_step = largest_step(&channel[4800..off]).max(largest_step(&input));
             let step_off = largest_step(&channel[off - 1..off + fade + 1]);
             let step_on = largest_step(&channel[on - 1..on + 2400]);
-            assert!(step_off < own_step * 1.2, "Step of {} into bypass, {} while playing", step_off, own_step);
-            assert!(step_on < own_step * 1.2, "Step of {} out of bypass, {} while playing", step_on, own_step);
+            assert!(
+                step_off < own_step * 1.2,
+                "Step of {} into bypass, {} while playing",
+                step_off,
+                own_step
+            );
+            assert!(
+                step_on < own_step * 1.2,
+                "Step of {} out of bypass, {} while playing",
+                step_on,
+                own_step
+            );
             let stale = largest_difference(&channel[on + fade..], &fresh[fade..]);
             assert!(stale < 1e-6, "Off by {} from a chain that starts at the switch", stale);
         }
@@ -3306,7 +3689,12 @@ mod tests {
         run_stereo_blocks(&mut chain, &bypassed, &vec![0.0; 16 * BLOCK], BLOCK);
         assert!(chain.is_idle());
         let (left, right) = run_stereo_blocks(&mut chain, &long, &vec![0.0; 9600], BLOCK);
-        assert!(peak(&left) < 1e-9 && peak(&right) < 1e-9, "Left over: {} and {}", peak(&left), peak(&right));
+        assert!(
+            peak(&left) < 1e-9 && peak(&right) < 1e-9,
+            "Left over: {} and {}",
+            peak(&left),
+            peak(&right)
+        );
         assert!(chain.is_idle());
     }
 
@@ -3329,7 +3717,8 @@ mod tests {
         for sample_rate in [44100.0, 48000.0, 88200.0, 96000.0, 192000.0] {
             let len = (sample_rate * 0.2) as usize;
             let mut noise = Noise::new(3);
-            let input: Vec<f32> = sine(97.0, 1.0, sample_rate, len).iter().map(|s| s + noise.next()).collect();
+            let input: Vec<f32> =
+                sine(97.0, 1.0, sample_rate, len).iter().map(|s| s + noise.next()).collect();
             for (amp, time_ms) in [(Amp::Klar, 20.0), (Amp::Torden, 1000.0)] {
                 let settings = AmpSettings {
                     in_gain_db: 24.0,
@@ -3342,8 +3731,19 @@ mod tests {
                 };
                 let (left, right) = run_stereo(&settings, &input, sample_rate);
                 for channel in [&left, &right] {
-                    assert!(channel.iter().all(|s| s.is_finite()), "{:?} not finite at {} Hz", amp, sample_rate);
-                    assert!(peak(channel) <= 1.0, "{:?} peak {} at {} Hz", amp, peak(channel), sample_rate);
+                    assert!(
+                        channel.iter().all(|s| s.is_finite()),
+                        "{:?} not finite at {} Hz",
+                        amp,
+                        sample_rate
+                    );
+                    assert!(
+                        peak(channel) <= 1.0,
+                        "{:?} peak {} at {} Hz",
+                        amp,
+                        peak(channel),
+                        sample_rate
+                    );
                     assert!(rms(channel) > 0.05);
                 }
                 let mono = run(&settings, &input, sample_rate);
@@ -3360,11 +3760,13 @@ mod tests {
             gate_release_ms: 20.0,
             ..everything_on(Amp::Brol, 0.7)
         });
-        let reference = run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, input.len());
+        let reference =
+            run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, input.len());
         assert!(reference.0 != reference.1);
         for block in [1, 7, 32, 64, 1000] {
             let output = run_stereo_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, block);
-            let off = largest_difference(&reference.0, &output.0).max(largest_difference(&reference.1, &output.1));
+            let off = largest_difference(&reference.0, &output.0)
+                .max(largest_difference(&reference.1, &output.1));
             assert!(off < 1e-5, "In blocks of {}: off by {}", block, off);
             let mono = run_blocks(&mut new_chain(SAMPLE_RATE), &settings, &input, block);
             assert!(largest_difference(&reference.0, &mono) < 1e-5, "Mono in blocks of {}", block);
@@ -3389,15 +3791,22 @@ mod tests {
         run_blocks(&mut chain, &settings, &vec![0.0; 48_000], BLOCK);
         assert!(chain.is_idle());
         let silent = block_time_us(&mut chain, &settings, &vec![0.0; 12_000]);
-        assert!(ringing < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us while the tail ends", playing, ringing);
-        assert!(silent < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us silent", playing, silent);
+        assert!(
+            ringing < playing * SLOWED_DOWN,
+            "{:.1} us per block playing, {:.1} us while the tail ends",
+            playing,
+            ringing
+        );
+        assert!(
+            silent < playing * SLOWED_DOWN,
+            "{:.1} us per block playing, {:.1} us silent",
+            playing,
+            silent
+        );
     }
 
     fn tuning(base: AmpSettings) -> AmpSettings {
-        AmpSettings {
-            tuner_on: true,
-            ..base
-        }
+        AmpSettings { tuner_on: true, ..base }
     }
 
     /// A low E string, quieter than a guitar gives it
@@ -3428,14 +3837,26 @@ mod tests {
             let fade = (TUNER_FADE_MS * 0.001 * SAMPLE_RATE) as usize + 1;
             for channel in [&left, &right] {
                 // Not quiet: silent, whatever still rings in the delay and the reverb
-                assert!(channel[on + fade..off].iter().all(|sample| *sample == 0.0), "{:?} is heard while tuning", playing.amp);
+                assert!(
+                    channel[on + fade..off].iter().all(|sample| *sample == 0.0),
+                    "{:?} is heard while tuning",
+                    playing.amp
+                );
                 assert!(rms(&channel[off + 4800..]) > 0.01);
 
                 let own_step = largest_step(&channel[4800..on]);
                 let step_on = largest_step(&channel[on - 1..on + fade + 1]);
                 let step_off = largest_step(&channel[off - 1..off + 2400]);
-                assert!(step_on < own_step * 1.2, "{:?}: step of {step_on} into tuning, {own_step} while playing", playing.amp);
-                assert!(step_off < own_step * 1.2, "{:?}: step of {step_off} out of tuning, {own_step} while playing", playing.amp);
+                assert!(
+                    step_on < own_step * 1.2,
+                    "{:?}: step of {step_on} into tuning, {own_step} while playing",
+                    playing.amp
+                );
+                assert!(
+                    step_off < own_step * 1.2,
+                    "{:?}: step of {step_off} out of tuning, {own_step} while playing",
+                    playing.amp
+                );
             }
         }
     }
@@ -3470,10 +3891,7 @@ mod tests {
             out_level: 0.0,
             ..AmpSettings::default()
         };
-        let bypassed = AmpSettings {
-            bypass: true,
-            ..AmpSettings::default()
-        };
+        let bypassed = AmpSettings { bypass: true, ..AmpSettings::default() };
         for settings in [AmpSettings::default(), far_down, with_amp(Amp::Torden, 1.0), bypassed] {
             let mut chain = new_chain(SAMPLE_RATE);
             let reading = chain.tuner_reading();
@@ -3482,7 +3900,10 @@ mod tests {
                 chain.process(&tuning(settings), l, Some(r));
             }
             let heard = reading.hz();
-            assert!(heard.is_some_and(|hz| cents_off(hz, expected).abs() < 3.0), "{heard:?} with {settings:?}");
+            assert!(
+                heard.is_some_and(|hz| cents_off(hz, expected).abs() < 3.0),
+                "{heard:?} with {settings:?}"
+            );
 
             // Bypass passes the input on while the tuner listens. Anything else is silent
             if settings.bypass {
@@ -3533,7 +3954,9 @@ mod tests {
             let reading = chain.tuner_reading();
             let mut output = input.clone();
             let mut heard = Vec::new();
-            for (range, settings) in [(0..on, playing), (on..off, tuning(playing)), (off..input.len(), playing)] {
+            for (range, settings) in
+                [(0..on, playing), (on..off, tuning(playing)), (off..input.len(), playing)]
+            {
                 for piece in output[range].chunks_mut(block) {
                     chain.process(&settings, piece, None);
                 }
@@ -3553,10 +3976,8 @@ mod tests {
 
     /// A built-in cabinet as a file of it comes out when it is loaded at `sample_rate`
     fn file_taps(amp: Amp, sample_rate: f32) -> Vec<f32> {
-        let recording = Recording {
-            samples: whole_response(amp, 48000.0, 0.1, 0.5),
-            sample_rate: 48000,
-        };
+        let recording =
+            Recording { samples: whole_response(amp, 48000.0, 0.1, 0.5), sample_rate: 48000 };
         user_cab::prepare(&recording, sample_rate).unwrap()
     }
 
@@ -3569,7 +3990,13 @@ mod tests {
     }
 
     /// Plays `input` and leaves a cabinet on the stage in front of the block at sample `at`
-    fn run_cab_change(chain: &mut AmpChain, settings: &AmpSettings, taps: &[f32], input: &[f32], at: usize) -> Vec<f32> {
+    fn run_cab_change(
+        chain: &mut AmpChain,
+        settings: &AmpSettings,
+        taps: &[f32],
+        input: &[f32],
+        at: usize,
+    ) -> Vec<f32> {
         let mut output = input.to_vec();
         let (before, after) = output.split_at_mut(at);
         for block in before.chunks_mut(BLOCK) {
@@ -3587,7 +4014,12 @@ mod tests {
     fn latency_samples_through(taps: &[f32], amp: Amp, sample_rate: f32) -> usize {
         let mut impulse = vec![0.0; 2048];
         impulse[0] = 0.05;
-        let output = run_blocks(&mut chain_with_cab(taps, sample_rate), &with_amp(amp, 0.0), &impulse, BLOCK);
+        let output = run_blocks(
+            &mut chain_with_cab(taps, sample_rate),
+            &with_amp(amp, 0.0),
+            &impulse,
+            BLOCK,
+        );
         let top = peak(&output);
         output.iter().position(|s| s.abs() >= 0.5 * top).unwrap()
     }
@@ -3619,7 +4051,14 @@ mod tests {
     fn test_missing_and_unusable_files_leave_the_amps_own_cabinet() {
         let dir = test_dir("chain");
         std::fs::write(dir.join("bad.wav"), b"not a recording").unwrap();
-        write_ir_wav(&dir.join("good.wav"), &whole_response(Amp::Klar, 48000.0, 0.1, 0.5), 2, 24, false, 48000);
+        write_ir_wav(
+            &dir.join("good.wav"),
+            &whole_response(Amp::Klar, 48000.0, 0.1, 0.5),
+            2,
+            24,
+            false,
+            48000,
+        );
 
         let input = power_chords(SAMPLE_RATE, 0.25);
         let settings = with_amp(Amp::Torden, 0.5);
@@ -3628,7 +4067,9 @@ mod tests {
         let mut chain = new_chain(SAMPLE_RATE);
         run_blocks(&mut chain, &settings, &input, BLOCK);
         let again = run_blocks(&mut chain, &settings, &input, BLOCK);
-        for (name, status) in [("gone.wav", CabStatus::Missing), ("bad.wav", CabStatus::Bad), ("", CabStatus::Fine)] {
+        for (name, status) in
+            [("gone.wav", CabStatus::Missing), ("bad.wav", CabStatus::Bad), ("", CabStatus::Fine)]
+        {
             let mut chain = new_chain(SAMPLE_RATE);
             let loader = CabLoader::new(chain.cab_stage(), SAMPLE_RATE);
             loader.load_from(&Mutex::new(name.to_owned()), Some(&dir));
@@ -3650,7 +4091,12 @@ mod tests {
         loader_for(&chain).load_from(&Mutex::new("good.wav".to_owned()), Some(&dir));
         let output = run_blocks(&mut chain, &settings, &input, BLOCK);
         assert!(chain.user_cab);
-        let through_file = run_blocks(&mut chain_with_cab(&file_taps(Amp::Klar, SAMPLE_RATE), SAMPLE_RATE), &settings, &input, BLOCK);
+        let through_file = run_blocks(
+            &mut chain_with_cab(&file_taps(Amp::Klar, SAMPLE_RATE), SAMPLE_RATE),
+            &settings,
+            &input,
+            BLOCK,
+        );
         assert!(largest_difference(&output, &through_file) < 1e-3 * peak(&output));
         assert!(largest_difference(&output, &reference) > 0.05 * peak(&output));
     }
@@ -3664,21 +4110,24 @@ mod tests {
         let input = power_chords(SAMPLE_RATE, 0.5);
         for amp in Amp::ALL {
             // Quiet enough for the safety clip to leave both alone
-            let on = AmpSettings {
-                out_level: 0.2,
-                ..with_amp(amp, 0.6)
-            };
+            let on = AmpSettings { out_level: 0.2, ..with_amp(amp, 0.6) };
             let off = AmpSettings { cab_on: false, ..on };
             let through = run_blocks(&mut chain_with_cab(&[1.0], SAMPLE_RATE), &on, &input, BLOCK);
             let without = run(&off, &input, SAMPLE_RATE);
             assert!(peak(&through) < OUTPUT_CLIP_KNEE && peak(&through) > 0.01);
             // The same but for the level the switched-off cabinet is turned down by
             let trim = db_to_gain(-CAB_OFF_DB);
-            let difference = through.iter().zip(&without).map(|(a, b)| (a - b * trim).abs()).fold(0.0, f32::max);
+            let difference =
+                through.iter().zip(&without).map(|(a, b)| (a - b * trim).abs()).fold(0.0, f32::max);
             assert!(difference < 1e-5 * peak(&through), "{:?}: off by {}", amp, difference);
 
             // Switched off, the player's cabinet is as much out of the way as the amp's own
-            let user_off = run_blocks(&mut chain_with_cab(&file_taps(amp, SAMPLE_RATE), SAMPLE_RATE), &off, &input, BLOCK);
+            let user_off = run_blocks(
+                &mut chain_with_cab(&file_taps(amp, SAMPLE_RATE), SAMPLE_RATE),
+                &off,
+                &input,
+                BLOCK,
+            );
             assert!(user_off == without, "{:?}", amp);
         }
     }
@@ -3699,12 +4148,31 @@ mod tests {
                     let mut chain = chain_with_cab(before, SAMPLE_RATE);
                     let output = run_cab_change(&mut chain, &settings, after, input, at);
                     let ratio = step_ratio(&output, at);
-                    assert!(ratio < 1.3, "{:?}, {} to {} taps: step {} times its own", amp, before.len(), after.len(), ratio);
+                    assert!(
+                        ratio < 1.3,
+                        "{:?}, {} to {} taps: step {} times its own",
+                        amp,
+                        before.len(),
+                        after.len(),
+                        ratio
+                    );
                     // Ends up as if it had been that cabinet all along
-                    let reference = run_blocks(&mut chain_with_cab(after, SAMPLE_RATE), &settings, input, BLOCK);
+                    let reference = run_blocks(
+                        &mut chain_with_cab(after, SAMPLE_RATE),
+                        &settings,
+                        input,
+                        BLOCK,
+                    );
                     let settled = at + 4800;
                     let difference = largest_difference(&output[settled..], &reference[settled..]);
-                    assert!(difference < 1e-4, "{:?}, {} to {} taps: off by {}", amp, before.len(), after.len(), difference);
+                    assert!(
+                        difference < 1e-4,
+                        "{:?}, {} to {} taps: off by {}",
+                        amp,
+                        before.len(),
+                        after.len(),
+                        difference
+                    );
                 }
             }
         }
@@ -3738,7 +4206,8 @@ mod tests {
             }
             chain.process(&settings, block, None);
             // Left alone until the crossfade is over, then taken at once
-            let fading = (600 * piece..600 * piece + chain.cabinet.swap_len()).contains(&((index + 1) * piece));
+            let fading = (600 * piece..600 * piece + chain.cabinet.swap_len())
+                .contains(&((index + 1) * piece));
             if index >= 603 && fading {
                 assert!(stage.is_ready(), "Taken during the crossfade, in piece {}", index);
             }
@@ -3749,7 +4218,8 @@ mod tests {
         let at = 600 * piece;
         let ratio = step_ratio(&output, at);
         assert!(ratio < 1.3, "Step {} times its own", ratio);
-        let reference = run_blocks(&mut chain_with_cab(&third, SAMPLE_RATE), &settings, &input, piece);
+        let reference =
+            run_blocks(&mut chain_with_cab(&third, SAMPLE_RATE), &settings, &input, piece);
         let settled = at + 9600;
         let difference = largest_difference(&output[settled..], &reference[settled..]);
         assert!(difference < 1e-4, "Off by {}", difference);
@@ -3765,29 +4235,50 @@ mod tests {
             let mut chain = chain_with_cab(&taps, SAMPLE_RATE);
             let switched = run_switch(&mut chain, from, to, 0.5, &input, at);
             assert!(chain.user_cab);
-            assert!(step_ratio(&switched, at) < 1.2, "{:?} to {:?}: step {}", from, to, step_ratio(&switched, at));
+            assert!(
+                step_ratio(&switched, at) < 1.2,
+                "{:?} to {:?}: step {}",
+                from,
+                to,
+                step_ratio(&switched, at)
+            );
 
             // The new amp through the player's cabinet, not through its own
-            let through = run_blocks(&mut chain_with_cab(&taps, SAMPLE_RATE), &with_amp(to, 0.5), &input, BLOCK);
+            let through = run_blocks(
+                &mut chain_with_cab(&taps, SAMPLE_RATE),
+                &with_amp(to, 0.5),
+                &input,
+                BLOCK,
+            );
             let own = run(&with_amp(to, 0.5), &input, SAMPLE_RATE);
             let level = rms(&through[settled..]);
             let difference = largest_difference(&switched[settled..], &through[settled..]);
-            assert!(difference < 0.01 * level, "{:?} to {:?}: off by {} at a level of {}", from, to, difference, level);
+            assert!(
+                difference < 0.01 * level,
+                "{:?} to {:?}: off by {} at a level of {}",
+                from,
+                to,
+                difference,
+                level
+            );
             assert!(largest_difference(&switched[settled..], &own[settled..]) > 0.1 * level);
 
             // The same while bypassed, where nothing is faded
             let mut chain = chain_with_cab(&taps, SAMPLE_RATE);
-            let bypassed = |amp: Amp| AmpSettings {
-                bypass: true,
-                ..with_amp(amp, 0.5)
-            };
+            let bypassed = |amp: Amp| AmpSettings { bypass: true, ..with_amp(amp, 0.5) };
             run_blocks(&mut chain, &with_amp(from, 0.5), &input[..4800], BLOCK);
             run_blocks(&mut chain, &bypassed(from), &input[..4800], BLOCK);
             run_blocks(&mut chain, &bypassed(to), &input[..4800], BLOCK);
             assert!(chain.user_cab && chain.amp == to);
             let back = run_blocks(&mut chain, &with_amp(to, 0.5), &input, BLOCK);
             let difference = largest_difference(&back[settled..], &through[settled..]);
-            assert!(difference < 0.01 * level, "{:?} to {:?} bypassed: off by {}", from, to, difference);
+            assert!(
+                difference < 0.01 * level,
+                "{:?} to {:?} bypassed: off by {}",
+                from,
+                to,
+                difference
+            );
         }
     }
 
@@ -3830,7 +4321,8 @@ mod tests {
                     ..with_amp(amp, 0.0)
                 };
                 let input = sine(freq_hz, 0.02, SAMPLE_RATE, 24_000);
-                let output = run_blocks(&mut chain_with_cab(&[1.0], SAMPLE_RATE), &settings, &input, BLOCK);
+                let output =
+                    run_blocks(&mut chain_with_cab(&[1.0], SAMPLE_RATE), &settings, &input, BLOCK);
                 to_db(level_at(&output[12_000..], SAMPLE_RATE, freq_hz))
             };
             let bright = level(1.0, 0.5, 5000.0) - level(0.5, 0.5, 5000.0);
@@ -3838,7 +4330,13 @@ mod tests {
             let thump = level(0.5, 1.0, cab.resonance_hz) - level(0.5, 0.5, cab.resonance_hz);
             assert!(bright > 4.0, "{:?}: Mic 10 adds {:.1} dB at 5 kHz", amp, bright);
             assert!(dark < -4.0, "{:?}: Mic 0 adds {:.1} dB at 4 kHz", amp, dark);
-            assert!((thump - 6.0).abs() < 0.5, "{:?}: Resonance 10 adds {:.1} dB at {} Hz", amp, thump, cab.resonance_hz);
+            assert!(
+                (thump - 6.0).abs() < 0.5,
+                "{:?}: Resonance 10 adds {:.1} dB at {} Hz",
+                amp,
+                thump,
+                cab.resonance_hz
+            );
         }
     }
 
@@ -3848,7 +4346,8 @@ mod tests {
         // parts are worked out in blocks of their own, counted in samples
         let input = power_chords(SAMPLE_RATE, 0.5);
         let settings = with_effects(with_amp(Amp::Brol, 0.6));
-        let (first, second) = (file_taps(Amp::Klar, SAMPLE_RATE), file_taps(Amp::Torden, SAMPLE_RATE));
+        let (first, second) =
+            (file_taps(Amp::Klar, SAMPLE_RATE), file_taps(Amp::Torden, SAMPLE_RATE));
         assert!(first.len() > 1000 && second.len() > 800);
         // Where every block size below has a block start
         let at = 8000;
@@ -3892,7 +4391,9 @@ mod tests {
         chain.cab_stage().offer(&taps, 96000.0);
         let output = run_blocks(&mut chain, &settings, &input, BLOCK);
         assert!(chain.user_cab);
-        assert!(output == run_blocks(&mut chain_with_cab(&taps, 96000.0), &settings, &input, BLOCK));
+        assert!(
+            output == run_blocks(&mut chain_with_cab(&taps, 96000.0), &settings, &input, BLOCK)
+        );
     }
 
     #[test]
@@ -3935,16 +4436,31 @@ mod tests {
                 let own = latency_samples(amp, sample_rate);
                 // Nothing in the way of the amp: no later than through the amp's own cabinet
                 let direct = latency_samples_through(&[1.0], amp, sample_rate);
-                assert!(direct <= own, "{:?} at {} Hz: {} samples, {} through its own", amp, sample_rate, direct, own);
+                assert!(
+                    direct <= own,
+                    "{:?} at {} Hz: {} samples, {} through its own",
+                    amp,
+                    sample_rate,
+                    direct,
+                    own
+                );
                 // The amp's own cabinet from a file with 30 ms of silence in front
                 let mut late = vec![0.0; 1440];
                 late.extend(whole_response(amp, 48000.0, 0.1, 0.5));
-                let recording = Recording {
-                    samples: late,
-                    sample_rate: 48000,
-                };
-                let through = latency_samples_through(&user_cab::prepare(&recording, sample_rate).unwrap(), amp, sample_rate);
-                assert!(through <= own + 1, "{:?} at {} Hz: {} samples, {} through its own", amp, sample_rate, through, own);
+                let recording = Recording { samples: late, sample_rate: 48000 };
+                let through = latency_samples_through(
+                    &user_cab::prepare(&recording, sample_rate).unwrap(),
+                    amp,
+                    sample_rate,
+                );
+                assert!(
+                    through <= own + 1,
+                    "{:?} at {} Hz: {} samples, {} through its own",
+                    amp,
+                    sample_rate,
+                    through,
+                    own
+                );
             }
         }
     }
@@ -3960,7 +4476,10 @@ mod tests {
         println!("Time per {}-sample block, stereo, everything on (Torden, Gain 10), both effects, and its", BLOCK);
         println!("share of real time: through the amp's own cabinet, and through one of the player's own");
         println!("of each length. The longest a file is cut to is {} ms", USER_IR_MS);
-        println!("{:>11}{:>19}{:>19}{:>19}{:>19}{:>19}", "", "own", "10 ms", "20 ms", "30 ms", "40 ms");
+        println!(
+            "{:>11}{:>19}{:>19}{:>19}{:>19}{:>19}",
+            "", "own", "10 ms", "20 ms", "30 ms", "40 ms"
+        );
         for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0] {
             let block_us = BLOCK as f64 / sample_rate as f64 * 1e6;
             let settings = with_default_effects(everything_on(Amp::Torden, 1.0));
@@ -3970,13 +4489,26 @@ mod tests {
                 // Noise that dies away, levelled like a file: as loud as the amp's own
                 let mut noise = Noise::new(5);
                 let len = (ms * 0.001 * sample_rate) as usize;
-                let response: Vec<f32> =
-                    (0..len).map(|index| if index == 0 { 1.0 } else { noise.next() * (-6.0 * index as f32 / len as f32).exp() }).collect();
-                let taps = if len == 0 { Vec::new() } else { user_cab::trim_and_level(&response, sample_rate).unwrap() };
+                let response: Vec<f32> = (0..len)
+                    .map(|index| {
+                        if index == 0 {
+                            1.0
+                        } else {
+                            noise.next() * (-6.0 * index as f32 / len as f32).exp()
+                        }
+                    })
+                    .collect();
+                let taps = if len == 0 {
+                    Vec::new()
+                } else {
+                    user_cab::trim_and_level(&response, sample_rate).unwrap()
+                };
                 let mut chain = chain_with_cab(&taps, sample_rate);
                 run_stereo_blocks(&mut chain, &settings, &chords, BLOCK);
                 assert_eq!(chain.user_cab, len > 0);
-                let time = (0..5).map(|_| block_time_stereo_us(&mut chain, &settings, &chords)).fold(f64::MAX, f64::min);
+                let time = (0..5)
+                    .map(|_| block_time_stereo_us(&mut chain, &settings, &chords))
+                    .fold(f64::MAX, f64::min);
                 print!("{:>6} {:>5.1} us{:>4.1}%", taps.len(), time, time / block_us * 100.0);
             }
             println!();
@@ -3993,9 +4525,20 @@ mod tests {
             for ms in [0.0, USER_IR_MS] {
                 let mut noise = Noise::new(5);
                 let len = (ms * 0.001 * sample_rate) as usize;
-                let response: Vec<f32> =
-                    (0..len).map(|index| if index == 0 { 1.0 } else { noise.next() * (-6.0 * index as f32 / len as f32).exp() }).collect();
-                let taps = if len == 0 { Vec::new() } else { user_cab::trim_and_level(&response, sample_rate).unwrap() };
+                let response: Vec<f32> = (0..len)
+                    .map(|index| {
+                        if index == 0 {
+                            1.0
+                        } else {
+                            noise.next() * (-6.0 * index as f32 / len as f32).exp()
+                        }
+                    })
+                    .collect();
+                let taps = if len == 0 {
+                    Vec::new()
+                } else {
+                    user_cab::trim_and_level(&response, sample_rate).unwrap()
+                };
                 let mut chain = chain_with_cab(&taps, sample_rate);
                 run_stereo_blocks(&mut chain, &settings, &chords, BLOCK);
                 let (mut median, mut most) = (f64::MAX, f64::MAX);
@@ -4014,13 +4557,21 @@ mod tests {
                     median = median.min(times[times.len() / 2]);
                     most = most.min(times[times.len() * 99 / 100]);
                 }
-                print!("{:>8} taps{:>6.1} /{:>5.1} us  x{:.2}", taps.len(), median, most, most / median);
+                print!(
+                    "{:>8} taps{:>6.1} /{:>5.1} us  x{:.2}",
+                    taps.len(),
+                    median,
+                    most,
+                    most / median
+                );
             }
             println!();
         }
 
         println!();
-        println!("Latency in samples at Gain 0: through the amp's own cabinet, through the same cabinet");
+        println!(
+            "Latency in samples at Gain 0: through the amp's own cabinet, through the same cabinet"
+        );
         println!("from a 48 kHz file with 30 ms of silence in front, and through a cabinet of one sample");
         println!("{:<8}{:>20}{:>20}{:>20}{:>20}", "", 44100, 48000, 96000, 192000);
         for amp in Amp::ALL {
@@ -4028,10 +4579,7 @@ mod tests {
             for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0] {
                 let mut late = vec![0.0; 1440];
                 late.extend(whole_response(amp, 48000.0, 0.1, 0.5));
-                let recording = Recording {
-                    samples: late,
-                    sample_rate: 48000,
-                };
+                let recording = Recording { samples: late, sample_rate: 48000 };
                 let taps = user_cab::prepare(&recording, sample_rate).unwrap();
                 print!(
                     "{:>10} /{:>3} /{:>3}",
@@ -4068,7 +4616,9 @@ mod tests {
             let recording = &recording[..(4.0 * sample_rate) as usize];
             for amp in Amp::ALL {
                 for gain in [0.0, 0.25, 0.5, 0.75, 1.0] {
-                    for (pedals, drive_on, effects_on) in [("plain", false, false), ("drive", true, false), ("effects", false, true)] {
+                    for (pedals, drive_on, effects_on) in
+                        [("plain", false, false), ("drive", true, false), ("effects", false, true)]
+                    {
                         let mut settings = with_amp(amp, gain);
                         settings.drive_on = drive_on;
                         settings.delay.on = effects_on;
@@ -4103,7 +4653,10 @@ mod tests {
         let gains = [0.0, 0.25, 0.5, 0.75, 1.0];
         let crest = |recording: &[f32]| to_db(peak(recording) / rms(recording));
 
-        for (name, recording) in [("Riffs (`guitar_di`)", guitar_di(SAMPLE_RATE)), ("Clean playing (`clean_di`)", clean_di(SAMPLE_RATE))] {
+        for (name, recording) in [
+            ("Riffs (`guitar_di`)", guitar_di(SAMPLE_RATE)),
+            ("Clean playing (`clean_di`)", clean_di(SAMPLE_RATE)),
+        ] {
             println!("\n{name}, crest {:.1} dB. Dials at 5 except Gain, 48 kHz, every pedal at its default", crest(&recording));
             println!("Per level of the recording in dBFS RMS: loudness in LUFS / peak in dBFS / crest in dB");
             print!("{:<8}{:>5}", "amp", "gain");
@@ -4118,11 +4671,17 @@ mod tests {
                     for (level, heard) in DI_LEVELS_DB.iter().zip(&mut loudness) {
                         // The peaks of a hot recording may be over full scale here: what a
                         // recording that loud would be if the converter had the room
-                        let output = run(&with_amp(amp, gain), &at_rms_db(&recording, *level), SAMPLE_RATE);
+                        let output =
+                            run(&with_amp(amp, gain), &at_rms_db(&recording, *level), SAMPLE_RATE);
                         *heard = loudness_lufs(&[&output], SAMPLE_RATE);
                         print!(
                             "{:>22}",
-                            format!("{:.1} / {:.1} / {:.1}", heard, to_db(peak(&output)), crest(&output))
+                            format!(
+                                "{:.1} / {:.1} / {:.1}",
+                                heard,
+                                to_db(peak(&output)),
+                                crest(&output)
+                            )
                         );
                     }
                     // How much of 12 dB more guitar is heard: 12 from a clean amp
@@ -4131,8 +4690,10 @@ mod tests {
             }
         }
 
-        println!("
-A note held at 220 Hz (a sine) at the same levels: distortion in dB against the note");
+        println!(
+            "
+A note held at 220 Hz (a sine) at the same levels: distortion in dB against the note"
+        );
         print!("{:<8}{:>5}", "amp", "gain");
         for level in DI_LEVELS_DB {
             print!("{:>10}", format!("{level:.0}"));
@@ -4142,7 +4703,12 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
             for gain in gains {
                 print!("{:<8}{:>5.1}", amp.model().name, gain * 10.0);
                 for level in DI_LEVELS_DB {
-                    let tone = sine(220.0, db_to_gain(level) * std::f32::consts::SQRT_2, SAMPLE_RATE, 19_200);
+                    let tone = sine(
+                        220.0,
+                        db_to_gain(level) * std::f32::consts::SQRT_2,
+                        SAMPLE_RATE,
+                        19_200,
+                    );
                     let output = run(&with_amp(amp, gain), &tone, SAMPLE_RATE);
                     print!("{:>10.1}", thd_db(&output[9600..], SAMPLE_RATE, 220.0));
                 }
@@ -4168,7 +4734,15 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         println!("Levels in dBFS. THD of the sine. Aliasing: energy not at harmonics, dB below the total");
         println!(
             "{:<8}{:>5}{:>12}{:>12}{:>10}{:>10}{:>9}{:>12}{:>12}",
-            "amp", "gain", "chords RMS", "chords pk", "sine RMS", "sine pk", "THD dB", "alias 1245", "alias 4186"
+            "amp",
+            "gain",
+            "chords RMS",
+            "chords pk",
+            "sine RMS",
+            "sine pk",
+            "THD dB",
+            "alias 1245",
+            "alias 4186"
         );
         for amp in Amp::ALL {
             for gain in gains {
@@ -4196,16 +4770,14 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         for amp in Amp::ALL {
             print!("{:<8}master", amp.model().name);
             for step in 0..=4 {
-                let settings = AmpSettings {
-                    master: step as f32 * 0.25,
-                    ..with_amp(amp, 0.5)
-                };
+                let settings = AmpSettings { master: step as f32 * 0.25, ..with_amp(amp, 0.5) };
                 print!("{:>8.1}", to_db(rms(&run(&settings, &chords[..96_000], SAMPLE_RATE))));
             }
             println!();
             print!("{:<8}gain  ", amp.model().name);
             for step in 0..=4 {
-                let output = run(&with_amp(amp, step as f32 * 0.25), &chords[..96_000], SAMPLE_RATE);
+                let output =
+                    run(&with_amp(amp, step as f32 * 0.25), &chords[..96_000], SAMPLE_RATE);
                 print!("{:>8.1}", to_db(rms(&output)));
             }
             println!();
@@ -4236,7 +4808,9 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
 
         println!();
         println!("Tightness: palm-muted power chords on 65 and 73 Hz roots, level per band in dB relative");
-        println!("to the whole signal. `boosted` is the same playing with the lows cut, the mids pushed");
+        println!(
+            "to the whole signal. `boosted` is the same playing with the lows cut, the mids pushed"
+        );
         println!("and 12 dB more level, as from an overdrive pedal in front");
         let mutes = palm_mutes(SAMPLE_RATE, 4.8);
         let print_tight = |name: &str, signal: &[f32]| {
@@ -4260,7 +4834,10 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         }
         for gain in [0.5, 1.0] {
             let name = format!("{} {:.1} boosted", Amp::Torden.model().name, gain * 10.0);
-            print_tight(&name, &run(&with_amp(Amp::Torden, gain), &boosted(&mutes, SAMPLE_RATE), SAMPLE_RATE));
+            print_tight(
+                &name,
+                &run(&with_amp(Amp::Torden, gain), &boosted(&mutes, SAMPLE_RATE), SAMPLE_RATE),
+            );
         }
 
         println!();
@@ -4272,7 +4849,12 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         );
         for amp in Amp::ALL {
             let play = |level_db: f32| {
-                let input = sine(220.0, db_to_gain(level_db) * std::f32::consts::SQRT_2, SAMPLE_RATE, 48_000);
+                let input = sine(
+                    220.0,
+                    db_to_gain(level_db) * std::f32::consts::SQRT_2,
+                    SAMPLE_RATE,
+                    48_000,
+                );
                 let output = run(&with_amp(amp, 0.5), &input, SAMPLE_RATE);
                 (to_db(rms(&output[24_000..])), thd_db(&output[24_000..], SAMPLE_RATE, 220.0))
             };
@@ -4289,7 +4871,9 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         }
 
         println!();
-        println!("Level after the preamp alone in dBFS RMS (chords), across Gain: tunes `level_db`");
+        println!(
+            "Level after the preamp alone in dBFS RMS (chords), across Gain: tunes `level_db`"
+        );
         for amp in Amp::ALL {
             print!("{:<8}", amp.model().name);
             for step in 0..=4 {
@@ -4311,7 +4895,10 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         println!("Cabinet response in dB");
         let probes = [
             [63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 315.0, 400.0, 500.0, 630.0, 800.0],
-            [1000.0, 1250.0, 1600.0, 2000.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0, 8000.0, 10000.0, 16000.0],
+            [
+                1000.0, 1250.0, 1600.0, 2000.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0, 8000.0,
+                10000.0, 16000.0,
+            ],
         ];
         for row in probes {
             print!("{:<8}", "Hz");
@@ -4371,7 +4958,8 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
                 run_blocks(&mut chain, &settings, &chords, BLOCK);
                 // Long enough for the slowest state in the chain to have decayed all the way
                 run_blocks(&mut chain, &settings, &vec![0.0; (sample_rate * 20.0) as usize], BLOCK);
-                let silent = block_time_us(&mut chain, &settings, &vec![0.0; (sample_rate * 2.0) as usize]);
+                let silent =
+                    block_time_us(&mut chain, &settings, &vec![0.0; (sample_rate * 2.0) as usize]);
                 // Measured right after each other, so the processor is in the same mood for both
                 let playing = block_time_us(&mut chain, &settings, &chords);
                 println!(
@@ -4387,12 +4975,19 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         }
 
         println!();
-        println!("Clean headroom at Gain 0: THD in dB of a 220 Hz sine at three levels in dBFS RMS");
+        println!(
+            "Clean headroom at Gain 0: THD in dB of a 220 Hz sine at three levels in dBFS RMS"
+        );
         println!("{:<8}{:>8}{:>8}{:>8}", "amp", "-18", "-12", "-6");
         for amp in Amp::ALL {
             print!("{:<8}", amp.model().name);
             for level_db in [-18.0, -12.0, -6.0] {
-                let input = sine(220.0, db_to_gain(level_db) * std::f32::consts::SQRT_2, SAMPLE_RATE, 48_000);
+                let input = sine(
+                    220.0,
+                    db_to_gain(level_db) * std::f32::consts::SQRT_2,
+                    SAMPLE_RATE,
+                    48_000,
+                );
                 let output = run(&with_amp(amp, 0.0), &input, SAMPLE_RATE);
                 print!("{:>8.1}", thd_db(&output[24_000..], SAMPLE_RATE, 220.0));
             }
@@ -4401,7 +4996,9 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
 
         println!();
         println!("Gate. A low E that rings out (peak -12 dBFS), the same note cut off after half a second,");
-        println!("and hiss at -70 dBFS RMS. `opens`: from the first sample of the note to fully open.");
+        println!(
+            "and hiss at -70 dBFS RMS. `opens`: from the first sample of the note to fully open."
+        );
         println!("`cut closed`: from the cut to silence. `ringing closed`: when the ringing note is shut out.");
         println!("`changes`: times the gate opened or started to close during the ringing note (2 is once each)");
         println!(
@@ -4427,7 +5024,9 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
                 let opens = ringing_trace.iter().position(|&gain| gain == 1.0).unwrap();
                 let cut_closed = cut_trace[24_000..].iter().position(|&gain| gain == 0.0).unwrap();
                 let ringing_closed = match ringing_trace.iter().rposition(|&gain| gain > 0.0) {
-                    Some(last) if last + 1 < ringing_trace.len() => format!("{:.2} s", (last + 1) as f32 / SAMPLE_RATE),
+                    Some(last) if last + 1 < ringing_trace.len() => {
+                        format!("{:.2} s", (last + 1) as f32 / SAMPLE_RATE)
+                    }
                     _ => "still open".to_string(),
                 };
                 let hiss_gain = rms(&hiss_trace[48_000..]);
@@ -4451,15 +5050,21 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         println!("Hiss at -70 dBFS RMS through each amp at Gain 10, output in dBFS RMS");
         for amp in Amp::ALL {
             let level = |gate_on: bool| {
-                let settings = AmpSettings {
-                    gate_on,
-                    ..with_amp(amp, 1.0)
-                };
+                let settings = AmpSettings { gate_on, ..with_amp(amp, 1.0) };
                 let output = run(&settings, &noise, SAMPLE_RATE);
                 let level = rms(&output[48_000..]);
-                if level < 1e-9 { "silent".to_string() } else { format!("{:.1}", to_db(level)) }
+                if level < 1e-9 {
+                    "silent".to_string()
+                } else {
+                    format!("{:.1}", to_db(level))
+                }
             };
-            println!("{:<8}gate off {:>8}   gate on at -60 dB {:>8}", amp.model().name, level(false), level(true));
+            println!(
+                "{:<8}gate off {:>8}   gate on at -60 dB {:>8}",
+                amp.model().name,
+                level(false),
+                level(true)
+            );
         }
 
         println!();
@@ -4477,7 +5082,15 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         };
         println!(
             "{:<22}{:>8}{:>8}{:>9}{:>9}{:>9}{:>9}{:>9}{:>9}",
-            "drive tone level", "THD dB", "level", "to 100", "100-400", "400-1k6", "1k6-6k4", "6k4 up", "over 3k"
+            "drive tone level",
+            "THD dB",
+            "level",
+            "to 100",
+            "100-400",
+            "400-1k6",
+            "1k6-6k4",
+            "6k4 up",
+            "over 3k"
         );
         print!("{:<22}{:>8}{:>8}", "off", "", "");
         for level in tight_levels_db(&chords, SAMPLE_RATE) {
@@ -4515,7 +5128,13 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         println!("Drive pedal into an amp. Chords RMS and peak in dBFS, THD of the sine, aliasing as above");
         println!(
             "{:<12}{:<20}{:>12}{:>12}{:>9}{:>12}{:>12}",
-            "amp gain", "drive tone level", "chords RMS", "chords pk", "THD dB", "alias 1245", "alias 4186"
+            "amp gain",
+            "drive tone level",
+            "chords RMS",
+            "chords pk",
+            "THD dB",
+            "alias 1245",
+            "alias 4186"
         );
         let pedal_rows = [
             (Amp::Klar, 0.3, None),
@@ -4560,9 +5179,19 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         println!("fundamental of a single low C (65 Hz) and low E (82 Hz) against the whole signal, in dB");
         println!(
             "{:<26}{:>9}{:>9}{:>9}{:>9}{:>9}{:>9}{:>9}{:>9}{:>9}",
-            "Hz", "to 100", "100-400", "400-1k6", "1k6-6k4", "6k4 up", "RMS", "lows", "65 Hz", "82 Hz"
+            "Hz",
+            "to 100",
+            "100-400",
+            "400-1k6",
+            "1k6-6k4",
+            "6k4 up",
+            "RMS",
+            "lows",
+            "65 Hz",
+            "82 Hz"
         );
-        let low_notes = [65.41, 82.41].map(|freq_hz| (freq_hz, pluck(freq_hz, Pluck::OPEN, 3, SAMPLE_RATE, 48_000)));
+        let low_notes = [65.41, 82.41]
+            .map(|freq_hz| (freq_hz, pluck(freq_hz, Pluck::OPEN, 3, SAMPLE_RATE, 48_000)));
         print!("{:<26}", "dry");
         for level in tight_levels_db(&mutes, SAMPLE_RATE) {
             print!("{:>9.1}", level);
@@ -4593,33 +5222,52 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
             }
             print!("{:>9.1}{:>9.1}", to_db(rms(&output)), lows_against_mids_db(&output));
             for (freq_hz, note) in &low_notes {
-                print!("{:>9.1}", fundamental_db(&run(settings, note, SAMPLE_RATE)[4800..28_800], *freq_hz));
+                print!(
+                    "{:>9.1}",
+                    fundamental_db(&run(settings, note, SAMPLE_RATE)[4800..28_800], *freq_hz)
+                );
             }
             println!();
         }
 
         println!();
-        println!("Cabinet dials: change of the response in dB with Mic and Resonance at either end");
-        let cab_probes = [63.0, 100.0, 125.0, 200.0, 400.0, 800.0, 1600.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0];
+        println!(
+            "Cabinet dials: change of the response in dB with Mic and Resonance at either end"
+        );
+        let cab_probes = [
+            63.0, 100.0, 125.0, 200.0, 400.0, 800.0, 1600.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0,
+        ];
         print!("{:<18}", "Hz");
         for probe in cab_probes {
             print!("{:>7}", probe);
         }
         println!();
         for amp in Amp::ALL {
-            for (name, mic, res) in [("mic 0", 0.0, 0.5), ("mic 10", 1.0, 0.5), ("res 0", 0.5, 0.0), ("res 10", 0.5, 1.0)] {
+            for (name, mic, res) in [
+                ("mic 0", 0.0, 0.5),
+                ("mic 10", 1.0, 0.5),
+                ("res 0", 0.5, 0.0),
+                ("res 10", 0.5, 1.0),
+            ] {
                 print!("{:<18}", format!("{} {}", amp.model().name, name));
                 for probe in cab_probes {
-                    print!("{:>7.1}", CabVoicing::response_db(&amp.model().cab, mic, res, probe, SAMPLE_RATE));
+                    print!(
+                        "{:>7.1}",
+                        CabVoicing::response_db(&amp.model().cab, mic, res, probe, SAMPLE_RATE)
+                    );
                 }
                 println!();
             }
         }
         println!("Chords RMS at Gain 5 against the cabinet as designed, in dB");
-        println!("{:<8}{:>8}{:>8}{:>8}{:>8}{:>9}", "amp", "mic 0", "mic 10", "res 0", "res 10", "cab off");
+        println!(
+            "{:<8}{:>8}{:>8}{:>8}{:>8}{:>9}",
+            "amp", "mic 0", "mic 10", "res 0", "res 10", "cab off"
+        );
         for amp in Amp::ALL {
             let base = with_amp(amp, 0.5);
-            let level = |settings: &AmpSettings| to_db(rms(&run(settings, &chords[..96_000], SAMPLE_RATE)));
+            let level =
+                |settings: &AmpSettings| to_db(rms(&run(settings, &chords[..96_000], SAMPLE_RATE)));
             let designed = level(&base);
             println!(
                 "{:<8}{:>8.1}{:>8.1}{:>8.1}{:>8.1}{:>9.1}",
@@ -4633,14 +5281,13 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         }
 
         println!();
-        println!("Latency with gate, drive and cabinet dials on (Drive 3, Tone 5 and Tone 0, Level 5)");
+        println!(
+            "Latency with gate, drive and cabinet dials on (Drive 3, Tone 5 and Tone 0, Level 5)"
+        );
         for amp in Amp::ALL {
             for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0] {
                 let samples = latency_samples_with(&everything_on(amp, 0.0), sample_rate);
-                let dark = AmpSettings {
-                    drive_tone: 0.0,
-                    ..everything_on(amp, 0.0)
-                };
+                let dark = AmpSettings { drive_tone: 0.0, ..everything_on(amp, 0.0) };
                 let dark_samples = latency_samples_with(&dark, sample_rate);
                 println!(
                     "{:<8}{:>8} Hz{:>5} samples{:>7.3} ms   Tone 0{:>5} samples{:>7.3} ms",
@@ -4696,7 +5343,12 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
             let both = with_default_effects(base);
             let chords = power_chords(sample_rate, 2.0);
             print!("{:>8} Hz", sample_rate);
-            for settings in [base, AmpSettings { reverb: base.reverb, ..both }, AmpSettings { delay: base.delay, ..both }, both] {
+            for settings in [
+                base,
+                AmpSettings { reverb: base.reverb, ..both },
+                AmpSettings { delay: base.delay, ..both },
+                both,
+            ] {
                 let mut chain = new_chain(sample_rate);
                 run_stereo_blocks(&mut chain, &settings, &chords, BLOCK);
                 let time = block_time_stereo_us(&mut chain, &settings, &chords);
@@ -4718,7 +5370,10 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
 
         println!();
         println!("Output peak on the chords in dBFS, the louder of left and right: in front of the safety");
-        println!("clip and behind it, and the share of samples over its knee ({:.1} dBFS)", to_db(OUTPUT_CLIP_KNEE));
+        println!(
+            "clip and behind it, and the share of samples over its knee ({:.1} dBFS)",
+            to_db(OUTPUT_CLIP_KNEE)
+        );
         println!("{:<22}{:>21}{:>24}{:>24}", "", "effects off", "default", "most");
         println!(
             "{:<22}{:>7}{:>7}{:>7}{:>10}{:>7}{:>7}{:>10}{:>7}{:>7}",
@@ -4740,8 +5395,16 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
             ("Klar 5.0 +6 dB in", with_amp(Amp::Klar, 0.5), &loud),
             ("Brøl 5.0 +6 dB in", with_amp(Amp::Brol, 0.5), &loud),
             ("Torden 5.0 +6 dB in", with_amp(Amp::Torden, 0.5), &loud),
-            ("Klar 5.0 Master 10", AmpSettings { master: 1.0, ..with_amp(Amp::Klar, 0.5) }, &chords),
-            ("Torden 5.0 Master 10", AmpSettings { master: 1.0, ..with_amp(Amp::Torden, 0.5) }, &chords),
+            (
+                "Klar 5.0 Master 10",
+                AmpSettings { master: 1.0, ..with_amp(Amp::Klar, 0.5) },
+                &chords,
+            ),
+            (
+                "Torden 5.0 Master 10",
+                AmpSettings { master: 1.0, ..with_amp(Amp::Torden, 0.5) },
+                &chords,
+            ),
         ];
         for (name, base, input) in peak_rows {
             let mut row = format!("{:<22}", name);
@@ -4759,7 +5422,10 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         println!();
         println!("Safety clip. Klar at Gain 3 with the drive at 10, 10, 10 in front, the loudest setting there");
         println!("is, across the Output dial: chords peak in front of the clip and behind it, and aliasing");
-        println!("{:<14}{:>8}{:>8}{:>12}{:>12}", "Output dB", "front", "out", "alias 1245", "alias 4186");
+        println!(
+            "{:<14}{:>8}{:>8}{:>12}{:>12}",
+            "Output dB", "front", "out", "alias 1245", "alias 4186"
+        );
         for out_db in [0.0, -3.0, -6.0, -9.0] {
             let settings = AmpSettings {
                 out_level: db_to_gain(out_db),
@@ -4787,10 +5453,7 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
             "{:<26}{:>8}{:>9}{:>8}{:>10}{:>8}{:>14}",
             "", "L/R", "wet L/R", "wet dB", "layout", "sum dB", "worst octave"
         );
-        let base = AmpSettings {
-            out_level: 0.01,
-            ..with_amp(Amp::Brol, 0.5)
-        };
+        let base = AmpSettings { out_level: 0.01, ..with_amp(Amp::Brol, 0.5) };
         let defaults = with_default_effects(base);
         let stereo_rows = [
             ("delay default", AmpSettings { reverb: base.reverb, ..defaults }),
@@ -4807,7 +5470,8 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
             let (left, right) = run_stereo(&settings, &chords, SAMPLE_RATE);
             let mono = run(&settings, &chords, SAMPLE_RATE);
             let (wet_left, wet_right) = (difference(&left, &dry), difference(&right, &dry));
-            let wet_sum: Vec<f32> = wet_left.iter().zip(&wet_right).map(|(l, r)| 0.5 * (l + r)).collect();
+            let wet_sum: Vec<f32> =
+                wet_left.iter().zip(&wet_right).map(|(l, r)| 0.5 * (l + r)).collect();
             let worst = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
                 .iter()
                 .map(|&centre_hz| {
@@ -4842,7 +5506,11 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
                 };
                 print!(
                     "{:>10}",
-                    format!("{} / {}", latency_samples_with(&plain, sample_rate), latency_samples_with(&effects, sample_rate))
+                    format!(
+                        "{} / {}",
+                        latency_samples_with(&plain, sample_rate),
+                        latency_samples_with(&effects, sample_rate)
+                    )
                 );
             }
             println!();
@@ -4854,11 +5522,26 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         let last_note = power_chords(SAMPLE_RATE, 2.0);
         let idle_rows = [
             ("effects off", with_amp(Amp::Brol, 0.5)),
-            ("delay default", AmpSettings { reverb: ReverbSettings::default(), ..with_default_effects(with_amp(Amp::Brol, 0.5)) }),
-            ("reverb default", AmpSettings { delay: DelaySettings::default(), ..with_default_effects(with_amp(Amp::Brol, 0.5)) }),
+            (
+                "delay default",
+                AmpSettings {
+                    reverb: ReverbSettings::default(),
+                    ..with_default_effects(with_amp(Amp::Brol, 0.5))
+                },
+            ),
+            (
+                "reverb default",
+                AmpSettings {
+                    delay: DelaySettings::default(),
+                    ..with_default_effects(with_amp(Amp::Brol, 0.5))
+                },
+            ),
             ("both default", with_default_effects(with_amp(Amp::Brol, 0.5))),
             ("reverb 6 s", AmpSettings { reverb: reverb_on(6.0, 0.2), ..with_amp(Amp::Brol, 0.5) }),
-            ("delay 1000 ms, 90 %", AmpSettings { delay: delay_on(1000.0, 0.9, 0.25), ..with_amp(Amp::Brol, 0.5) }),
+            (
+                "delay 1000 ms, 90 %",
+                AmpSettings { delay: delay_on(1000.0, 0.9, 0.25), ..with_amp(Amp::Brol, 0.5) },
+            ),
         ];
         for (name, settings) in idle_rows {
             let mut chain = new_chain(SAMPLE_RATE);
@@ -4872,7 +5555,8 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
                 blocks += 1;
             }
             let last = &heard[heard.len().saturating_sub(480)..];
-            let level = if last.is_empty() { String::new() } else { format!("{:>9.1}", to_db(peak(last))) };
+            let level =
+                if last.is_empty() { String::new() } else { format!("{:>9.1}", to_db(peak(last))) };
             println!("{:<22}{:>8.2}{}", name, (blocks * BLOCK) as f32 / SAMPLE_RATE, level);
         }
 
@@ -4883,7 +5567,11 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
             let start = Instant::now();
             let sum: f32 = ramp.iter().map(|&x| shape(x)).sum();
             std::hint::black_box(sum);
-            println!("{:<22}{:>6.1}", name, start.elapsed().as_secs_f64() * 1e9 / ramp.len() as f64);
+            println!(
+                "{:<22}{:>6.1}",
+                name,
+                start.elapsed().as_secs_f64() * 1e9 / ramp.len() as f64
+            );
         };
         let mut clipper = AsymClipper::new();
         let mut second = AsymClipper::new();
@@ -4892,7 +5580,6 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         time_ns("AsymClipper", &mut |x| clipper.process(x));
         time_ns("AsymClipper, 2nd order", &mut |x| second.process(x));
         time_ns("tanh", &mut |x| x.tanh());
-
 
         println!();
         println!("Aliasing per sample rate at Gain 10 (and Torden with the drive at 3, 5, 8 in front): the");
@@ -4913,7 +5600,8 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         for (name, settings) in &alias_rows {
             print!("{:<22}", name);
             for sample_rate in rates {
-                let levels = ALIAS_TONES_HZ.map(|freq_hz| aliasing_db_at(settings, freq_hz, sample_rate));
+                let levels =
+                    ALIAS_TONES_HZ.map(|freq_hz| aliasing_db_at(settings, freq_hz, sample_rate));
                 print!("{:>18}", format!("{:.1} / {:.1}", levels[0], levels[1]));
             }
             println!();
@@ -4945,7 +5633,8 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
             let measure = |sample_rate: f32| {
                 let chords_out = run(settings, &same_chords(sample_rate, 3.0), sample_rate);
                 let half = (0.5 * sample_rate) as usize;
-                let tone_out = run(settings, &sine(220.0, 0.178, sample_rate, 2 * half), sample_rate);
+                let tone_out =
+                    run(settings, &sine(220.0, 0.178, sample_rate, 2 * half), sample_rate);
                 let mut levels = vec![to_db(rms(&chords_out))];
                 levels.extend(band_levels_db(&chords_out, sample_rate));
                 levels.push(spectrum_level_db(&chords_out, sample_rate, 8000.0, 16000.0));
@@ -4958,15 +5647,22 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
                 for level in &levels[1..] {
                     print!("{:>7.1}", level);
                 }
-                let off = levels.iter().zip(&reference.0).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+                let off =
+                    levels.iter().zip(&reference.0).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
                 println!("{:>14}", format!("{:.2} / {:.2}", off, (thd - reference.1).abs()));
             }
         }
 
         println!();
         println!("Zipper noise: a dial swept from 0 to 10 while a sine plays through Klar at Gain 0. Level");
-        println!("beside the sine, at the rate the dials are read ({} Hz), against the sine, in dB", SAMPLE_RATE / CHUNK as f32);
-        println!("{:<10}{:>8}{:>12}{:>12}{:>12}", "dial", "sine Hz", "in 50 ms", "in 200 ms", "in 1 s");
+        println!(
+            "beside the sine, at the rate the dials are read ({} Hz), against the sine, in dB",
+            SAMPLE_RATE / CHUNK as f32
+        );
+        println!(
+            "{:<10}{:>8}{:>12}{:>12}{:>12}",
+            "dial", "sine Hz", "in 50 ms", "in 200 ms", "in 1 s"
+        );
         for (dial, freq_hz) in SWEPT_DIALS {
             print!("{:<10}{:>8}", dial, freq_hz);
             for sweep_s in [0.05, 0.2, 1.0] {
@@ -4991,7 +5687,10 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
     fn print_cabinet_rates() {
         println!("Cabinet response per sample rate in dB, and the largest difference from the 48 kHz one");
         println!("from 60 Hz to 10 kHz (600 frequencies) and where it is");
-        let probes = [63.0, 100.0, 250.0, 1000.0, 2000.0, 3150.0, 4000.0, 5000.0, 6300.0, 8000.0, 10000.0, 16000.0];
+        let probes = [
+            63.0, 100.0, 250.0, 1000.0, 2000.0, 3150.0, 4000.0, 5000.0, 6300.0, 8000.0, 10000.0,
+            16000.0,
+        ];
         print!("{:<16}{:>6}", "Hz", "taps");
         for probe in probes {
             print!("{:>7}", probe);
@@ -5054,10 +5753,18 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
                     let settings = with_drive(amp, gain, drive, tone, level);
                     print!(
                         "{:<26}",
-                        format!("{} {:.1} {:.0}/{:.0}/{:.0}", amp.model().name, gain * 10.0, drive * 10.0, tone * 10.0, level * 10.0)
+                        format!(
+                            "{} {:.1} {:.0}/{:.0}/{:.0}",
+                            amp.model().name,
+                            gain * 10.0,
+                            drive * 10.0,
+                            tone * 10.0,
+                            level * 10.0
+                        )
                     );
                     for sample_rate in rates {
-                        let levels = ALIAS_TONES_HZ.map(|freq_hz| aliasing_db_at(&settings, freq_hz, sample_rate));
+                        let levels = ALIAS_TONES_HZ
+                            .map(|freq_hz| aliasing_db_at(&settings, freq_hz, sample_rate));
                         print!("{:>18}", format!("{:.1} / {:.1}", levels[0], levels[1]));
                     }
                     println!();
@@ -5076,10 +5783,19 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
                 let time = |settings: &AmpSettings| {
                     let mut chain = new_chain(sample_rate);
                     run_blocks(&mut chain, settings, &chords, BLOCK);
-                    (0..5).map(|_| block_time_us(&mut chain, settings, &chords)).fold(f64::MAX, f64::min)
+                    (0..5)
+                        .map(|_| block_time_us(&mut chain, settings, &chords))
+                        .fold(f64::MAX, f64::min)
                 };
-                let (plain, driven) = (time(&with_amp(amp, 1.0)), time(&with_drive(amp, 1.0, 1.0, 1.0, 1.0)));
-                print!("{:>9} Hz{:>6.1} /{:>5.1} us{:>5.2} %", sample_rate, plain, driven, (driven - plain) / block_us * 100.0);
+                let (plain, driven) =
+                    (time(&with_amp(amp, 1.0)), time(&with_drive(amp, 1.0, 1.0, 1.0, 1.0)));
+                print!(
+                    "{:>9} Hz{:>6.1} /{:>5.1} us{:>5.2} %",
+                    sample_rate,
+                    plain,
+                    driven,
+                    (driven - plain) / block_us * 100.0
+                );
             }
             println!();
         }
@@ -5120,13 +5836,15 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         for sample_rate in [48000.0, 96000.0, 192000.0] {
             let chords = power_chords(sample_rate, 2.0);
             // The fastest run is the one the rest of the machine disturbed least
-            let runs: Vec<Vec<f64>> = (0..7).map(|_| stage_times_ns(&profile_settings, &chords, sample_rate)).collect();
+            let runs: Vec<Vec<f64>> =
+                (0..7).map(|_| stage_times_ns(&profile_settings, &chords, sample_rate)).collect();
             let medians: Vec<f64> = (0..STAGE_NAMES.len())
                 .map(|stage| runs.iter().map(|run| run[stage]).fold(f64::MAX, f64::min))
                 .collect();
             let mut chain = new_chain(sample_rate);
             run_stereo_blocks(&mut chain, &profile_settings, &chords, BLOCK);
-            let whole = block_time_stereo_us(&mut chain, &profile_settings, &chords) * 1000.0 / BLOCK as f64;
+            let whole = block_time_stereo_us(&mut chain, &profile_settings, &chords) * 1000.0
+                / BLOCK as f64;
             profile.push((sample_rate, medians, whole));
         }
         print!("{:<10}", "");
@@ -5181,11 +5899,7 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
             ("gain10", with_gain(1.0)),
             (
                 "gain5_master10",
-                AmpSettings {
-                    master: 1.0,
-                    out_level: 0.5,
-                    ..AmpSettings::default()
-                },
+                AmpSettings { master: 1.0, out_level: 0.5, ..AmpSettings::default() },
             ),
             (
                 "gain7_scooped",
@@ -5198,7 +5912,9 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
                 },
             ),
         ];
-        let file_name = |amp: Amp, name: &str| format!("amp_{}_{}.wav", format!("{:?}", amp).to_lowercase(), name);
+        let file_name = |amp: Amp, name: &str| {
+            format!("amp_{}_{}.wav", format!("{:?}", amp).to_lowercase(), name)
+        };
         let mutes = palm_mutes(sample_rate as f32, 4.8);
         for amp in Amp::ALL {
             for (name, settings) in &settings {
@@ -5207,17 +5923,30 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
                 write_wav(&dir.join(file_name(amp, name)), &[&output, &output], sample_rate);
             }
             let output = run(&with_amp(amp, 0.6), &mutes, sample_rate as f32);
-            write_wav(&dir.join(file_name(amp, "palm_mutes_gain6")), &[&output, &output], sample_rate);
+            write_wav(
+                &dir.join(file_name(amp, "palm_mutes_gain6")),
+                &[&output, &output],
+                sample_rate,
+            );
         }
-        let output = run(&with_amp(Amp::Torden, 0.5), &boosted(&mutes, sample_rate as f32), sample_rate as f32);
-        write_wav(&dir.join(file_name(Amp::Torden, "palm_mutes_boosted_gain5")), &[&output, &output], sample_rate);
+        let output = run(
+            &with_amp(Amp::Torden, 0.5),
+            &boosted(&mutes, sample_rate as f32),
+            sample_rate as f32,
+        );
+        write_wav(
+            &dir.join(file_name(Amp::Torden, "palm_mutes_boosted_gain5")),
+            &[&output, &output],
+            sample_rate,
+        );
 
         // Clean playing from a guitar recorded quietly, at the reference level and hot:
         // the clean amp follows the level, and rounds off what goes over its power stage
         let clean = clean_di(sample_rate as f32);
         for amp in Amp::ALL {
             for level_db in [REFERENCE_DI_DB - 6.0, REFERENCE_DI_DB, REFERENCE_DI_DB + 6.0] {
-                let output = run(&with_amp(amp, 0.5), &at_rms_db(&clean, level_db), sample_rate as f32);
+                let output =
+                    run(&with_amp(amp, 0.5), &at_rms_db(&clean, level_db), sample_rate as f32);
                 let name = format!("clean_playing_gain5_di{level_db:.0}");
                 write_wav(&dir.join(file_name(amp, &name)), &[&output, &output], sample_rate);
             }
@@ -5232,7 +5961,11 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         };
         render("torden_gain6_drive_off", &with_amp(Amp::Torden, 0.6), &input);
         render("torden_gain6_drive_on", &with_drive(Amp::Torden, 0.6, 0.2, 0.5, 0.8), &input);
-        render("torden_palm_mutes_gain6_drive_on", &with_drive(Amp::Torden, 0.6, 0.2, 0.5, 0.8), &mutes);
+        render(
+            "torden_palm_mutes_gain6_drive_on",
+            &with_drive(Amp::Torden, 0.6, 0.2, 0.5, 0.8),
+            &mutes,
+        );
         render("klar_gain3_drive_off", &with_amp(Amp::Klar, 0.3), &input);
         render("klar_gain3_drive3", &with_drive(Amp::Klar, 0.3, 0.3, 0.5, 0.5), &input);
         render("klar_gain3_drive7", &with_drive(Amp::Klar, 0.3, 0.7, 0.5, 0.5), &input);
@@ -5247,12 +5980,8 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
             ("res10", 0.5, 1.0, true),
             ("off", 0.5, 0.5, false),
         ] {
-            let settings = AmpSettings {
-                cab_on,
-                cab_mic: mic,
-                cab_res: res,
-                ..with_amp(Amp::Brol, 0.6)
-            };
+            let settings =
+                AmpSettings { cab_on, cab_mic: mic, cab_res: res, ..with_amp(Amp::Brol, 0.6) };
             render(&format!("brol_gain6_cab_{}", name), &settings, &input);
         }
 
@@ -5262,18 +5991,13 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
         let mut noise = Noise::new(9);
         for (index, sample) in noisy.iter_mut().enumerate() {
             let time = index as f32 / rate;
-            let hum = (std::f32::consts::TAU * 50.0 * time).sin() + 0.5 * (std::f32::consts::TAU * 150.0 * time).sin();
+            let hum = (std::f32::consts::TAU * 50.0 * time).sin()
+                + 0.5 * (std::f32::consts::TAU * 150.0 * time).sin();
             *sample += db_to_gain(-66.0) * hum + db_to_gain(-70.0) * noise.next();
         }
         let mut chain = new_chain(rate);
-        let gate_off = AmpSettings {
-            gate_on: false,
-            ..with_amp(Amp::Torden, 0.7)
-        };
-        let gate_on = AmpSettings {
-            gate_thresh_db: -55.0,
-            ..with_amp(Amp::Torden, 0.7)
-        };
+        let gate_off = AmpSettings { gate_on: false, ..with_amp(Amp::Torden, 0.7) };
+        let gate_on = AmpSettings { gate_thresh_db: -55.0, ..with_amp(Amp::Torden, 0.7) };
         let mut output = run_blocks(&mut chain, &gate_off, &noisy, BLOCK);
         output.extend(run_blocks(&mut chain, &gate_on, &noisy, BLOCK));
         write_wav(&dir.join("amp_torden_gate_off_then_on.wav"), &[&output, &output], sample_rate);
@@ -5302,10 +6026,7 @@ A note held at 220 Hz (a sine) at the same levels: distortion in dB against the 
             ),
             (
                 "brol_gain6_room",
-                AmpSettings {
-                    reverb: reverb_on(0.5, 0.3),
-                    ..with_amp(Amp::Brol, 0.6)
-                },
+                AmpSettings { reverb: reverb_on(0.5, 0.3), ..with_amp(Amp::Brol, 0.6) },
             ),
             (
                 "torden_gain7_lead_delay",

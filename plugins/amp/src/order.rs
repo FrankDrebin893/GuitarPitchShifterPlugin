@@ -157,10 +157,7 @@ impl ChainOrder {
         for (slot, &pedal) in pedals.iter_mut().zip(front.pedals().iter().chain(back.pedals())) {
             *slot = pedal;
         }
-        ChainOrder {
-            pedals,
-            front: front.len,
-        }
+        ChainOrder { pedals, front: front.len }
     }
 
     /// The order a saved project names: the ids of the pedals with `amp` between the two
@@ -196,7 +193,11 @@ impl ChainOrder {
             let ahead = if zone == Zone::Front { default.front() } else { default.back() };
             let ahead = &ahead[..ahead.iter().position(|&other| other == pedal).unwrap_or(0)];
             let row = &mut rows[zone as usize];
-            let place = row.pedals().iter().rposition(|other| ahead.contains(other)).map_or(0, |last| last + 1);
+            let place = row
+                .pedals()
+                .iter()
+                .rposition(|other| ahead.contains(other))
+                .map_or(0, |last| last + 1);
             row.insert(place, pedal);
         }
         Self::from_rows(&rows)
@@ -212,7 +213,8 @@ impl ChainOrder {
     /// The order as one number: four bits per pedal, first to last, then how many of them
     /// are in front of the amp
     fn to_bits(self) -> u64 {
-        let pedals = self.pedals.iter().rev().fold(0u64, |bits, pedal| (bits << 4) | pedal.index() as u64);
+        let pedals =
+            self.pedals.iter().rev().fold(0u64, |bits, pedal| (bits << 4) | pedal.index() as u64);
         pedals | ((self.front as u64) << (4 * Pedal::ALL.len()))
     }
 
@@ -247,10 +249,7 @@ struct Row {
 
 impl Row {
     fn new() -> Self {
-        Self {
-            slots: [Pedal::Comp; Pedal::ALL.len()],
-            len: 0,
-        }
+        Self { slots: [Pedal::Comp; Pedal::ALL.len()], len: 0 }
     }
 
     fn pedals(&self) -> &[Pedal] {
@@ -279,9 +278,7 @@ pub struct StoredOrder {
 
 impl StoredOrder {
     pub fn new() -> Self {
-        Self {
-            bits: AtomicU64::new(ChainOrder::default().to_bits()),
-        }
+        Self { bits: AtomicU64::new(ChainOrder::default().to_bits()) }
     }
 
     pub fn get(&self) -> ChainOrder {
@@ -313,7 +310,9 @@ mod tests {
     use super::*;
 
     fn is_legal(order: &ChainOrder) -> bool {
-        let every_pedal_once = Pedal::ALL.iter().all(|pedal| order.pedals.iter().filter(|other| *other == pedal).count() == 1);
+        let every_pedal_once = Pedal::ALL
+            .iter()
+            .all(|pedal| order.pedals.iter().filter(|other| *other == pedal).count() == 1);
         every_pedal_once
             && order.front().iter().all(|pedal| pedal.can_be_in(Zone::Front))
             && order.back().iter().all(|pedal| pedal.can_be_in(Zone::Back))
@@ -324,14 +323,20 @@ mod tests {
         let order = ChainOrder::default();
         assert!(is_legal(&order));
         assert_eq!(order.front(), [Pedal::Comp, Pedal::Drive, Pedal::Phaser]);
-        assert_eq!(order.back(), [Pedal::Chorus, Pedal::Flanger, Pedal::Tremolo, Pedal::Delay, Pedal::Reverb]);
+        assert_eq!(
+            order.back(),
+            [Pedal::Chorus, Pedal::Flanger, Pedal::Tremolo, Pedal::Delay, Pedal::Reverb]
+        );
         // The pedals the chain had before keep their order: drive, amp, delay, reverb
         let before = |first: Pedal, second: Pedal| {
             let place = |pedal| order.pedals.iter().position(|&other| other == pedal).unwrap();
             place(first) < place(second)
         };
         assert!(order.zone_of(Pedal::Drive) == Zone::Front && before(Pedal::Delay, Pedal::Reverb));
-        assert_eq!(order.ids(), ["comp", "drive", "phaser", "amp", "chorus", "flanger", "tremolo", "delay", "reverb"]);
+        assert_eq!(
+            order.ids(),
+            ["comp", "drive", "phaser", "amp", "chorus", "flanger", "tremolo", "delay", "reverb"]
+        );
     }
 
     #[test]
@@ -350,10 +355,16 @@ mod tests {
 
         let chorus_first = order.moved(Pedal::Chorus, Zone::Front, 0);
         assert_eq!(chorus_first.front(), [Pedal::Chorus, Pedal::Comp, Pedal::Drive, Pedal::Phaser]);
-        assert_eq!(chorus_first.back(), [Pedal::Flanger, Pedal::Tremolo, Pedal::Delay, Pedal::Reverb]);
+        assert_eq!(
+            chorus_first.back(),
+            [Pedal::Flanger, Pedal::Tremolo, Pedal::Delay, Pedal::Reverb]
+        );
 
         let reverb_into_delay = order.moved(Pedal::Reverb, Zone::Back, 3);
-        assert_eq!(reverb_into_delay.back(), [Pedal::Chorus, Pedal::Flanger, Pedal::Tremolo, Pedal::Reverb, Pedal::Delay]);
+        assert_eq!(
+            reverb_into_delay.back(),
+            [Pedal::Chorus, Pedal::Flanger, Pedal::Tremolo, Pedal::Reverb, Pedal::Delay]
+        );
 
         let comp_behind_drive = order.moved(Pedal::Comp, Zone::Front, 1);
         assert_eq!(comp_behind_drive.front(), [Pedal::Drive, Pedal::Comp, Pedal::Phaser]);
@@ -407,10 +418,15 @@ mod tests {
         assert_eq!(ChainOrder::from_ids([]), default);
         let older = ChainOrder::from_ids(["drive", "amp", "reverb", "delay"]);
         assert_eq!(older.front(), [Pedal::Comp, Pedal::Drive, Pedal::Phaser]);
-        assert_eq!(older.back(), [Pedal::Chorus, Pedal::Flanger, Pedal::Tremolo, Pedal::Reverb, Pedal::Delay]);
+        assert_eq!(
+            older.back(),
+            [Pedal::Chorus, Pedal::Flanger, Pedal::Tremolo, Pedal::Reverb, Pedal::Delay]
+        );
 
         // Names of a later build, a pedal twice, pedals on the wrong side, no amp
-        let odd = ChainOrder::from_ids(["wah", "chorus", "chorus", "delay", "amp", "drive", "comp", "octaver"]);
+        let odd = ChainOrder::from_ids([
+            "wah", "chorus", "chorus", "delay", "amp", "drive", "comp", "octaver",
+        ]);
         assert!(is_legal(&odd));
         assert_eq!(odd.zone_of(Pedal::Chorus), Zone::Front);
         assert_eq!(odd.zone_of(Pedal::Comp), Zone::Back);
@@ -430,7 +446,11 @@ mod tests {
         let stored = StoredOrder::new();
         assert_eq!(stored.get(), ChainOrder::default());
 
-        let order = ChainOrder::default().moved(Pedal::Tremolo, Zone::Front, 0).moved(Pedal::Reverb, Zone::Back, 0);
+        let order = ChainOrder::default().moved(Pedal::Tremolo, Zone::Front, 0).moved(
+            Pedal::Reverb,
+            Zone::Back,
+            0,
+        );
         stored.put(order);
         assert_eq!(stored.get(), order);
         let saved = stored.map(|ids| ids.clone());

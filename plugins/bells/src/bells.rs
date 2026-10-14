@@ -185,7 +185,8 @@ impl GlassBells {
     fn apply_settings(&mut self) {
         let rate = self.sample_rate;
         self.attack_step = 1.0 / (self.settings.attack_ms.max(ATTACK_MIN_MS) * 0.001 * rate);
-        self.echo_time_target = (self.settings.delay_ms * 0.001 * rate).min((self.echo_left.len() - 4) as f32);
+        self.echo_time_target =
+            (self.settings.delay_ms * 0.001 * rate).min((self.echo_left.len() - 4) as f32);
         self.hall.set_decay(self.settings.reverb_decay_s);
     }
 
@@ -267,17 +268,21 @@ impl GlassBells {
         let fraction = whole - self.echo_time;
         let position = self.echo_write + self.echo_left.len() - whole as usize;
         let (first, second) = (position & self.echo_mask, (position + 1) & self.echo_mask);
-        let delayed_left = self.echo_left[first] * (1.0 - fraction) + self.echo_left[second] * fraction;
-        let delayed_right = self.echo_right[first] * (1.0 - fraction) + self.echo_right[second] * fraction;
+        let delayed_left =
+            self.echo_left[first] * (1.0 - fraction) + self.echo_left[second] * fraction;
+        let delayed_right =
+            self.echo_right[first] * (1.0 - fraction) + self.echo_right[second] * fraction;
         // Each bounce is a little darker
         self.echo_damped[0] += (delayed_left - self.echo_damped[0]) * 0.35;
         self.echo_damped[1] += (delayed_right - self.echo_damped[1]) * 0.35;
-        self.echo_left[self.echo_write] = (left + right) * 0.5 + self.echo_damped[1] * settings.delay_feedback;
+        self.echo_left[self.echo_write] =
+            (left + right) * 0.5 + self.echo_damped[1] * settings.delay_feedback;
         self.echo_right[self.echo_write] = self.echo_damped[0] * settings.delay_feedback;
         let echo_left = self.echo_damped[0] * self.delay_gain;
         let echo_right = self.echo_damped[1] * self.delay_gain;
 
-        let (hall_left, hall_right) = self.hall.process((left + right) * 0.3 + (echo_left + echo_right) * 0.25);
+        let (hall_left, hall_right) =
+            self.hall.process((left + right) * 0.3 + (echo_left + echo_right) * 0.25);
 
         let wet = settings.reverb_mix * self.reverb_gain;
         let left = left * settings.dry + echo_left * settings.delay_mix + hall_left * wet;
@@ -295,12 +300,7 @@ mod tests {
 
     /// The bells alone
     fn plain() -> BellSettings {
-        BellSettings {
-            delay_on: false,
-            reverb_on: false,
-            dry: 1.0,
-            ..BellSettings::default()
-        }
+        BellSettings { delay_on: false, reverb_on: false, dry: 1.0, ..BellSettings::default() }
     }
 
     fn bells(settings: &BellSettings, sample_rate: f32) -> GlassBells {
@@ -314,7 +314,12 @@ mod tests {
         (0..(seconds * sample_rate) as usize).map(|_| bells.process()).unzip()
     }
 
-    fn strike(settings: &BellSettings, note: u8, velocity: f32, seconds: f32) -> (Vec<f32>, Vec<f32>) {
+    fn strike(
+        settings: &BellSettings,
+        note: u8,
+        velocity: f32,
+        seconds: f32,
+    ) -> (Vec<f32>, Vec<f32>) {
         let mut bells = bells(settings, SAMPLE_RATE);
         bells.note_on(note, velocity);
         render(&mut bells, SAMPLE_RATE, seconds)
@@ -337,7 +342,12 @@ mod tests {
                 let (left, _) = render(&mut bells, sample_rate, 3.0);
                 // Once the glass has gone the carrier is what is left
                 let found = zero_crossing_freq(&left[(2.5 * sample_rate) as usize..], sample_rate);
-                assert!((found / note_hz(note as f32) - 1.0).abs() < 0.003, "Note {} at {} Hz", note, found);
+                assert!(
+                    (found / note_hz(note as f32) - 1.0).abs() < 0.003,
+                    "Note {} at {} Hz",
+                    note,
+                    found
+                );
             }
         }
     }
@@ -437,15 +447,8 @@ mod tests {
             let (left, _) = strike(settings, 69, 0.8, 2.0);
             rms(&left[72000..])
         };
-        let short = BellSettings {
-            decay_s: 0.3,
-            ..BellSettings::default()
-        };
-        let both_off = BellSettings {
-            delay_on: false,
-            reverb_on: false,
-            ..short
-        };
+        let short = BellSettings { decay_s: 0.3, ..BellSettings::default() };
+        let both_off = BellSettings { delay_on: false, reverb_on: false, ..short };
         assert!(tail(&short) > 0.001);
         assert!(tail(&both_off) < 1e-5, "{}", tail(&both_off));
     }
@@ -526,7 +529,12 @@ mod tests {
             sum += bells.process().0;
         }
         let per_frame_ns = started.elapsed().as_nanos() as f64 / frames as f64;
-        println!("\nTwelve bells at 48 kHz: {:.0} ns per frame ({:.2} % of a core) ({})", per_frame_ns, per_frame_ns * 48000.0 / 1e7, sum.is_finite());
+        println!(
+            "\nTwelve bells at 48 kHz: {:.0} ns per frame ({:.2} % of a core) ({})",
+            per_frame_ns,
+            per_frame_ns * 48000.0 / 1e7,
+            sum.is_finite()
+        );
     }
 
     /// Writes target/renders/bells.wav for listening:
@@ -574,7 +582,9 @@ mod tests {
             }
             let (left, right) = bells.process();
             for channel in [left, right] {
-                writer.write_sample(((channel * volume).clamp(-1.0, 1.0) * 32767.0) as i16).unwrap();
+                writer
+                    .write_sample(((channel * volume).clamp(-1.0, 1.0) * 32767.0) as i16)
+                    .unwrap();
             }
         }
         writer.finalize().unwrap();

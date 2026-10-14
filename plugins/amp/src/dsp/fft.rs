@@ -32,7 +32,8 @@ impl RealFft {
         assert!(size.is_power_of_two() && (4..=1 << 16).contains(&size));
         let half = size / 2;
         let bits = half.trailing_zeros();
-        let order = (0..half).map(|index| (index.reverse_bits() >> (usize::BITS - bits)) as u16).collect();
+        let order =
+            (0..half).map(|index| (index.reverse_bits() >> (usize::BITS - bits)) as u16).collect();
 
         let (mut turn_re, mut turn_im) = (Vec::with_capacity(half), Vec::with_capacity(half));
         let mut width = 1;
@@ -44,7 +45,9 @@ impl RealFft {
             }
             width *= 2;
         }
-        let split = |part: fn(f64) -> f64| (0..=half).map(|bin| part(-PI * bin as f64 / half as f64) as f32).collect();
+        let split = |part: fn(f64) -> f64| {
+            (0..=half).map(|bin| part(-PI * bin as f64 / half as f64) as f32).collect()
+        };
         Self {
             half,
             order,
@@ -75,7 +78,11 @@ impl RealFft {
         while width < self.half {
             let turn_re = &self.turn_re[width - 1..2 * width - 1];
             let turn_im = &self.turn_im[width - 1..2 * width - 1];
-            for (group_re, group_im) in self.work_re.chunks_exact_mut(2 * width).zip(self.work_im.chunks_exact_mut(2 * width)) {
+            for (group_re, group_im) in self
+                .work_re
+                .chunks_exact_mut(2 * width)
+                .zip(self.work_im.chunks_exact_mut(2 * width))
+            {
                 let (low_re, high_re) = group_re.split_at_mut(width);
                 let (low_im, high_im) = group_im.split_at_mut(width);
                 for step in 0..width {
@@ -194,15 +201,19 @@ mod tests {
         let (a, b) = (noise(size, 7), noise(size, 9));
         let mut fft = RealFft::new(size);
         let bins = fft.bins();
-        let (mut a_re, mut a_im, mut b_re, mut b_im) = (vec![0.0; bins], vec![0.0; bins], vec![0.0; bins], vec![0.0; bins]);
+        let (mut a_re, mut a_im, mut b_re, mut b_im) =
+            (vec![0.0; bins], vec![0.0; bins], vec![0.0; bins], vec![0.0; bins]);
         fft.forward(&a, &mut a_re, &mut a_im);
         fft.forward(&b, &mut b_re, &mut b_im);
-        let re: Vec<f32> = (0..bins).map(|bin| a_re[bin] * b_re[bin] - a_im[bin] * b_im[bin]).collect();
-        let im: Vec<f32> = (0..bins).map(|bin| a_re[bin] * b_im[bin] + a_im[bin] * b_re[bin]).collect();
+        let re: Vec<f32> =
+            (0..bins).map(|bin| a_re[bin] * b_re[bin] - a_im[bin] * b_im[bin]).collect();
+        let im: Vec<f32> =
+            (0..bins).map(|bin| a_re[bin] * b_im[bin] + a_im[bin] * b_re[bin]).collect();
         let mut product = vec![0.0; size];
         fft.inverse(&re, &im, &mut product);
         for index in 0..size {
-            let expected: f64 = (0..size).map(|tap| a[tap] as f64 * b[(index + size - tap) % size] as f64).sum();
+            let expected: f64 =
+                (0..size).map(|tap| a[tap] as f64 * b[(index + size - tap) % size] as f64).sum();
             assert!((product[index] as f64 - expected).abs() < 1e-4, "Sample {index}");
         }
     }

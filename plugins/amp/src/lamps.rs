@@ -27,10 +27,7 @@ pub struct LampReading {
 
 impl LampReading {
     pub fn new() -> Self {
-        Self {
-            gate: AtomicU32::new(0.0f32.to_bits()),
-            clips: AtomicU32::new(0),
-        }
+        Self { gate: AtomicU32::new(0.0f32.to_bits()), clips: AtomicU32::new(0) }
     }
 
     /// The gain the gate was at when the last block ended: 0.0 closed, 1.0 open, between
@@ -70,10 +67,7 @@ pub struct ClipHold {
 impl ClipHold {
     /// `clips` is the count as it stands: what was clipped before now does not light the lamp
     pub fn new(clips: u32) -> Self {
-        Self {
-            seen: clips,
-            lit_until: f64::NEG_INFINITY,
-        }
+        Self { seen: clips, lit_until: f64::NEG_INFINITY }
     }
 
     /// Whether the lamp is lit at `now`, given the count as it stands

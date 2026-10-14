@@ -78,11 +78,7 @@ pub struct ReverbSettings {
 
 impl Default for ReverbSettings {
     fn default() -> Self {
-        Self {
-            on: false,
-            decay_s: 1.5,
-            mix: 0.2,
-        }
+        Self { on: false, decay_s: 1.5, mix: 0.2 }
     }
 }
 
@@ -137,11 +133,7 @@ struct Loop {
 }
 
 impl Loop {
-    const REST: Loop = Loop {
-        gains: [0.0; LINES],
-        damping: [1.0; LINES],
-        level: 0.0,
-    };
+    const REST: Loop = Loop { gains: [0.0; LINES], damping: [1.0; LINES], level: 0.0 };
 }
 
 /// The lines mix into each other with equal weights and alternating signs, so each one
@@ -225,15 +217,8 @@ impl Reverb {
         let mut reverb = Self {
             sample_rate: 44100.0,
             low_cut: Biquad::new(),
-            diffusers: std::array::from_fn(|_| Diffuser {
-                buffer: Vec::new(),
-                position: 0,
-            }),
-            lines: std::array::from_fn(|_| Line {
-                buffer: Vec::new(),
-                write: 0,
-                delay: 0,
-            }),
+            diffusers: std::array::from_fn(|_| Diffuser { buffer: Vec::new(), position: 0 }),
+            lines: std::array::from_fn(|_| Line { buffer: Vec::new(), write: 0, delay: 0 }),
             damping_state: [0.0; LINES],
             mod_phase: MOD_START,
             mod_step: [0.0; LINES / 2],
@@ -284,7 +269,11 @@ impl Reverb {
             *step = rate_hz / sample_rate;
         }
 
-        self.low_cut.set(BiquadCoeffs::highpass(LOW_CUT_HZ, std::f32::consts::FRAC_1_SQRT_2, sample_rate));
+        self.low_cut.set(BiquadCoeffs::highpass(
+            LOW_CUT_HZ,
+            std::f32::consts::FRAC_1_SQRT_2,
+            sample_rate,
+        ));
         self.decay_coeff = smoothing_coeff(DECAY_SMOOTH_MS, sample_rate / TICK as f32);
         self.dial_coeff = smoothing_coeff(DIAL_SMOOTH_MS, sample_rate);
         self.feed_step = 1.0 / (FADE_MS * 0.001 * sample_rate);
@@ -335,7 +324,8 @@ impl Reverb {
     /// Gains, damping and level for a decay time
     fn design(&self, decay_s: f32) -> Loop {
         let mut design = Loop::REST;
-        let cosine = (TAU * DAMPING_HZ.min(0.45 * self.sample_rate as f64) / self.sample_rate as f64).cos();
+        let cosine =
+            (TAU * DAMPING_HZ.min(0.45 * self.sample_rate as f64) / self.sample_rate as f64).cos();
         let decay_cosine = (TAU * DECAY_HZ / self.sample_rate as f64).cos();
         for (index, line) in self.lines.iter().enumerate() {
             let pass_s = line.delay as f64 / self.sample_rate as f64;
@@ -350,8 +340,11 @@ impl Reverb {
             for _ in 0..4 {
                 let high = (wanted.powf(1.0 / DAMPING_RATIO) / gain).min(1.0 - 1e-9);
                 let (lost, lost_at_cosine) = (1.0 - high * high, 1.0 - high * high * cosine);
-                pole = (lost_at_cosine - (lost_at_cosine * lost_at_cosine - lost * lost).max(0.0).sqrt()) / lost;
-                let at_decay_hz = (1.0 - pole) / (1.0 - 2.0 * pole * decay_cosine + pole * pole).sqrt();
+                pole = (lost_at_cosine
+                    - (lost_at_cosine * lost_at_cosine - lost * lost).max(0.0).sqrt())
+                    / lost;
+                let at_decay_hz =
+                    (1.0 - pole) / (1.0 - 2.0 * pole * decay_cosine + pole * pole).sqrt();
                 gain = (wanted / at_decay_hz).min(most);
             }
             design.gains[index] = (gain / (LINES as f64).sqrt()) as f32;
@@ -380,8 +373,10 @@ impl Reverb {
             self.target = self.design(self.decay_s);
             let per_sample = 1.0 / TICK as f32;
             for index in 0..LINES {
-                self.step.gains[index] = (self.target.gains[index] - self.current.gains[index]) * per_sample;
-                self.step.damping[index] = (self.target.damping[index] - self.current.damping[index]) * per_sample;
+                self.step.gains[index] =
+                    (self.target.gains[index] - self.current.gains[index]) * per_sample;
+                self.step.damping[index] =
+                    (self.target.damping[index] - self.current.damping[index]) * per_sample;
             }
             self.step.level = (self.target.level - self.current.level) * per_sample;
             self.ramping = true;
@@ -402,7 +397,9 @@ impl Reverb {
                 if !settings.on {
                     return;
                 }
-                let Some(first) = (start..len).find(|&index| (0.5 * (left[index] + right[index])).abs() >= SILENCE) else {
+                let Some(first) = (start..len)
+                    .find(|&index| (0.5 * (left[index] + right[index])).abs() >= SILENCE)
+                else {
                     return;
                 };
                 // Nothing is heard yet, so there is nothing to smooth
@@ -417,7 +414,15 @@ impl Reverb {
 
     /// Processes from `start` to the end of the block or to where the reverb falls idle.
     /// Returns where it stopped
-    fn run(&mut self, on: bool, decay_s: f32, mix: f32, left: &mut [f32], right: &mut [f32], start: usize) -> usize {
+    fn run(
+        &mut self,
+        on: bool,
+        decay_s: f32,
+        mix: f32,
+        left: &mut [f32],
+        right: &mut [f32],
+        start: usize,
+    ) -> usize {
         let feed_target = if on { 1.0 } else { 0.0 };
 
         for index in start..left.len() {
@@ -434,7 +439,8 @@ impl Reverb {
                 self.current.level += self.step.level;
             }
             if self.feed != feed_target {
-                self.feed = (self.feed + self.feed_step.copysign(feed_target - self.feed)).clamp(0.0, 1.0);
+                self.feed =
+                    (self.feed + self.feed_step.copysign(feed_target - self.feed)).clamp(0.0, 1.0);
             }
             if self.mix != mix {
                 self.mix += self.dial_coeff * (mix - self.mix);
@@ -463,7 +469,8 @@ impl Reverb {
                 let moving = &self.lines[2 * pair + 1];
                 let delay = moving.delay as f32 + self.mod_depth * drift;
                 let whole = delay as usize;
-                reads[2 * pair + 1] = read_cubic(&moving.buffer, moving.write, whole, delay - whole as f32);
+                reads[2 * pair + 1] =
+                    read_cubic(&moving.buffer, moving.write, whole, delay - whole as f32);
             }
 
             let (mut tail_left, mut tail_right) = (0.0, 0.0);
@@ -520,14 +527,16 @@ mod tests {
     }
 
     fn off() -> ReverbSettings {
-        ReverbSettings {
-            on: false,
-            ..settings(0.5, 1.0)
-        }
+        ReverbSettings { on: false, ..settings(0.5, 1.0) }
     }
 
     /// Runs a mono signal through in blocks. Returns left and right
-    fn run_blocks(reverb: &mut Reverb, settings: &ReverbSettings, input: &[f32], block: usize) -> (Vec<f32>, Vec<f32>) {
+    fn run_blocks(
+        reverb: &mut Reverb,
+        settings: &ReverbSettings,
+        input: &[f32],
+        block: usize,
+    ) -> (Vec<f32>, Vec<f32>) {
         let (mut left, mut right) = (input.to_vec(), input.to_vec());
         for (l, r) in left.chunks_mut(block).zip(right.chunks_mut(block)) {
             reverb.process(settings, l, r);
@@ -569,7 +578,12 @@ mod tests {
     fn test_line_lengths_share_no_factor() {
         for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0] {
             let reverb = new_reverb(sample_rate);
-            let lengths: Vec<usize> = reverb.lines.iter().map(|line| line.delay).chain(reverb.diffusers.iter().map(|d| d.buffer.len())).collect();
+            let lengths: Vec<usize> = reverb
+                .lines
+                .iter()
+                .map(|line| line.delay)
+                .chain(reverb.diffusers.iter().map(|d| d.buffer.len()))
+                .collect();
             for (index, &a) in lengths.iter().enumerate() {
                 for &b in &lengths[index + 1..] {
                     assert_eq!(gcd(a, b), 1, "{} and {} at {} Hz", a, b, sample_rate);
@@ -598,7 +612,13 @@ mod tests {
                 let (left, right) = impulse_response(decay_s, sample_rate, 0.75 * decay_s + 0.3);
                 for channel in [&left, &right] {
                     let measured = decay_at(channel, sample_rate, 1000.0);
-                    assert!((measured / decay_s - 1.0).abs() < 0.2, "{} Hz, set {} s: {} s", sample_rate, decay_s, measured);
+                    assert!(
+                        (measured / decay_s - 1.0).abs() < 0.2,
+                        "{} Hz, set {} s: {} s",
+                        sample_rate,
+                        decay_s,
+                        measured
+                    );
                 }
             }
         }
@@ -607,7 +627,8 @@ mod tests {
     #[test]
     fn test_highs_die_faster() {
         let (left, _) = impulse_response(2.0, SAMPLE_RATE, 1.8);
-        let (mid, high) = (decay_at(&left, SAMPLE_RATE, 1000.0), decay_at(&left, SAMPLE_RATE, 5000.0));
+        let (mid, high) =
+            (decay_at(&left, SAMPLE_RATE, 1000.0), decay_at(&left, SAMPLE_RATE, 5000.0));
         assert!((0.35..0.65).contains(&(high / mid)), "{} s at 1 kHz, {} s at 5 kHz", mid, high);
     }
 
@@ -635,9 +656,11 @@ mod tests {
         let window = seconds(0.01, SAMPLE_RATE);
         // 3.0 is noise. Single echoes standing out push it up, a tail that rings on a few
         // tones pulls it down towards 1.5
-        let mut values: Vec<f32> = left[seconds(0.15, SAMPLE_RATE)..].chunks_exact(window).map(kurtosis).collect();
+        let mut values: Vec<f32> =
+            left[seconds(0.15, SAMPLE_RATE)..].chunks_exact(window).map(kurtosis).collect();
         values.sort_by(|a, b| a.total_cmp(b));
-        let (lowest, median, highest) = (values[0], values[values.len() / 2], values[values.len() - 1]);
+        let (lowest, median, highest) =
+            (values[0], values[values.len() / 2], values[values.len() - 1]);
         assert!((2.4..3.6).contains(&median), "median {}", median);
         assert!(lowest > 1.9 && highest < 8.0, "{} to {}", lowest, highest);
     }
@@ -691,13 +714,18 @@ mod tests {
         assert!(!reverb.is_idle());
 
         // Switched off, the tail rings out: 120 dB at this decay is 0.6 s
-        let (trail, _) = run_blocks(&mut reverb, &off(), &vec![0.0; seconds(0.1, SAMPLE_RATE)], BLOCK);
+        let (trail, _) =
+            run_blocks(&mut reverb, &off(), &vec![0.0; seconds(0.1, SAMPLE_RATE)], BLOCK);
         assert!(peak(&trail[seconds(0.05, SAMPLE_RATE)..]) > 0.001);
-        let (late, _) = run_blocks(&mut reverb, &off(), &vec![0.0; seconds(1.4, SAMPLE_RATE)], BLOCK);
+        let (late, _) =
+            run_blocks(&mut reverb, &off(), &vec![0.0; seconds(1.4, SAMPLE_RATE)], BLOCK);
         assert!(reverb.is_idle());
         assert!(late[seconds(1.3, SAMPLE_RATE)..].iter().all(|&sample| sample == 0.0));
         assert!(reverb.lines.iter().all(|line| line.buffer.iter().all(|&sample| sample == 0.0)));
-        assert!(reverb.diffusers.iter().all(|diffuser| diffuser.buffer.iter().all(|&sample| sample == 0.0)));
+        assert!(reverb
+            .diffusers
+            .iter()
+            .all(|diffuser| diffuser.buffer.iter().all(|&sample| sample == 0.0)));
 
         let (left, right) = run_blocks(&mut reverb, &off(), &input, BLOCK);
         assert_eq!(left, input);
@@ -736,9 +764,15 @@ mod tests {
             slowest = slowest.max(block_time_us(&mut reverb, &setting, &silence));
         }
         assert!(!reverb.is_idle());
-        assert!(slowest < playing * SLOWED_DOWN, "{:.1} us per block playing, {:.1} us in the tail", playing, slowest);
+        assert!(
+            slowest < playing * SLOWED_DOWN,
+            "{:.1} us per block playing, {:.1} us in the tail",
+            playing,
+            slowest
+        );
 
-        let (left, right) = run_blocks(&mut reverb, &setting, &vec![0.0; seconds(0.6, SAMPLE_RATE)], BLOCK);
+        let (left, right) =
+            run_blocks(&mut reverb, &setting, &vec![0.0; seconds(0.6, SAMPLE_RATE)], BLOCK);
         assert!(reverb.is_idle());
         let end = seconds(0.55, SAMPLE_RATE);
         assert!(left[end..].iter().chain(&right[end..]).all(|&sample| sample == 0.0));
@@ -748,14 +782,23 @@ mod tests {
     fn test_decay_change_does_not_click() {
         let input = sine(440.0, 0.5, SAMPLE_RATE, seconds(3.0, SAMPLE_RATE));
         // The dry sine and the loudest a tail of it gets
-        let limit = |output: &[f32]| 1.5 * peak(output) * std::f32::consts::TAU * 440.0 / SAMPLE_RATE;
+        let limit =
+            |output: &[f32]| 1.5 * peak(output) * std::f32::consts::TAU * 440.0 / SAMPLE_RATE;
         for (from_s, to_s) in [(DECAY_MIN_S, DECAY_MAX_S), (DECAY_MAX_S, DECAY_MIN_S), (1.0, 2.0)] {
             let mut reverb = new_reverb(SAMPLE_RATE);
             let half = input.len() / 2;
-            let (mut output, _) = run_blocks(&mut reverb, &settings(from_s, 1.0), &input[..half], BLOCK);
+            let (mut output, _) =
+                run_blocks(&mut reverb, &settings(from_s, 1.0), &input[..half], BLOCK);
             output.extend(run_blocks(&mut reverb, &settings(to_s, 1.0), &input[half..], BLOCK).0);
             let step = largest_step(&output[half - 100..]);
-            assert!(step < limit(&output), "{} to {} s: step {} against {}", from_s, to_s, step, limit(&output));
+            assert!(
+                step < limit(&output),
+                "{} to {} s: step {} against {}",
+                from_s,
+                to_s,
+                step,
+                limit(&output)
+            );
             assert_eq!(reverb.decay_s, to_s);
             assert!(reverb.current == reverb.design(to_s));
         }
@@ -777,7 +820,8 @@ mod tests {
 
         let mut reverb = new_reverb(SAMPLE_RATE);
         run_blocks(&mut reverb, &on, &input, BLOCK);
-        let (trail, _) = run_blocks(&mut reverb, &off, &vec![0.0; seconds(0.5, SAMPLE_RATE)], BLOCK);
+        let (trail, _) =
+            run_blocks(&mut reverb, &off, &vec![0.0; seconds(0.5, SAMPLE_RATE)], BLOCK);
         assert!(peak(&trail[seconds(0.3, SAMPLE_RATE)..]) > 0.01);
     }
 
@@ -790,7 +834,8 @@ mod tests {
         let half = seconds(1.8, SAMPLE_RATE);
         let pass = |block: usize| {
             let mut reverb = new_reverb(SAMPLE_RATE);
-            let (mut left, mut right) = run_blocks(&mut reverb, &settings(DECAY_MIN_S, 0.8), &input[..half], block);
+            let (mut left, mut right) =
+                run_blocks(&mut reverb, &settings(DECAY_MIN_S, 0.8), &input[..half], block);
             let (l, r) = run_blocks(&mut reverb, &settings(1.5, 0.5), &input[half..], block);
             left.extend(l);
             right.extend(r);
@@ -808,11 +853,23 @@ mod tests {
         for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0] {
             for decay_s in [DECAY_MIN_S, DECAY_MAX_S] {
                 let mut signal = noise(1.0, seconds(0.5, sample_rate));
-                signal.extend((0..seconds(0.5, sample_rate)).map(|i| if (i / 100) % 2 == 0 { 1.0 } else { -1.0 }));
+                signal.extend((0..seconds(0.5, sample_rate)).map(|i| {
+                    if (i / 100) % 2 == 0 {
+                        1.0
+                    } else {
+                        -1.0
+                    }
+                }));
                 let (left, right) = run(&settings(decay_s, 1.0), &signal, sample_rate);
                 for channel in [&left, &right] {
                     assert!(channel.iter().all(|sample| sample.is_finite()));
-                    assert!(peak(channel) < 8.0, "{} Hz, {} s: peak {}", sample_rate, decay_s, peak(channel));
+                    assert!(
+                        peak(channel) < 8.0,
+                        "{} Hz, {} s: peak {}",
+                        sample_rate,
+                        decay_s,
+                        peak(channel)
+                    );
                 }
             }
         }
@@ -823,7 +880,10 @@ mod tests {
         let layout = |reverb: &Reverb| {
             let lines = reverb.lines.iter().map(|line| &line.buffer);
             let diffusers = reverb.diffusers.iter().map(|diffuser| &diffuser.buffer);
-            lines.chain(diffusers).map(|buffer| (buffer.as_ptr() as usize, buffer.len(), buffer.capacity())).collect::<Vec<_>>()
+            lines
+                .chain(diffusers)
+                .map(|buffer| (buffer.as_ptr() as usize, buffer.len(), buffer.capacity()))
+                .collect::<Vec<_>>()
         };
         let mut reverb = new_reverb(192000.0);
         let before = layout(&reverb);
@@ -866,7 +926,13 @@ mod tests {
     }
 
     /// Delay, then reverb, as the chain runs them
-    fn run_both(delay: &mut Delay, reverb: &mut Reverb, delay_settings: &DelaySettings, reverb_settings: &ReverbSettings, input: &[f32]) -> (Vec<f32>, Vec<f32>) {
+    fn run_both(
+        delay: &mut Delay,
+        reverb: &mut Reverb,
+        delay_settings: &DelaySettings,
+        reverb_settings: &ReverbSettings,
+        input: &[f32],
+    ) -> (Vec<f32>, Vec<f32>) {
         let (mut left, mut right) = (input.to_vec(), input.to_vec());
         for (l, r) in left.chunks_mut(BLOCK).zip(right.chunks_mut(BLOCK)) {
             delay.process(delay_settings, l, r);
@@ -903,18 +969,27 @@ mod tests {
         let di = guitar_di(SAMPLE_RATE);
 
         println!("\n== DELAY ==");
-        println!("\nEcho time, single sample in, feedback 0.5, mix 1.0 (ms; the lines feed each other)");
-        println!("{:>8} {:>19} {:>19} {:>19} {:>19}", "set", "1st left / right", "2nd left / right", "3rd left / right", "4th left / right");
+        println!(
+            "\nEcho time, single sample in, feedback 0.5, mix 1.0 (ms; the lines feed each other)"
+        );
+        println!(
+            "{:>8} {:>19} {:>19} {:>19} {:>19}",
+            "set", "1st left / right", "2nd left / right", "3rd left / right", "4th left / right"
+        );
         for time_ms in [TIME_MIN_MS, 125.0, 350.0, 500.0, TIME_MAX_MS] {
             let mut input = vec![0.0; at(time_ms * 4.6)];
             input[0] = 1.0;
-            let (left, right) = delay_tests::run(&delay_tests::settings(time_ms, 0.5, 1.0), &input, SAMPLE_RATE);
+            let (left, right) =
+                delay_tests::run(&delay_tests::settings(time_ms, 0.5, 1.0), &input, SAMPLE_RATE);
             let mut row = format!("{:>8.1}", time_ms);
             for repeat in 1..=4 {
-                let window = at(time_ms * (repeat as f32 - 0.5))..at(time_ms * (repeat as f32 + 0.5));
+                let window =
+                    at(time_ms * (repeat as f32 - 0.5))..at(time_ms * (repeat as f32 + 0.5));
                 let found = |channel: &[f32]| {
                     let slice = &channel[window.clone()];
-                    let index = (0..slice.len()).max_by(|&a, &b| slice[a].abs().total_cmp(&slice[b].abs())).unwrap();
+                    let index = (0..slice.len())
+                        .max_by(|&a, &b| slice[a].abs().total_cmp(&slice[b].abs()))
+                        .unwrap();
                     (window.start + index) as f32 * 1000.0 / SAMPLE_RATE
                 };
                 row += &format!(" {:>9.2} {:>9.2}", found(&left), found(&right));
@@ -922,26 +997,49 @@ mod tests {
             println!("{}", row);
         }
 
-        println!("\nLevel of each repeat of a 20 ms noise burst against the burst (dB), 300 ms, mix 1.0");
-        println!("{:>9} {:>7} {:>7} {:>7} {:>7} {:>7} {:>7}   {}", "feedback", "1", "2", "3", "4", "5", "6", "per repeat, set");
+        println!(
+            "\nLevel of each repeat of a 20 ms noise burst against the burst (dB), 300 ms, mix 1.0"
+        );
+        println!(
+            "{:>9} {:>7} {:>7} {:>7} {:>7} {:>7} {:>7}   {}",
+            "feedback", "1", "2", "3", "4", "5", "6", "per repeat, set"
+        );
         let mut burst = vec![0.0; at(2200.0)];
         burst[..at(20.0)].copy_from_slice(&noise(0.25, at(20.0)));
         let burst_level = rms(&burst[..at(20.0)]);
-        let repeat_of = |channel: &[f32], number: usize| channel[at(300.0 * number as f32 - 8.0)..at(300.0 * number as f32 + 28.0)].to_vec();
+        let repeat_of = |channel: &[f32], number: usize| {
+            channel[at(300.0 * number as f32 - 8.0)..at(300.0 * number as f32 + 28.0)].to_vec()
+        };
         for feedback in [0.0, 0.3, 0.6, FEEDBACK_MAX] {
-            let (left, _) = delay_tests::run(&delay_tests::settings(300.0, feedback, 1.0), &burst, SAMPLE_RATE);
+            let (left, _) =
+                delay_tests::run(&delay_tests::settings(300.0, feedback, 1.0), &burst, SAMPLE_RATE);
             let mut row = format!("{:>9.2}", feedback);
             for number in 1..=6 {
-                row += &format!(" {:>7.1}", to_db(rms(&repeat_of(&left, number)) * (36.0f32 / 20.0).sqrt() / burst_level));
+                row += &format!(
+                    " {:>7.1}",
+                    to_db(rms(&repeat_of(&left, number)) * (36.0f32 / 20.0).sqrt() / burst_level)
+                );
             }
             println!("{}   {:.1} dB", row, to_db(feedback));
         }
 
         println!("\nSpectrum of each repeat at feedback 0.9 (dB against the burst's own level in the band)");
-        println!("{:>8} {:>9} {:>9} {:>9} {:>9} {:>9}", "repeat", "<120 Hz", "120-500", "500-2k", "2k-5k", ">5 kHz");
-        let (left, _) = delay_tests::run(&delay_tests::settings(300.0, FEEDBACK_MAX, 1.0), &burst, SAMPLE_RATE);
-        let bands: [(Option<f32>, Option<f32>); 5] = [(None, Some(120.0)), (Some(120.0), Some(500.0)), (Some(500.0), Some(2000.0)), (Some(2000.0), Some(5000.0)), (Some(5000.0), None)];
-        let in_band = |signal: &[f32], band: (Option<f32>, Option<f32>)| band_level_db(signal, SAMPLE_RATE, band.0, band.1) + to_db(rms(signal));
+        println!(
+            "{:>8} {:>9} {:>9} {:>9} {:>9} {:>9}",
+            "repeat", "<120 Hz", "120-500", "500-2k", "2k-5k", ">5 kHz"
+        );
+        let (left, _) =
+            delay_tests::run(&delay_tests::settings(300.0, FEEDBACK_MAX, 1.0), &burst, SAMPLE_RATE);
+        let bands: [(Option<f32>, Option<f32>); 5] = [
+            (None, Some(120.0)),
+            (Some(120.0), Some(500.0)),
+            (Some(500.0), Some(2000.0)),
+            (Some(2000.0), Some(5000.0)),
+            (Some(5000.0), None),
+        ];
+        let in_band = |signal: &[f32], band: (Option<f32>, Option<f32>)| {
+            band_level_db(signal, SAMPLE_RATE, band.0, band.1) + to_db(rms(signal))
+        };
         // The burst with silence around it, as long as the pieces the repeats are cut into
         let mut dry_piece = vec![0.0; at(36.0)];
         dry_piece[at(8.0)..at(28.0)].copy_from_slice(&burst[..at(20.0)]);
@@ -956,60 +1054,120 @@ mod tests {
 
         println!("\nLoudest output after 30 s of input, feedback 0.9, mix 1.0");
         let chords = power_chords(SAMPLE_RATE, 30.0);
-        let loud_chords: Vec<f32> = chords.iter().map(|sample| (sample * 8.0).clamp(-1.0, 1.0)).collect();
+        let loud_chords: Vec<f32> =
+            chords.iter().map(|sample| (sample * 8.0).clamp(-1.0, 1.0)).collect();
         let full_noise = noise(1.0, seconds(30.0, SAMPLE_RATE));
-        let square: Vec<f32> = (0..seconds(30.0, SAMPLE_RATE)).map(|i| if (i / at(20.0)) % 2 == 0 { 1.0 } else { -1.0 }).collect();
+        let square: Vec<f32> = (0..seconds(30.0, SAMPLE_RATE))
+            .map(|i| if (i / at(20.0)) % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
         for (name, signal, time_ms) in [
             ("power chords at -18 dBFS, 350 ms", &chords, 350.0),
             ("power chords clipped at full scale, 350 ms", &loud_chords, 350.0),
             ("full-scale noise, 350 ms", &full_noise, 350.0),
             ("full-scale square in tune with the loop, 20 ms", &square, 20.0),
         ] {
-            let (left, right) = delay_tests::run(&delay_tests::settings(time_ms, FEEDBACK_MAX, 1.0), signal, SAMPLE_RATE);
+            let (left, right) = delay_tests::run(
+                &delay_tests::settings(time_ms, FEEDBACK_MAX, 1.0),
+                signal,
+                SAMPLE_RATE,
+            );
             let last = seconds(25.0, SAMPLE_RATE);
             println!(
                 "  {:<48} input peak {:.2}, output peak {:.2}, repeats alone {:.2}",
                 name,
                 peak(signal),
                 peak(&left).max(peak(&right)),
-                peak(&without(&left[last..], &signal[last..])).max(peak(&without(&right[last..], &signal[last..])))
+                peak(&without(&left[last..], &signal[last..]))
+                    .max(peak(&without(&right[last..], &signal[last..])))
             );
         }
 
         println!("\nWidth: guitar phrase, 350 ms, feedback 0.4, mix 1.0");
-        let (left, right) = delay_tests::run(&delay_tests::settings(350.0, 0.4, 1.0), &di, SAMPLE_RATE);
+        let (left, right) =
+            delay_tests::run(&delay_tests::settings(350.0, 0.4, 1.0), &di, SAMPLE_RATE);
         let (wet_left, wet_right) = (without(&left, &di), without(&right, &di));
         let mono: Vec<f32> = left.iter().zip(&right).map(|(l, r)| 0.5 * (l + r)).collect();
-        let wet_mono: Vec<f32> = wet_left.iter().zip(&wet_right).map(|(l, r)| 0.5 * (l + r)).collect();
-        println!("  correlation of the repeats, left against right: {:.2}", correlation(&wet_left, &wet_right));
-        println!("  repeats against dry: {:.1} dB left, {:.1} dB right", to_db(rms(&wet_left) / rms(&di)), to_db(rms(&wet_right) / rms(&di)));
-        println!("  repeats in the mono sum against one side: {:.1} dB", to_db(rms(&wet_mono) / rms(&wet_left)));
-        println!("  dry signal in the mono sum: {:.3} of the input", dot(&mono, &di) / dot(&di, &di));
+        let wet_mono: Vec<f32> =
+            wet_left.iter().zip(&wet_right).map(|(l, r)| 0.5 * (l + r)).collect();
+        println!(
+            "  correlation of the repeats, left against right: {:.2}",
+            correlation(&wet_left, &wet_right)
+        );
+        println!(
+            "  repeats against dry: {:.1} dB left, {:.1} dB right",
+            to_db(rms(&wet_left) / rms(&di)),
+            to_db(rms(&wet_right) / rms(&di))
+        );
+        println!(
+            "  repeats in the mono sum against one side: {:.1} dB",
+            to_db(rms(&wet_mono) / rms(&wet_left))
+        );
+        println!(
+            "  dry signal in the mono sum: {:.3} of the input",
+            dot(&mono, &di) / dot(&di, &di)
+        );
         println!("  mono sum against one side: {:.1} dB", to_db(rms(&mono) / rms(&left)));
 
         println!("\nTime dial moved while a 220 Hz sine plays (largest step between samples; steady {:.4})", {
             let (steady, _) = delay_tests::run(&delay_tests::settings(300.0, 0.5, 1.0), &sine(220.0, 0.5, SAMPLE_RATE, at(2000.0)), SAMPLE_RATE);
             largest_step(&steady[at(1500.0)..])
         });
-        for (from_ms, to_ms) in [(300.0, 450.0), (450.0, 300.0), (TIME_MIN_MS, TIME_MAX_MS), (TIME_MAX_MS, TIME_MIN_MS)] {
+        for (from_ms, to_ms) in
+            [(300.0, 450.0), (450.0, 300.0), (TIME_MIN_MS, TIME_MAX_MS), (TIME_MAX_MS, TIME_MIN_MS)]
+        {
             let input = sine(220.0, 0.5, SAMPLE_RATE, at(6000.0));
             let mut delay = new_delay(SAMPLE_RATE);
-            delay_tests::run_blocks(&mut delay, &delay_tests::settings(from_ms, 0.5, 1.0), &input[..at(2000.0)], BLOCK);
-            let (left, _) = delay_tests::run_blocks(&mut delay, &delay_tests::settings(to_ms, 0.5, 1.0), &input[at(2000.0)..], BLOCK);
+            delay_tests::run_blocks(
+                &mut delay,
+                &delay_tests::settings(from_ms, 0.5, 1.0),
+                &input[..at(2000.0)],
+                BLOCK,
+            );
+            let (left, _) = delay_tests::run_blocks(
+                &mut delay,
+                &delay_tests::settings(to_ms, 0.5, 1.0),
+                &input[at(2000.0)..],
+                BLOCK,
+            );
             // Where the repeats are steady again: the step is back at what it ends up as
             let settled = largest_step(&left[left.len() - at(200.0)..]);
-            let glide = (0..left.len() - at(50.0)).step_by(at(10.0)).rev().find(|&start| (largest_step(&left[start..start + at(50.0)]) / settled - 1.0).abs() > 0.05).unwrap_or(0);
-            println!("  {:>6.0} to {:>6.0} ms: largest step {:.4}, glide over after about {:.2} s", from_ms, to_ms, largest_step(&left), glide as f32 / SAMPLE_RATE);
+            let glide = (0..left.len() - at(50.0))
+                .step_by(at(10.0))
+                .rev()
+                .find(|&start| {
+                    (largest_step(&left[start..start + at(50.0)]) / settled - 1.0).abs() > 0.05
+                })
+                .unwrap_or(0);
+            println!(
+                "  {:>6.0} to {:>6.0} ms: largest step {:.4}, glide over after about {:.2} s",
+                from_ms,
+                to_ms,
+                largest_step(&left),
+                glide as f32 / SAMPLE_RATE
+            );
         }
 
         println!("\n== REVERB ==");
-        println!("\nReverb time (s to fall 60 dB, from the fall between -5 and -25 dB), left channel");
-        println!("{:>8} {:>8} | {:>8} {:>8} {:>8} {:>8} | {:>10} {:>10}", "rate", "set", "250 Hz", "1 kHz", "5 kHz", "5k / 1k", "1 kHz/set", "right 1k");
+        println!(
+            "\nReverb time (s to fall 60 dB, from the fall between -5 and -25 dB), left channel"
+        );
+        println!(
+            "{:>8} {:>8} | {:>8} {:>8} {:>8} {:>8} | {:>10} {:>10}",
+            "rate", "set", "250 Hz", "1 kHz", "5 kHz", "5k / 1k", "1 kHz/set", "right 1k"
+        );
         for sample_rate in [44100.0, 48000.0, 96000.0, 192000.0] {
-            let decays: &[f32] = if sample_rate == 48000.0 { &[DECAY_MIN_S, 0.6, 1.0, 1.8, 3.0, DECAY_MAX_S] } else { &[1.8] };
+            let decays: &[f32] = if sample_rate == 48000.0 {
+                &[DECAY_MIN_S, 0.6, 1.0, 1.8, 3.0, DECAY_MAX_S]
+            } else {
+                &[1.8]
+            };
             for &decay_s in decays {
                 let (left, right) = impulse_response(decay_s, sample_rate, decay_s + 0.4);
-                let (low, mid, high) = (decay_at(&left, sample_rate, 250.0), decay_at(&left, sample_rate, 1000.0), decay_at(&left, sample_rate, 5000.0));
+                let (low, mid, high) = (
+                    decay_at(&left, sample_rate, 250.0),
+                    decay_at(&left, sample_rate, 1000.0),
+                    decay_at(&left, sample_rate, 5000.0),
+                );
                 println!(
                     "{:>8.0} {:>8.2} | {:>8.2} {:>8.2} {:>8.2} {:>8.2} | {:>10.2} {:>10.2}",
                     sample_rate,
@@ -1026,7 +1184,17 @@ mod tests {
 
         println!("\nDensity of the tail of one sample: kurtosis in 10 ms windows, left channel");
         println!("(3.0 is noise; higher is single echoes standing out; towards 1.5 is ringing on a few tones)");
-        println!("{:>8} | {:>7} {:>7} {:>7} {:>7} {:>7} {:>7} | {:>24}", "decay", "20 ms", "40 ms", "60 ms", "100 ms", "150 ms", "250 ms", "0.3 s on: low/median/high");
+        println!(
+            "{:>8} | {:>7} {:>7} {:>7} {:>7} {:>7} {:>7} | {:>24}",
+            "decay",
+            "20 ms",
+            "40 ms",
+            "60 ms",
+            "100 ms",
+            "150 ms",
+            "250 ms",
+            "0.3 s on: low/median/high"
+        );
         let window = at(10.0);
         for decay_s in [DECAY_MIN_S, 1.8, DECAY_MAX_S] {
             let (left, _) = impulse_response(decay_s, SAMPLE_RATE, (decay_s * 0.6).max(0.9));
@@ -1035,18 +1203,34 @@ mod tests {
                 row += &format!(" {:>7.1}", kurtosis(&left[at(start_ms)..at(start_ms) + window]));
             }
             let end = seconds((decay_s * 0.6).max(0.9).min(decay_s * 1.5), SAMPLE_RATE);
-            let mut late: Vec<f32> = left[at(300.0)..end.max(at(320.0))].chunks_exact(window).map(kurtosis).collect();
+            let mut late: Vec<f32> =
+                left[at(300.0)..end.max(at(320.0))].chunks_exact(window).map(kurtosis).collect();
             late.sort_by(|a, b| a.total_cmp(b));
-            println!("{} | {:>7.1} {:>7.1} {:>7.1}", row, late[0], late[late.len() / 2], late[late.len() - 1]);
+            println!(
+                "{} | {:>7.1} {:>7.1} {:>7.1}",
+                row,
+                late[0],
+                late[late.len() / 2],
+                late[late.len() - 1]
+            );
         }
 
         println!("\nStart of the tail of one sample, decay 1.8 s");
         let (left, _) = impulse_response(1.8, SAMPLE_RATE, 0.5);
         let first = left.iter().position(|sample| sample.abs() > 0.0).unwrap();
         let smooth = at(5.0);
-        let loudest = (0..left.len() - smooth).step_by(at(1.0)).max_by(|&a, &b| rms(&left[a..a + smooth]).total_cmp(&rms(&left[b..b + smooth]))).unwrap();
-        let level_in = |from_ms: f32, to_ms: f32| to_db(rms(&left[at(from_ms)..at(to_ms)]) / rms(&left[loudest..loudest + smooth]));
-        println!("  first sound after {:.1} ms; loudest 5 ms from {:.0} ms", first as f32 * 1000.0 / SAMPLE_RATE, loudest as f32 * 1000.0 / SAMPLE_RATE);
+        let loudest = (0..left.len() - smooth)
+            .step_by(at(1.0))
+            .max_by(|&a, &b| rms(&left[a..a + smooth]).total_cmp(&rms(&left[b..b + smooth])))
+            .unwrap();
+        let level_in = |from_ms: f32, to_ms: f32| {
+            to_db(rms(&left[at(from_ms)..at(to_ms)]) / rms(&left[loudest..loudest + smooth]))
+        };
+        println!(
+            "  first sound after {:.1} ms; loudest 5 ms from {:.0} ms",
+            first as f32 * 1000.0 / SAMPLE_RATE,
+            loudest as f32 * 1000.0 / SAMPLE_RATE
+        );
         println!(
             "  level against the loudest 5 ms (dB): 15-20 ms {:.1}, 20-30 ms {:.1}, 30-50 ms {:.1}, 50-100 ms {:.1}, 100-200 ms {:.1}",
             level_in(15.0, 20.0),
@@ -1059,9 +1243,12 @@ mod tests {
         println!("\nRinging: the resonances from 400 to 1600 Hz in 1 Hz steps, in the tail from 0.5 s to 1.5 s:");
         println!("the strongest and the 99th percentile against the median one (dB)");
         let spread = |late: &[f32]| {
-            let mut levels: Vec<f64> = (400..1600).map(|freq_hz| level_at_fast(late, SAMPLE_RATE, freq_hz as f64)).collect();
+            let mut levels: Vec<f64> = (400..1600)
+                .map(|freq_hz| level_at_fast(late, SAMPLE_RATE, freq_hz as f64))
+                .collect();
             levels.sort_by(|a, b| a.total_cmp(b));
-            let against_median = |index: usize| 20.0 * (levels[index] / levels[levels.len() / 2]).log10();
+            let against_median =
+                |index: usize| 20.0 * (levels[index] / levels[levels.len() / 2]).log10();
             (against_median(levels.len() - 1), against_median(levels.len() * 99 / 100))
         };
         for decay_s in [1.8, DECAY_MAX_S] {
@@ -1070,22 +1257,41 @@ mod tests {
             println!("  decay {:.1} s: {:.1} / {:.1}", decay_s, strongest, most);
             // What no reverb can beat: noise that dies away at the same rate
             let mut source = Noise::new(11);
-            let ideal: Vec<f32> = (0..seconds(1.0, SAMPLE_RATE)).map(|index| source.next() * 10.0f32.powf(-3.0 * index as f32 / (decay_s * SAMPLE_RATE))).collect();
+            let ideal: Vec<f32> = (0..seconds(1.0, SAMPLE_RATE))
+                .map(|index| {
+                    source.next() * 10.0f32.powf(-3.0 * index as f32 / (decay_s * SAMPLE_RATE))
+                })
+                .collect();
             let (strongest, most) = spread(&ideal);
             println!("  noise dying away at that rate: {:.1} / {:.1}", strongest, most);
         }
 
-        println!("\nPalm mutes into the reverb (decay 1.8 s, mix 1.0): kurtosis of the tail in the gaps");
+        println!(
+            "\nPalm mutes into the reverb (decay 1.8 s, mix 1.0): kurtosis of the tail in the gaps"
+        );
         let mutes = palm_mutes(SAMPLE_RATE, 2.4);
         let (left, right) = run(&settings(1.8, 1.0), &mutes, SAMPLE_RATE);
         let tail = without(&left, &mutes);
         let mut gaps: Vec<f32> = tail[at(300.0)..].chunks_exact(window).map(kurtosis).collect();
         gaps.sort_by(|a, b| a.total_cmp(b));
-        println!("  low / median / high: {:.1} / {:.1} / {:.1}", gaps[0], gaps[gaps.len() / 2], gaps[gaps.len() - 1]);
-        println!("  tail against dry: {:.1} dB, peak of the output {:.2} (dry {:.2})", to_db(rms(&tail) / rms(&mutes)), peak(&left).max(peak(&right)), peak(&mutes));
+        println!(
+            "  low / median / high: {:.1} / {:.1} / {:.1}",
+            gaps[0],
+            gaps[gaps.len() / 2],
+            gaps[gaps.len() - 1]
+        );
+        println!(
+            "  tail against dry: {:.1} dB, peak of the output {:.2} (dry {:.2})",
+            to_db(rms(&tail) / rms(&mutes)),
+            peak(&left).max(peak(&right)),
+            peak(&mutes)
+        );
 
         println!("\nLevel and width: guitar phrase, mix 1.0");
-        println!("{:>8} {:>14} {:>14} {:>13} {:>16} {:>14}", "decay", "tail left dB", "tail right dB", "correlation", "mono sum dB", "dry in mono");
+        println!(
+            "{:>8} {:>14} {:>14} {:>13} {:>16} {:>14}",
+            "decay", "tail left dB", "tail right dB", "correlation", "mono sum dB", "dry in mono"
+        );
         for decay_s in [DECAY_MIN_S, 1.0, 1.8, 3.0, DECAY_MAX_S] {
             let (left, right) = run(&settings(decay_s, 1.0), &di, SAMPLE_RATE);
             let (tail_left, tail_right) = (without(&left, &di), without(&right, &di));
@@ -1104,23 +1310,39 @@ mod tests {
         println!("\nTail of an octave of noise against that noise (dB), decay 1.8 s, mix 1.0: the low cut and the damping");
         let mut row = String::new();
         for centre_hz in [62.5, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0] {
-            let input = octave_band(&noise(0.25, seconds(6.0, SAMPLE_RATE)), SAMPLE_RATE, centre_hz);
+            let input =
+                octave_band(&noise(0.25, seconds(6.0, SAMPLE_RATE)), SAMPLE_RATE, centre_hz);
             let (left, _) = run(&settings(1.8, 1.0), &input, SAMPLE_RATE);
             let from = seconds(2.0, SAMPLE_RATE);
-            row += &format!("  {} Hz {:.1}", centre_hz, to_db(rms(&without(&left, &input)[from..]) / rms(&input[from..])));
+            row += &format!(
+                "  {} Hz {:.1}",
+                centre_hz,
+                to_db(rms(&without(&left, &input)[from..]) / rms(&input[from..]))
+            );
         }
         println!("{}", row);
         let (left, right) = impulse_response(1.8, SAMPLE_RATE, 2.0);
-        println!("Left against right of the tail of one sample: correlation {:.3}", correlation(&left, &right));
+        println!(
+            "Left against right of the tail of one sample: correlation {:.3}",
+            correlation(&left, &right)
+        );
 
         println!("\nLoudest output, mix 1.0, decay 6 s, 10 s of input");
         for (name, signal) in [
             ("power chords clipped at full scale", &loud_chords[..seconds(10.0, SAMPLE_RATE)]),
             ("full-scale noise", &full_noise[..seconds(10.0, SAMPLE_RATE)]),
-            ("full-scale 440 Hz sine", &sine(440.0, 1.0, SAMPLE_RATE, seconds(10.0, SAMPLE_RATE))[..]),
+            (
+                "full-scale 440 Hz sine",
+                &sine(440.0, 1.0, SAMPLE_RATE, seconds(10.0, SAMPLE_RATE))[..],
+            ),
         ] {
             let (left, right) = run(&settings(DECAY_MAX_S, 1.0), signal, SAMPLE_RATE);
-            println!("  {:<40} output peak {:.2}, tail alone {:.2}", name, peak(&left).max(peak(&right)), peak(&without(&left, signal)).max(peak(&without(&right, signal))));
+            println!(
+                "  {:<40} output peak {:.2}, tail alone {:.2}",
+                name,
+                peak(&left).max(peak(&right)),
+                peak(&without(&left, signal)).max(peak(&without(&right, signal)))
+            );
         }
 
         println!("\nDecay dial moved while a 440 Hz sine plays (largest step; the dry sine alone makes {:.4})", 0.5 * std::f32::consts::TAU * 440.0 / SAMPLE_RATE);
@@ -1128,14 +1350,23 @@ mod tests {
             let input = sine(440.0, 0.5, SAMPLE_RATE, seconds(4.0, SAMPLE_RATE));
             let mut reverb = new_reverb(SAMPLE_RATE);
             let half = input.len() / 2;
-            let (before, _) = run_blocks(&mut reverb, &settings(from_s, 1.0), &input[..half], BLOCK);
+            let (before, _) =
+                run_blocks(&mut reverb, &settings(from_s, 1.0), &input[..half], BLOCK);
             let (after, _) = run_blocks(&mut reverb, &settings(to_s, 1.0), &input[half..], BLOCK);
-            println!("  {:.1} to {:.1} s: before {:.4}, after {:.4}", from_s, to_s, largest_step(&before[half / 2..]), largest_step(&after));
+            println!(
+                "  {:.1} to {:.1} s: before {:.4}, after {:.4}",
+                from_s,
+                to_s,
+                largest_step(&before[half / 2..]),
+                largest_step(&after)
+            );
         }
 
         println!("\n== TAILS AND COST ==");
         println!("\nSeconds from the end of the input until idle, at mix 1.0, and the peak of what was still");
-        println!("coming out in the last 10 ms before that and in the 10 ms a second earlier, in dBFS");
+        println!(
+            "coming out in the last 10 ms before that and in the 10 ms a second earlier, in dBFS"
+        );
         // Runs `process` on silence until `is_idle`. Returns the seconds and the two peaks
         fn ring_out(mut process: impl FnMut(&mut [f32], &mut [f32]) -> bool) -> (f32, f32, f32) {
             let mut heard = Vec::new();
@@ -1152,7 +1383,9 @@ mod tests {
             };
             (heard.len() as f32 / SAMPLE_RATE, peak_before(0), peak_before(SAMPLE_RATE as usize))
         }
-        for (time_ms, feedback) in [(TIME_MIN_MS, 0.35), (350.0, 0.35), (350.0, FEEDBACK_MAX), (TIME_MAX_MS, FEEDBACK_MAX)] {
+        for (time_ms, feedback) in
+            [(TIME_MIN_MS, 0.35), (350.0, 0.35), (350.0, FEEDBACK_MAX), (TIME_MAX_MS, FEEDBACK_MAX)]
+        {
             let mut delay = new_delay(SAMPLE_RATE);
             let setting = delay_tests::settings(time_ms, feedback, 1.0);
             delay_tests::run_blocks(&mut delay, &setting, &di[..seconds(2.0, SAMPLE_RATE)], BLOCK);
@@ -1160,19 +1393,33 @@ mod tests {
                 delay.process(&setting, left, right);
                 delay.is_idle()
             });
-            println!("  delay {:>6.0} ms, feedback {:.2}: {:>5.1} s {:>8.1} {:>8.1}", time_ms, feedback, time_s, last, earlier);
+            println!(
+                "  delay {:>6.0} ms, feedback {:.2}: {:>5.1} s {:>8.1} {:>8.1}",
+                time_ms, feedback, time_s, last, earlier
+            );
         }
         for decay_s in [DECAY_MIN_S, 1.8, DECAY_MAX_S] {
             let mut reverb = new_reverb(SAMPLE_RATE);
-            run_blocks(&mut reverb, &settings(decay_s, 1.0), &di[..seconds(2.0, SAMPLE_RATE)], BLOCK);
+            run_blocks(
+                &mut reverb,
+                &settings(decay_s, 1.0),
+                &di[..seconds(2.0, SAMPLE_RATE)],
+                BLOCK,
+            );
             let (time_s, last, earlier) = ring_out(|left, right| {
                 reverb.process(&settings(decay_s, 1.0), left, right);
                 reverb.is_idle()
             });
-            println!("  reverb decay {:.1} s:               {:>5.1} s {:>8.1} {:>8.1}", decay_s, time_s, last, earlier);
+            println!(
+                "  reverb decay {:.1} s:               {:>5.1} s {:>8.1} {:>8.1}",
+                decay_s, time_s, last, earlier
+            );
         }
 
-        println!("\nCost per block of {} samples (median, microseconds, and share of real time)", BLOCK);
+        println!(
+            "\nCost per block of {} samples (median, microseconds, and share of real time)",
+            BLOCK
+        );
         println!("{:>10} {:<34} {:>9} {:>9}", "rate", "", "us", "%");
         for sample_rate in [48000.0, 192000.0] {
             let block_us = BLOCK as f64 / sample_rate as f64 * 1e6;
@@ -1180,14 +1427,29 @@ mod tests {
             let silence = vec![0.0; seconds(1.0, sample_rate)];
             let delay_on = delay_tests::settings(350.0, 0.5, 0.5);
             let reverb_on = settings(1.8, 0.5);
-            let print = |name: &str, time_us: f64| println!("{:>10.0} {:<34} {:>9.2} {:>9.3}", sample_rate, name, time_us, 100.0 * time_us / block_us);
+            let print = |name: &str, time_us: f64| {
+                println!(
+                    "{:>10.0} {:<34} {:>9.2} {:>9.3}",
+                    sample_rate,
+                    name,
+                    time_us,
+                    100.0 * time_us / block_us
+                )
+            };
 
             let mut delay = new_delay(sample_rate);
             print("delay playing", delay_tests::block_time_us(&mut delay, &delay_on, &playing));
             print("delay tail", delay_tests::block_time_us(&mut delay, &delay_on, &silence));
             delay.reset();
             print("delay on, idle", delay_tests::block_time_us(&mut delay, &delay_on, &silence));
-            print("delay off, idle, input playing", delay_tests::block_time_us(&mut delay, &DelaySettings { on: false, ..delay_on }, &playing));
+            print(
+                "delay off, idle, input playing",
+                delay_tests::block_time_us(
+                    &mut delay,
+                    &DelaySettings { on: false, ..delay_on },
+                    &playing,
+                ),
+            );
 
             let mut reverb = new_reverb(sample_rate);
             print("reverb playing", block_time_us(&mut reverb, &reverb_on, &playing));
@@ -1198,7 +1460,10 @@ mod tests {
                     .enumerate()
                     .map(|(index, block)| {
                         let (mut l, mut r) = (block.to_vec(), block.to_vec());
-                        let setting = settings(if (index / 200) % 2 == 0 { DECAY_MIN_S } else { DECAY_MAX_S }, 0.5);
+                        let setting = settings(
+                            if (index / 200) % 2 == 0 { DECAY_MIN_S } else { DECAY_MAX_S },
+                            0.5,
+                        );
                         let start = Instant::now();
                         reverb.process(&setting, &mut l, &mut r);
                         start.elapsed().as_secs_f64() * 1e6
@@ -1209,9 +1474,16 @@ mod tests {
             });
             reverb.reset();
             print("reverb on, idle", block_time_us(&mut reverb, &reverb_on, &silence));
-            print("reverb off, idle, input playing", block_time_us(&mut reverb, &ReverbSettings { on: false, ..reverb_on }, &playing));
+            print(
+                "reverb off, idle, input playing",
+                block_time_us(&mut reverb, &ReverbSettings { on: false, ..reverb_on }, &playing),
+            );
 
-            let both = |delay: &mut Delay, reverb: &mut Reverb, delay_settings: &DelaySettings, reverb_settings: &ReverbSettings, input: &[f32]| {
+            let both = |delay: &mut Delay,
+                        reverb: &mut Reverb,
+                        delay_settings: &DelaySettings,
+                        reverb_settings: &ReverbSettings,
+                        input: &[f32]| {
                 let (mut left, mut right) = (input.to_vec(), input.to_vec());
                 let mut times: Vec<f64> = left
                     .chunks_mut(BLOCK)
@@ -1224,17 +1496,31 @@ mod tests {
                     })
                     .collect();
                 times.sort_by(|a, b| a.total_cmp(b));
-                (times[times.len() / 2], times[times.len() * 99 / 100], times[times.len() * 999 / 1000])
+                (
+                    times[times.len() / 2],
+                    times[times.len() * 99 / 100],
+                    times[times.len() * 999 / 1000],
+                )
             };
             let (mut delay, mut reverb) = (new_delay(sample_rate), new_reverb(sample_rate));
-            let (median, most, worst) = both(&mut delay, &mut reverb, &delay_on, &reverb_on, &playing);
+            let (median, most, worst) =
+                both(&mut delay, &mut reverb, &delay_on, &reverb_on, &playing);
             print("both playing", median);
             print("both playing, 99th percentile", most);
             print("both playing, 99.9th percentile", worst);
             let (median, _, _) = both(&mut delay, &mut reverb, &delay_on, &reverb_on, &silence);
             print("both, tail", median);
-            let off = (DelaySettings { on: false, ..delay_on }, ReverbSettings { on: false, ..reverb_on });
-            let (_, _, worst) = both(&mut delay, &mut reverb, &off.0, &off.1, &vec![0.0; seconds(30.0, sample_rate)]);
+            let off = (
+                DelaySettings { on: false, ..delay_on },
+                ReverbSettings { on: false, ..reverb_on },
+            );
+            let (_, _, worst) = both(
+                &mut delay,
+                &mut reverb,
+                &off.0,
+                &off.1,
+                &vec![0.0; seconds(30.0, sample_rate)],
+            );
             assert!(delay.is_idle() && reverb.is_idle());
             print("both ringing out, 99.9th percentile", worst);
             let (median, _, _) = both(&mut delay, &mut reverb, &off.0, &off.1, &playing);
@@ -1262,7 +1548,8 @@ mod tests {
 
         let delay_off = DelaySettings::default();
         let reverb_off = ReverbSettings::default();
-        let delay = |time_ms: f32, feedback: f32, mix: f32| delay_tests::settings(time_ms, feedback, mix);
+        let delay =
+            |time_ms: f32, feedback: f32, mix: f32| delay_tests::settings(time_ms, feedback, mix);
         let renders: [(&str, &[f32], DelaySettings, ReverbSettings); 12] = [
             ("delay_350ms", &phrase, delay(350.0, 0.4, 0.4), reverb_off),
             ("delay_slap_90ms", &phrase, delay(90.0, 0.15, 0.5), reverb_off),
@@ -1278,7 +1565,13 @@ mod tests {
             ("impulse_reverb_6s", &click, delay_off, settings(DECAY_MAX_S, 1.0)),
         ];
         for (name, input, delay_settings, reverb_settings) in renders {
-            let (left, right) = run_both(&mut new_delay(SAMPLE_RATE), &mut new_reverb(SAMPLE_RATE), &delay_settings, &reverb_settings, input);
+            let (left, right) = run_both(
+                &mut new_delay(SAMPLE_RATE),
+                &mut new_reverb(SAMPLE_RATE),
+                &delay_settings,
+                &reverb_settings,
+                input,
+            );
             write_wav(&dir.join(format!("amp_fx_{}.wav", name)), &[&left, &right], rate);
         }
 
@@ -1291,10 +1584,8 @@ mod tests {
                 on: turn % 4 != 3,
                 ..delay([350.0, 500.0, 200.0][turn % 3], 0.5, 0.4)
             };
-            let reverb_settings = ReverbSettings {
-                on: turn % 5 != 4,
-                ..settings([1.0, 4.0][turn % 2], 0.35)
-            };
+            let reverb_settings =
+                ReverbSettings { on: turn % 5 != 4, ..settings([1.0, 4.0][turn % 2], 0.35) };
             delay_unit.process(&delay_settings, l, r);
             reverb_unit.process(&reverb_settings, l, r);
         }

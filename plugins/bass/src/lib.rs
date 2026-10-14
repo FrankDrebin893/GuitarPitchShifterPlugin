@@ -46,10 +46,7 @@ pub struct BassSynthParams {
 
 impl Default for BassSynthPlugin {
     fn default() -> Self {
-        Self {
-            params: Arc::new(BassSynthParams::default()),
-            bass: Bass::new(),
-        }
+        Self { params: Arc::new(BassSynthParams::default()), bass: Bass::new() }
     }
 }
 
@@ -95,10 +92,7 @@ impl Default for BassSynthParams {
             sustain: FloatParam::new(
                 "Sustain",
                 defaults.sustain_s,
-                FloatRange::Linear {
-                    min: bass::SUSTAIN_MIN_S,
-                    max: bass::SUSTAIN_MAX_S,
-                },
+                FloatRange::Linear { min: bass::SUSTAIN_MIN_S, max: bass::SUSTAIN_MAX_S },
             )
             .with_step_size(0.1)
             .with_unit(" s")
@@ -107,10 +101,7 @@ impl Default for BassSynthParams {
             slide: FloatParam::new(
                 "Slide",
                 defaults.slide_ms,
-                FloatRange::Linear {
-                    min: 0.0,
-                    max: bass::SLIDE_MAX_MS,
-                },
+                FloatRange::Linear { min: 0.0, max: bass::SLIDE_MAX_MS },
             )
             .with_step_size(1.0)
             .with_unit(" ms"),
@@ -118,10 +109,7 @@ impl Default for BassSynthParams {
             transpose: FloatParam::new(
                 "Transpose",
                 defaults.transpose,
-                FloatRange::Linear {
-                    min: -bass::TRANSPOSE_RANGE,
-                    max: bass::TRANSPOSE_RANGE,
-                },
+                FloatRange::Linear { min: -bass::TRANSPOSE_RANGE, max: bass::TRANSPOSE_RANGE },
             )
             .with_step_size(1.0)
             .with_unit(" st"),
@@ -217,8 +205,12 @@ impl Plugin for BassSynthPlugin {
                 match event {
                     NoteEvent::NoteOn { note, velocity, .. } => self.bass.note_on(note, velocity),
                     NoteEvent::NoteOff { note, .. } => self.bass.note_off(note),
-                    NoteEvent::MidiCC { cc, .. } if cc == control_change::ALL_NOTES_OFF => self.bass.release(),
-                    NoteEvent::MidiCC { cc, .. } if cc == control_change::ALL_SOUND_OFF => self.bass.reset(),
+                    NoteEvent::MidiCC { cc, .. } if cc == control_change::ALL_NOTES_OFF => {
+                        self.bass.release()
+                    }
+                    NoteEvent::MidiCC { cc, .. } if cc == control_change::ALL_SOUND_OFF => {
+                        self.bass.reset()
+                    }
                     _ => {}
                 }
 
@@ -237,20 +229,19 @@ impl Plugin for BassSynthPlugin {
 
 impl ClapPlugin for BassSynthPlugin {
     const CLAP_ID: &'static str = "net.hojte.bass-synth";
-    const CLAP_DESCRIPTION: Option<&'static str> = Some("A plucked string bass, picked or played with a finger");
+    const CLAP_DESCRIPTION: Option<&'static str> =
+        Some("A plucked string bass, picked or played with a finger");
     const CLAP_MANUAL_URL: Option<&'static str> = None;
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
-    const CLAP_FEATURES: &'static [ClapFeature] = &[
-        ClapFeature::Instrument,
-        ClapFeature::Synthesizer,
-        ClapFeature::Stereo,
-    ];
+    const CLAP_FEATURES: &'static [ClapFeature] =
+        &[ClapFeature::Instrument, ClapFeature::Synthesizer, ClapFeature::Stereo];
 }
 
 impl Vst3Plugin for BassSynthPlugin {
     // Frozen: DAW projects find the plugin by this ID. Never change it
     const VST3_CLASS_ID: [u8; 16] = *b"HojtBassSynth001";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Instrument, Vst3SubCategory::Synth];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Instrument, Vst3SubCategory::Synth];
 }
 
 nih_export_clap!(BassSynthPlugin);
@@ -264,13 +255,7 @@ mod tests {
     fn test_parameter_defaults_are_those_of_the_dsp() {
         let (params, defaults) = (BassSynthParams::default().settings(), BassSettings::default());
         assert!((params.volume_db - defaults.volume_db).abs() < 0.001);
-        assert_eq!(
-            BassSettings {
-                volume_db: defaults.volume_db,
-                ..params
-            },
-            defaults
-        );
+        assert_eq!(BassSettings { volume_db: defaults.volume_db, ..params }, defaults);
     }
 
     #[test]

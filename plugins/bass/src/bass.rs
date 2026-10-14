@@ -278,7 +278,8 @@ impl Bass {
         if velocity <= 0.0 {
             return self.note_off(note);
         }
-        let sliding = self.settings.slide_ms > 0.0 && self.held && self.note.is_some_and(|held| held != note);
+        let sliding =
+            self.settings.slide_ms > 0.0 && self.held && self.note.is_some_and(|held| held != note);
         if sliding {
             self.slide_to(note);
         } else {
@@ -344,7 +345,8 @@ impl Bass {
                 }
                 let pick = ((period * 0.18) as usize).max(1);
                 for index in 0..length {
-                    let comb = self.pluck[index] - if index >= pick { self.pluck[index - pick] } else { 0.0 };
+                    let comb = self.pluck[index]
+                        - if index >= pick { self.pluck[index - pick] } else { 0.0 };
                     let position = (self.write + self.line.len() - 1 - index) & self.mask;
                     self.line[position] = comb * level * 1.6;
                 }
@@ -490,7 +492,14 @@ mod tests {
                     let output = render(&mut bass, sample_rate, 0.5);
                     let found = pitch(&output[(0.2 * sample_rate) as usize..], sample_rate);
                     let cents = 1200.0 * (found / note_hz(midi as f32)).log2();
-                    assert!(cents.abs() < 6.0, "{:?} note {} at {} Hz: {} cents off", voice, midi, sample_rate, cents);
+                    assert!(
+                        cents.abs() < 6.0,
+                        "{:?} note {} at {} Hz: {} cents off",
+                        voice,
+                        midi,
+                        sample_rate,
+                        cents
+                    );
                 }
             }
         }
@@ -499,10 +508,7 @@ mod tests {
     #[test]
     fn test_transpose_moves_the_pitch() {
         let mut bass = bass(Voice::Groove, SAMPLE_RATE);
-        bass.set(&BassSettings {
-            transpose: -12.0,
-            ..Voice::Groove.settings()
-        });
+        bass.set(&BassSettings { transpose: -12.0, ..Voice::Groove.settings() });
         bass.note_on(45, 0.9);
         let output = render(&mut bass, SAMPLE_RATE, 0.8);
         let found = pitch(&output[9600..], SAMPLE_RATE);
@@ -520,17 +526,19 @@ mod tests {
             render(&mut bass, SAMPLE_RATE, 0.3);
             bass.note_off(33);
             let released = render(&mut bass, SAMPLE_RATE, 0.7);
-            assert!(rms(&released[24000..]) < 0.002, "{:?} released: {}", voice, rms(&released[24000..]));
+            assert!(
+                rms(&released[24000..]) < 0.002,
+                "{:?} released: {}",
+                voice,
+                rms(&released[24000..])
+            );
         }
     }
 
     #[test]
     fn test_sustain_reaches_the_note_that_is_ringing() {
         // Without the sine under the string, which has its own decay
-        let string_alone = BassSettings {
-            sub: 0.0,
-            ..Voice::Groove.settings()
-        };
+        let string_alone = BassSettings { sub: 0.0, ..Voice::Groove.settings() };
         let level_after = |sustain_s: f32| {
             let mut bass = bass(Voice::Groove, SAMPLE_RATE);
             bass.set(&string_alone);
@@ -546,10 +554,7 @@ mod tests {
         bass.note_on(33, 0.9);
         render(&mut bass, SAMPLE_RATE, 0.2);
         bass.note_off(33);
-        bass.set(&BassSettings {
-            sustain_s: SUSTAIN_MAX_S,
-            ..Voice::Groove.settings()
-        });
+        bass.set(&BassSettings { sustain_s: SUSTAIN_MAX_S, ..Voice::Groove.settings() });
         assert!(rms(&render(&mut bass, SAMPLE_RATE, 0.7)[24000..]) < 0.002);
     }
 
@@ -611,14 +616,17 @@ mod tests {
             let soft = note(voice, 33, 0.3, 0.3);
             let hard = note(voice, 33, 1.0, 0.3);
             // Less than the velocity says where the drive evens the level out
-            assert!(peak(&hard) > peak(&soft) * 1.2, "{:?}: {} vs {}", voice, peak(&hard), peak(&soft));
+            assert!(
+                peak(&hard) > peak(&soft) * 1.2,
+                "{:?}: {} vs {}",
+                voice,
+                peak(&hard),
+                peak(&soft)
+            );
 
             let with = |brightness: f32| {
                 let mut bass = bass(voice, SAMPLE_RATE);
-                bass.set(&BassSettings {
-                    brightness,
-                    ..voice.settings()
-                });
+                bass.set(&BassSettings { brightness, ..voice.settings() });
                 bass.note_on(33, 0.9);
                 self::brightness(&render(&mut bass, SAMPLE_RATE, 0.3))
             };
@@ -656,7 +664,13 @@ mod tests {
                     output.extend(render(&mut bass, sample_rate, 0.2));
                 }
                 assert!(output.iter().all(|sample| sample.is_finite()));
-                assert!(peak(&output) <= 2.0, "{:?} at {} Hz peaks at {}", voice, sample_rate, peak(&output));
+                assert!(
+                    peak(&output) <= 2.0,
+                    "{:?} at {} Hz peaks at {}",
+                    voice,
+                    sample_rate,
+                    peak(&output)
+                );
             }
         }
     }
@@ -692,7 +706,12 @@ mod tests {
             sum += bass.process();
         }
         let per_frame_ns = started.elapsed().as_nanos() as f64 / frames as f64;
-        println!("\nOne note at 48 kHz: {:.0} ns per frame ({:.2} % of a core) ({})", per_frame_ns, per_frame_ns * 48000.0 / 1e7, sum.is_finite());
+        println!(
+            "\nOne note at 48 kHz: {:.0} ns per frame ({:.2} % of a core) ({})",
+            per_frame_ns,
+            per_frame_ns * 48000.0 / 1e7,
+            sum.is_finite()
+        );
     }
 
     /// Writes WAV files to target/renders for listening (bass_<voice>.wav):

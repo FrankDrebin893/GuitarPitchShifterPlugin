@@ -1,5 +1,7 @@
 use super::{Hit, Voice};
-use crate::dsp::{decay_coeff, semitones_to_ratio, soft_clip, Modes, Noise, OnePole, Svf, SILENCE_THRESHOLD};
+use crate::dsp::{
+    decay_coeff, semitones_to_ratio, soft_clip, Modes, Noise, OnePole, Svf, SILENCE_THRESHOLD,
+};
 
 const MODES: usize = 6;
 // Vibration modes of a circular membrane, relative to the fundamental
@@ -99,7 +101,10 @@ impl Snare {
             let level = if i == 0 {
                 1.0
             } else {
-                MODE_LEVELS[i] * preset.ring * (0.5 + 0.5 * hit.velocity) * (1.0 + 0.2 * self.noise.next())
+                MODE_LEVELS[i]
+                    * preset.ring
+                    * (0.5 + 0.5 * hit.velocity)
+                    * (1.0 + 0.2 * self.noise.next())
             };
             let decay_ms = preset.body_decay_ms * hit.decay / MODE_RATIOS[i];
             self.modes.set(i, freq * MODE_RATIOS[i], level, decay_ms, sample_rate);
@@ -108,14 +113,18 @@ impl Snare {
         self.bend = semitones_to_ratio(preset.bend_semitones * hit.velocity) - 1.0;
         self.wire_filter.set(preset.wire_hz, WIRE_Q, sample_rate);
         // Soft hits are darker
-        self.wire_lp
-            .set(preset.wire_lp_hz * (WIRE_SOFT_TOP + (1.0 - WIRE_SOFT_TOP) * hit.velocity), sample_rate);
+        self.wire_lp.set(
+            preset.wire_lp_hz * (WIRE_SOFT_TOP + (1.0 - WIRE_SOFT_TOP) * hit.velocity),
+            sample_rate,
+        );
         self.wire_coeff = decay_coeff(preset.wire_decay_ms * hit.decay, sample_rate);
 
         self.body_level = preset.body_level;
         // Harder hits rattle the wires more against the head
-        self.wire_level =
-            preset.wire_level * WIRE_GAIN * (0.6 + 0.4 * hit.velocity) * (1.0 + 0.1 * self.noise.next());
+        self.wire_level = preset.wire_level
+            * WIRE_GAIN
+            * (0.6 + 0.4 * hit.velocity)
+            * (1.0 + 0.1 * self.noise.next());
         self.attack_level = preset.attack_level * (0.4 + 0.6 * hit.velocity);
         self.drive = preset.drive;
         self.drive_norm = 1.0 / preset.drive.tanh();
@@ -128,8 +137,13 @@ impl Snare {
         let detune = 1.0 + 0.01 * self.noise.next();
 
         for i in 0..MODES {
-            self.modes
-                .set(i, STICK_FREQS_HZ[i] * detune, STICK_LEVELS[i], STICK_DECAYS_MS[i], sample_rate);
+            self.modes.set(
+                i,
+                STICK_FREQS_HZ[i] * detune,
+                STICK_LEVELS[i],
+                STICK_DECAYS_MS[i],
+                sample_rate,
+            );
         }
 
         self.bend = 0.0;
@@ -257,6 +271,9 @@ mod tests {
         let stick = render(&mut snare, SAMPLE_RATE as usize);
 
         assert!(peak(&stick) > 0.1);
-        assert!(decay_time_s(&stick, SAMPLE_RATE, -40.0) < decay_time_s(&full, SAMPLE_RATE, -40.0) * 0.5);
+        assert!(
+            decay_time_s(&stick, SAMPLE_RATE, -40.0)
+                < decay_time_s(&full, SAMPLE_RATE, -40.0) * 0.5
+        );
     }
 }

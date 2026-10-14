@@ -482,7 +482,9 @@ mod tests {
             assert!((1..=MAX_STAGES).contains(&model.stage_count));
             for stage in &model.stages[..model.stage_count] {
                 assert!(stage.headroom[0] > 0.0 && stage.headroom[1] > 0.0);
-                assert!(stage.gain_db[1] >= stage.gain_db[0] && stage.gain_db[2] >= stage.gain_db[1]);
+                assert!(
+                    stage.gain_db[1] >= stage.gain_db[0] && stage.gain_db[2] >= stage.gain_db[1]
+                );
                 assert!(stage.bias_shift >= 0.0);
             }
             assert!(model.power.sag >= 0.0 && model.power.sag < 0.5);

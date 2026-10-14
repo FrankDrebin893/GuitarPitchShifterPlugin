@@ -51,11 +51,7 @@ pub struct FlangerSettings {
 
 impl Default for FlangerSettings {
     fn default() -> Self {
-        Self {
-            on: false,
-            rate_hz: 0.3,
-            depth: 0.5,
-        }
+        Self { on: false, rate_hz: 0.3, depth: 0.5 }
     }
 }
 
@@ -155,7 +151,12 @@ impl Flanger {
     }
 
     /// Behind the cabinet: two channels at the host's rate
-    pub fn process_stereo(&mut self, settings: &FlangerSettings, left: &mut [f32], right: &mut [f32]) {
+    pub fn process_stereo(
+        &mut self,
+        settings: &FlangerSettings,
+        left: &mut [f32],
+        right: &mut [f32],
+    ) {
         debug_assert_eq!(left.len(), right.len());
         let len = left.len().min(right.len());
         self.process(settings, [&mut left[..len], &mut right[..len]]);
@@ -169,11 +170,16 @@ impl Flanger {
 
     /// True when the filters would put out nothing more by themselves
     fn filters_at_rest(&self) -> bool {
-        self.highpass.state().abs() < SILENCE && self.lowpass.iter().all(|filter| filter.state().abs() < SILENCE)
+        self.highpass.state().abs() < SILENCE
+            && self.lowpass.iter().all(|filter| filter.state().abs() < SILENCE)
     }
 
     /// Adds the copies to a block in place
-    fn process<const N: usize>(&mut self, settings: &FlangerSettings, mut channels: [&mut [f32]; N]) {
+    fn process<const N: usize>(
+        &mut self,
+        settings: &FlangerSettings,
+        mut channels: [&mut [f32]; N],
+    ) {
         let rate = settings.rate_hz.clamp(RATE_MIN_HZ, RATE_MAX_HZ);
         let depth = settings.depth.clamp(0.0, 1.0);
         let wet = WET * depth.sqrt();
@@ -262,8 +268,12 @@ mod tests {
         for sample_rate in [48000.0, 192_000.0, 384_000.0] {
             for (depth, to_ms) in [(1.0, 6.0), (0.5, 3.25), (0.0, 0.5)] {
                 for stereo in [false, true] {
-                    let (low, high) = swept_range::<Flanger>(sample_rate, &settings(1.0, depth), stereo);
-                    assert!((low - 0.5).abs() < 0.01 && (high - to_ms).abs() < 0.01, "{sample_rate} Hz, depth {depth}: {low} to {high} ms");
+                    let (low, high) =
+                        swept_range::<Flanger>(sample_rate, &settings(1.0, depth), stereo);
+                    assert!(
+                        (low - 0.5).abs() < 0.01 && (high - to_ms).abs() < 0.01,
+                        "{sample_rate} Hz, depth {depth}: {low} to {high} ms"
+                    );
                 }
             }
         }
@@ -291,12 +301,21 @@ mod tests {
                 .skip(1)
                 .map(|piece| {
                     let wet = &piece[1..];
-                    let at = (0..wet.len()).max_by(|&a, &b| wet[a].abs().total_cmp(&wet[b].abs())).unwrap() + 1;
+                    let at = (0..wet.len())
+                        .max_by(|&a, &b| wet[a].abs().total_cmp(&wet[b].abs()))
+                        .unwrap()
+                        + 1;
                     at as f32 * 1000.0 / sample_rate
                 })
                 .collect();
-            let (nearest, furthest) = delays_ms.iter().fold((f32::MAX, f32::MIN), |(low, high), &delay| (low.min(delay), high.max(delay)));
-            assert!((0.5..0.8).contains(&nearest) && (5.7..6.2).contains(&furthest), "{sample_rate} Hz: {nearest} to {furthest} ms");
+            let (nearest, furthest) =
+                delays_ms.iter().fold((f32::MAX, f32::MIN), |(low, high), &delay| {
+                    (low.min(delay), high.max(delay))
+                });
+            assert!(
+                (0.5..0.8).contains(&nearest) && (5.7..6.2).contains(&furthest),
+                "{sample_rate} Hz: {nearest} to {furthest} ms"
+            );
         }
     }
 
@@ -307,7 +326,12 @@ mod tests {
             let depth = 0.001;
             let gain = |freq_hz: f32| {
                 let input = sine(freq_hz, 0.25, sample_rate, (0.2 * sample_rate) as usize);
-                let output = run_mono(&mut Flanger::at(sample_rate), &settings(RATE_MIN_HZ, depth), &input, 64);
+                let output = run_mono(
+                    &mut Flanger::at(sample_rate),
+                    &settings(RATE_MIN_HZ, depth),
+                    &input,
+                    64,
+                );
                 let from = output.len() / 2;
                 (rms(&output[from..]) / rms(&input[from..]) - 1.0) / (WET * depth.sqrt())
             };
@@ -316,7 +340,10 @@ mod tests {
             // upside down
             let (peak, notch) = (gain(2000.0), gain(1000.0));
             assert!(peak > 1.5 && peak < 1.0 / (1.0 - FEEDBACK), "{sample_rate} Hz: peak {peak}");
-            assert!((notch + 1.0 / (1.0 + FEEDBACK)).abs() < 0.1, "{sample_rate} Hz: notch {notch}");
+            assert!(
+                (notch + 1.0 / (1.0 + FEEDBACK)).abs() < 0.1,
+                "{sample_rate} Hz: notch {notch}"
+            );
         }
     }
 
@@ -327,12 +354,16 @@ mod tests {
             for rate_hz in [RATE_MIN_HZ, RATE_MAX_HZ] {
                 for depth in [0.05, 1.0] {
                     let mut noise = Noise::new(9);
-                    let mut input: Vec<f32> = (0..(0.1 * sample_rate) as usize).map(|_| noise.next()).collect();
+                    let mut input: Vec<f32> =
+                        (0..(0.1 * sample_rate) as usize).map(|_| noise.next()).collect();
                     input.resize((0.4 * sample_rate) as usize, 0.0);
                     let mut flanger = Flanger::at(sample_rate);
                     let output = run_mono(&mut flanger, &settings(rate_hz, depth), &input, 128);
                     let late = peak(&output[(0.35 * sample_rate) as usize..]);
-                    assert!(late < 1e-4, "{sample_rate} Hz, {rate_hz} Hz, depth {depth}: {late} left");
+                    assert!(
+                        late < 1e-4,
+                        "{sample_rate} Hz, {rate_hz} Hz, depth {depth}: {late} left"
+                    );
                 }
             }
         }
@@ -376,6 +407,9 @@ mod tests {
         // still. While it moves the turns are not in step, and at the top of the guitar's
         // range it gets to 6 dB
         assert!(one > -8.0, "One channel {one} dB");
-        assert!(sum > -8.0 && sum > one - 0.5, "Mono sum {sum} dB at {at_hz} Hz, one channel {one} dB");
+        assert!(
+            sum > -8.0 && sum > one - 0.5,
+            "Mono sum {sum} dB at {at_hz} Hz, one channel {one} dB"
+        );
     }
 }
