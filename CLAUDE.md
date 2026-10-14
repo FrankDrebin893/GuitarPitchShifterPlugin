@@ -42,7 +42,7 @@ issues with `scripts/move-issue.sh`, which keeps label and board together):
 
 | Label | Means | Who moves it there |
 |-------|-------|--------------------|
-| `state:idea` | Filed, not yet thought through | Anyone, through an issue template |
+| `state:idea` | Filed, not yet thought through | Anyone, through an issue template; Claude with `/issue` |
 | `state:spec` | A spec is on the issue: what changes, ids, look, tests, acceptance, questions | Claude (`/spec`) |
 | `state:approved` | Rasmus said yes to the spec | **Rasmus only** |
 | `state:building` | Being built on a branch `<kind>/<issue>-<slug>` | Claude (`/next`) |
