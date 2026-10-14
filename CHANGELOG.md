@@ -36,6 +36,11 @@ Three new instruments, each a pedal of its own:
   when what rang does not fade like a string; a string that already rings when the tuner is
   switched on is read from its next pluck
 
+### Guitar Amp, Shimmer Pad, Glass Bells
+
+- VST3 hosts that stop processing a silent plugin no longer cut the delay and reverb tails:
+  the plugins tell the host from the start that their tails ring on
+
 ## 0.1.0
 
 First public release. VST3 and CLAP for Windows, macOS and Linux. The macOS and Linux builds

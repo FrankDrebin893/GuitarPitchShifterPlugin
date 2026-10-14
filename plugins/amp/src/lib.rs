@@ -609,6 +609,8 @@ impl Vst3Plugin for GuitarAmpPlugin {
     const VST3_CLASS_ID: [u8; 16] = *b"HojtGuitarAmp003";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
         &[Vst3SubCategory::Fx, Vst3SubCategory::Distortion];
+    // The delay and reverb ring on after the input stops, for as long as their settings say. A host that asks only once, before the first block, would hear 0
+    const VST3_INFINITE_TAIL: bool = true;
 }
 
 nih_export_clap!(GuitarAmpPlugin);
@@ -720,5 +722,12 @@ mod ids {
             include_str!("../../../bundler.toml"),
             "amp",
         );
+    }
+
+    #[test]
+    fn vst3_tail_is_infinite() {
+        use nih_plug::prelude::Vst3Plugin;
+        let infinite = super::GuitarAmpPlugin::VST3_INFINITE_TAIL;
+        assert!(infinite);
     }
 }

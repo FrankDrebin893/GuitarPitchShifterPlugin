@@ -188,4 +188,12 @@ mod ids {
             "pitch_shifter",
         );
     }
+
+    #[test]
+    fn vst3_tail_is_what_the_last_block_said() {
+        // Nothing rings on after the input: the tail is 0, so a host may stop calling
+        use nih_plug::prelude::Vst3Plugin;
+        let infinite = super::GuitarPitchShifterPlugin::VST3_INFINITE_TAIL;
+        assert!(!infinite);
+    }
 }

@@ -356,6 +356,11 @@ preamp, tone stack, power amp), cabinet, stereo delay and reverb, output level, 
   the modules smooth themselves
 - 2026-10-10 M4: `KeepAlive` while `!chain.is_idle()`, else `Normal`. `Tail(n)` would need
   the tail length ahead of time, and gains nothing in CLAP
+- 2026-10-14 VST3 tail (#20): nih-plug answers `getTailSamples` from the last block's status,
+  which is `Normal` until the first block, so a host that asks once at activation heard 0.
+  VST3 has no restart flag for the tail. Fixed in our nih-plug fork (one commit):
+  `Vst3Plugin::VST3_INFINITE_TAIL`, set for the amp, pad and bells. A host that suspends
+  silent plugins never suspends these; the amp costs its 2 % of a core on silence there
 - 2026-10-10 M4: rigs use `ui::rig_led` (black socket, darker unlit lens); `ui::led` and the
   other two plugins are unchanged
 - 2026-10-10 M5: oversampling is 4x at 44.1 and 48 kHz and 2x (the steep half-band alone)
@@ -487,7 +492,6 @@ worst latency 0.317 ms (Torden, 44.1 kHz, everything on). Run `amp_report` for t
 - M4: effects at their maximum push 2 to 11 dB over the safety clip's knee; the clip is not
   antialiased (an antialiased one costs half a sample and rolls off the top even when idle)
 - M4: with the gate off and a hissy amp the effects never go idle, so the status stays KeepAlive
-- M4: VST3 hosts that read the tail length only once at load see 0
 - M4: latency is unchanged by the effects (Klar 8, Brøl 10, Torden 14 samples at 48 kHz with
   every pedal on)
 
