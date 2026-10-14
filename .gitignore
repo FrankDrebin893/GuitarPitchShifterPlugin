@@ -1,5 +1,6 @@
 /target
 build.bat
 nul
-.claude/
+.claude/*
+!.claude/commands/
 /dist
