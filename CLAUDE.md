@@ -23,6 +23,7 @@ A suite of VST3/CLAP plugins built with Rust and the nih-plug framework. The bra
 - `scripts/package.sh` - Packs the bundles into the zips of a release
 - `scripts/site-audio.sh` - Makes the page's sound examples from the render tests
 - `scripts/sync-labels.sh` - The backlog's labels on GitHub
+- `scripts/move-issue.sh` - Moves an issue to a state: its label and its place on the board
 - `.github/workflows/` - `ci.yml` (tests), `release.yml` (builds and publishes a release),
   `pages.yml` (publishes `site/`), `approval-guard.yml` (see How work flows)
 - `.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md` - What an issue and a pull request ask for
@@ -32,7 +33,9 @@ Each plugin keeps DSP in its own module(s), separate from `lib.rs` (plugin entry
 ## How work flows
 
 The backlog is the GitHub issues of `FrankDrebin893/hojt-audio`, ordered on the project board
-"HØJT backlog". An issue has one state label, and moves through them in this order:
+"HØJT backlog" (https://github.com/users/FrankDrebin893/projects/2), whose State field mirrors
+the label. An issue has one state label, and moves through them in this order (Claude moves
+issues with `scripts/move-issue.sh`, which keeps label and board together):
 
 | Label | Means | Who moves it there |
 |-------|-------|--------------------|

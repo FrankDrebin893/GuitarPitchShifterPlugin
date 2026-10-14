@@ -20,6 +20,6 @@ in CLAUDE.md.
    - **Done when**: acceptance criteria Rasmus can check, including a listen for a sound change
    - **Risks and size**: S (an hour), M (a session), L (several: say how it splits into sub-issues)
    - **Questions**: decisions that are Rasmus's, each with your recommendation
-4. Set the label: `gh issue edit $ARGUMENTS --remove-label state:idea --add-label state:spec`.
-   Add the `plugin:*` / `kind:*` labels it lacks. Never add `state:approved`
+4. `scripts/move-issue.sh $ARGUMENTS spec` (label and board). Add the `plugin:*` / `kind:*`
+   labels it lacks. Never add `state:approved`
 5. Tell Rasmus in two lines what the spec proposes and what it asks him
