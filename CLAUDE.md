@@ -514,7 +514,10 @@ How it behaves:
   included); off brings it back as fast. Bypass still passes the input while tuning. The tuner
   costs nothing when off and under 3 us in its worst 64-sample block when on
 - The tuner reads 48 Hz to 1420 Hz against A = 440 Hz (`REFERENCE_A_HZ`), a new reading every
-  30 ms, none for silence, noise or chords. A loaded project never opens with the tuner on
+  30 ms, none for silence, noise, hum or chords. A note is shown from a pluck on (a rise of
+  12 dB within 50 ms; 6 dB to change notes or pluck again), and let go after a second if it
+  does not fade like a string. A loaded
+  project never opens with the tuner on
 - Besides its own cabinet an amp can play through a WAV impulse response from
   `Documents/Hojt Audio/Cabinets` (or the folder in `HOJT_CABINETS_DIR`), picked on the Cab pedal.
   Mono or the left channel of stereo, 16/24/32-bit integer or 32-bit float, any rate; resampled,
