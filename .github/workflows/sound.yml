@@ -53,7 +53,7 @@ jobs:
           git worktree add ../base "$base"
 
       - name: Reports and renders after
-        run: scripts/sound-reports.sh "$RUNNER_TEMP/after" --renders ${{ steps.scope.outputs.plugins }}
+        run: bash scripts/sound-reports.sh "$RUNNER_TEMP/after" --renders ${{ steps.scope.outputs.plugins }}
 
       - name: Reports and renders before
         working-directory: ../base
