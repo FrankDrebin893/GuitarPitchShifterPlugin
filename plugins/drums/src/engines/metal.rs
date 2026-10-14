@@ -1,4 +1,4 @@
-use super::{advance, coef, db, sine, BusDrive, CombRoom, MetalCluster, Rest, ENV_FLOOR};
+use super::{advance, coef, db, hat_time, sine, BusDrive, CombRoom, MetalCluster, Rest, ENV_FLOOR};
 use crate::drum_kit::{tom_index, Mix};
 use crate::dsp::{Noise, Svf};
 use crate::voices::tom::TOM_COUNT;
@@ -11,6 +11,8 @@ const LEVEL: f32 = 0.4;
 // Balance of the kit with the level controls at 0 dB
 const TOM_TRIM_DB: f32 = -2.0;
 const HAT_TRIM_DB: f32 = -4.0;
+// Time constant of the closed hi-hat, which the pedal also chokes an open one to
+const HAT_CLOSED_S: f32 = 0.028;
 const CYMBAL_TRIM_DB: f32 = -4.0;
 
 // The room at the default Room setting (25 %), as a share of its full level
@@ -117,6 +119,8 @@ impl Swell {
 pub struct MetalKit {
     sample_rate: f32,
     active: bool,
+    // How open the hi-hat pedal holds the hats, 0.0-1.0: what a hit on 46 sounds like
+    hat_openness: f32,
     rest: Rest,
     noise: Noise,
 
@@ -166,6 +170,7 @@ impl MetalKit {
         let mut kit = Self {
             sample_rate: 44100.0,
             active: false,
+            hat_openness: 1.0,
             rest: Rest::new(),
             noise: Noise::new(seed),
             kick: Kick::default(),
@@ -247,6 +252,7 @@ impl MetalKit {
             *tom = Tom::default();
         }
         self.hat_env = 0.0;
+        self.hat_openness = 1.0;
         self.ride = Ride::default();
         self.crashes = [Swell::default(), Swell::default()];
         self.splash = Swell::default();
@@ -286,6 +292,18 @@ impl MetalKit {
     #[cfg(test)]
     pub fn is_active(&self) -> bool {
         self.active
+    }
+
+    /// For the next hits on 46
+    pub fn set_hat_openness(&mut self, openness: f32) {
+        self.hat_openness = openness;
+    }
+
+    /// The pedal shut on a ringing hat: it dies as a closed one does. `decay` is Damping's
+    pub fn choke_hat(&mut self, decay: f32) {
+        if self.hat_env > ENV_FLOOR {
+            self.hat_decay = self.hat_decay.min(coef(HAT_CLOSED_S * decay, self.sample_rate));
+        }
     }
 
     /// Only called with notes of the kit's map
@@ -344,9 +362,12 @@ impl MetalKit {
                 };
             }
             // The closed and pedal sounds have a short decay, which chokes an open hi-hat
-            42 => (self.hat_env, self.hat_decay) = (level, decay(0.028)),
+            42 => (self.hat_env, self.hat_decay) = (level, decay(HAT_CLOSED_S)),
             44 => (self.hat_env, self.hat_decay) = (level * 0.55, decay(0.018)),
-            46 => (self.hat_env, self.hat_decay) = (level, decay(0.26)),
+            46 => {
+                let tau_s = hat_time(HAT_CLOSED_S, 0.26, self.hat_openness);
+                (self.hat_env, self.hat_decay) = (level, decay(tau_s));
+            }
             51 | 59 => {
                 self.ride.env = level;
                 self.ride.ping = level;

@@ -16,6 +16,8 @@ use kit::Kit;
 
 const LEVEL_MIN_DB: f32 = -30.0;
 const LEVEL_MAX_DB: f32 = 6.0;
+// MIDI's foot controller, which electronic kits send from the hi-hat pedal
+const HAT_PEDAL_CC: u8 = 4;
 
 pub struct DrumSynthPlugin {
     params: Arc<DrumSynthParams>,
@@ -130,7 +132,8 @@ impl Plugin for DrumSynthPlugin {
         ..AudioIOLayout::const_default()
     }];
 
-    const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
+    // CC4 is the hi-hat pedal
+    const MIDI_INPUT: MidiConfig = MidiConfig::MidiCCs;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
 
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
@@ -180,8 +183,13 @@ impl Plugin for DrumSynthPlugin {
                     break;
                 }
 
-                if let NoteEvent::NoteOn { note, velocity, .. } = event {
-                    self.drums.note_on(note, velocity);
+                match event {
+                    NoteEvent::NoteOn { note, velocity, .. } => self.drums.note_on(note, velocity),
+                    // The foot controller: 127 is the pedal shut, as electronic kits send it
+                    NoteEvent::MidiCC { cc: HAT_PEDAL_CC, value, .. } => {
+                        self.drums.set_hat_openness(1.0 - value)
+                    }
+                    _ => {}
                 }
 
                 next_event = context.next_event();

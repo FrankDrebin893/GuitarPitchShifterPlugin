@@ -23,6 +23,16 @@ fn coef(tau_s: f32, sample_rate: f32) -> f32 {
     decay_coeff(tau_s.max(0.00001) * 1000.0, sample_rate)
 }
 
+/// Time constant of a hi-hat hit on 46 at `openness`: from the closed hat's (0.0) to the
+/// open one's (1.0) on a log scale. Fully open is the open hat's exactly
+fn hat_time(closed_s: f32, open_s: f32, openness: f32) -> f32 {
+    if openness >= 1.0 {
+        open_s
+    } else {
+        closed_s * (open_s / closed_s).powf(openness.max(0.0))
+    }
+}
+
 fn db(level_db: f32) -> f32 {
     10.0f32.powf(level_db / 20.0)
 }
