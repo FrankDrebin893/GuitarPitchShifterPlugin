@@ -6,10 +6,11 @@ argument-hint: [issue number]
 Build one approved issue of FrankDrebin893/hojt-audio, following "How work flows" in CLAUDE.md.
 
 1. **Pick.** If an issue number was given ($ARGUMENTS), take that one. Otherwise take the
-   first issue in State "Approved" in the order of the board "HØJT backlog":
-   `gh project item-list 2 --owner FrankDrebin893 --format json --jq '.items[] | select(.state=="Approved") | .content.number'`.
-   The board's State only follows the label for Rasmus's approvals if he moves both; when they
-   disagree, the label (and its timeline, step 2) decides
+   `state:approved` issue that stands highest on the board "HØJT backlog": the approved ones are
+   `gh issue list --label state:approved --json number --jq '.[].number'`, the board's order is
+   `gh project item-list 2 --owner FrankDrebin893 --limit 500 --format json --jq '.items[].content.number'`.
+   The label is the approval; the board only gives the order (an approved issue not on the
+   board comes last)
 2. **Check the approval.** Only Rasmus approves. Read who set the label:
    ```bash
    gh api repos/FrankDrebin893/hojt-audio/issues/<n>/timeline --paginate \
