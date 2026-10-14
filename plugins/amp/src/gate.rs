@@ -133,7 +133,10 @@ impl Gate {
                 self.level += self.level_release * (heard - self.level) + ANTI_DENORMAL;
             }
 
-            if !self.on || self.level >= self.open_level || (self.open && self.level >= self.close_level) {
+            if !self.on
+                || self.level >= self.open_level
+                || (self.open && self.level >= self.close_level)
+            {
                 self.open = true;
                 self.hold = self.hold_len;
             } else if self.hold > 0 {
@@ -227,7 +230,11 @@ pub mod tests {
         // Open within a millisecond of the level crossing the threshold
         let crossing = input.iter().position(|s| s.abs() >= db_to_gain(-50.0)).unwrap();
         let opened = trace.iter().position(|&gain| gain == 1.0).unwrap();
-        assert!(opened - crossing <= (0.001 * SAMPLE_RATE) as usize, "Opened after {} samples", opened - crossing);
+        assert!(
+            opened - crossing <= (0.001 * SAMPLE_RATE) as usize,
+            "Opened after {} samples",
+            opened - crossing
+        );
         assert!(trace[opened..28_800].iter().all(|&gain| gain == 1.0));
 
         // Held, then closed all the way within the hold, the detector's fall and the release
@@ -253,7 +260,12 @@ pub mod tests {
         };
         for release_ms in [20.0, 100.0, 500.0] {
             let measured = closing_ms(release_ms);
-            assert!((measured - release_ms).abs() < 0.03 * release_ms + 0.1, "{} ms: {} ms", release_ms, measured);
+            assert!(
+                (measured - release_ms).abs() < 0.03 * release_ms + 0.1,
+                "{} ms: {} ms",
+                release_ms,
+                measured
+            );
         }
     }
 

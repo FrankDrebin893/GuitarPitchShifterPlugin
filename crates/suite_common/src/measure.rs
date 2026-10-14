@@ -56,9 +56,9 @@ pub fn pitch_hz(samples: &[f32], sample_rate: f32, low_hz: f32, high_hz: f32) ->
     let scores: Vec<f64> = (shortest..=longest).map(match_at).collect();
     let best = scores.iter().fold(f64::MIN, |best, &score| best.max(score));
     // The first peak that is nearly as good as the best: a later one is a multiple of the period
-    let Some(index) = (1..scores.len().saturating_sub(1))
-        .find(|&i| scores[i] > best * 0.97 && scores[i] >= scores[i - 1] && scores[i] >= scores[i + 1])
-    else {
+    let Some(index) = (1..scores.len().saturating_sub(1)).find(|&i| {
+        scores[i] > best * 0.97 && scores[i] >= scores[i - 1] && scores[i] >= scores[i + 1]
+    }) else {
         return 0.0;
     };
     let (before, at, after) = (scores[index - 1], scores[index], scores[index + 1]);
@@ -90,7 +90,9 @@ mod tests {
     fn test_decay_time_and_zero_crossings() {
         let sample_rate = 44100.0;
         let tone: Vec<f32> = (0..44100)
-            .map(|i| sine(i as f32 * 100.0 / sample_rate) * (-(i as f32) / (0.1 * sample_rate)).exp())
+            .map(|i| {
+                sine(i as f32 * 100.0 / sample_rate) * (-(i as f32) / (0.1 * sample_rate)).exp()
+            })
             .collect();
         assert!((zero_crossing_freq(&tone, sample_rate) - 100.0).abs() < 0.5);
         // 40 dB is 4.6 time constants

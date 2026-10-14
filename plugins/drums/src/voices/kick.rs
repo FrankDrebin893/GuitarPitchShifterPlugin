@@ -87,7 +87,8 @@ impl Kick {
         // No drummer hits the same spot twice
         self.freq = preset.freq_hz * hit.tune * (1.0 + 0.004 * self.noise.next());
         // Harder hits stretch the head further, so they start higher
-        let start_freq = self.freq * semitones_to_ratio(preset.sweep_semitones * (0.6 + 0.4 * hit.velocity));
+        let start_freq =
+            self.freq * semitones_to_ratio(preset.sweep_semitones * (0.6 + 0.4 * hit.velocity));
         self.sweep = start_freq - self.freq;
         self.shell_freq = self.freq * SHELL_RATIO;
 
@@ -100,8 +101,11 @@ impl Kick {
 
         self.level = amplitude;
         self.shell_level = preset.shell_level;
-        self.click_level =
-            preset.click_level * CLICK_GAIN * amplitude * (0.5 + 0.5 * hit.velocity) * (1.0 + 0.15 * self.noise.next());
+        self.click_level = preset.click_level
+            * CLICK_GAIN
+            * amplitude
+            * (0.5 + 0.5 * hit.velocity)
+            * (1.0 + 0.15 * self.noise.next());
         self.drive = preset.drive;
         self.drive_norm = 1.0 / preset.drive.tanh();
 
@@ -139,7 +143,8 @@ impl Voice for Kick {
 
         let body = (self.phase * TAU).sin() * self.amp_env
             + (self.shell_phase * TAU).sin() * self.shell_env * self.shell_level;
-        let click = self.click_filter.process(self.noise.next()).band * self.click_env * self.click_level;
+        let click =
+            self.click_filter.process(self.noise.next()).band * self.click_env * self.click_level;
         let output = soft_clip(body * self.drive * self.level) * self.drive_norm + click;
 
         let freq = self.freq + self.sweep * self.pitch_env;

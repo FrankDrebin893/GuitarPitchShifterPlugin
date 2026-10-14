@@ -49,10 +49,7 @@ impl Room {
             feedback: [0.0; LINES],
             damping: std::array::from_fn(|_| OnePole::new()),
             diffusers: std::array::from_fn(|_| {
-                std::array::from_fn(|_| Allpass {
-                    buffer: Vec::new(),
-                    position: 0,
-                })
+                std::array::from_fn(|_| Allpass { buffer: Vec::new(), position: 0 })
             }),
         };
         room.set_sample_rate(44100.0);

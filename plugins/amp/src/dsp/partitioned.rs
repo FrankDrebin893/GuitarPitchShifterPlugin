@@ -79,7 +79,9 @@ pub fn partition(taps: &[f32], block: usize, spectra: &mut [f32]) -> usize {
     let partitions = tail.len().div_ceil(block).min(MAX_PARTITIONS);
     let mut fft = RealFft::new(2 * block);
     let mut padded = vec![0.0; 2 * block];
-    for (taps, spectrum) in tail.chunks(block).zip(spectra.chunks_exact_mut(spectrum_len(block))).take(partitions) {
+    for (taps, spectrum) in
+        tail.chunks(block).zip(spectra.chunks_exact_mut(spectrum_len(block))).take(partitions)
+    {
         padded.fill(0.0);
         padded[..taps.len()].copy_from_slice(taps);
         let (re, im) = spectrum.split_at_mut(block + 1);
@@ -341,7 +343,8 @@ impl Tail {
         let spectrum = spectrum_len(self.block);
         if step == 0 {
             self.newest = (self.newest + 1) % MAX_PARTITIONS;
-            let (re, im) = self.inputs[self.newest * spectrum..(self.newest + 1) * spectrum].split_at_mut(bins);
+            let (re, im) = self.inputs[self.newest * spectrum..(self.newest + 1) * spectrum]
+                .split_at_mut(bins);
             self.fft.forward(&self.samples[..2 * self.block], re, im);
             self.known = (self.known + 1).min(MAX_PARTITIONS);
             return;
@@ -361,7 +364,8 @@ impl Tail {
                 let partition = step - first;
                 let from = (self.newest + MAX_PARTITIONS - partition) % MAX_PARTITIONS * spectrum;
                 let (input_re, input_im) = self.inputs[from..from + spectrum].split_at(bins);
-                let (tap_re, tap_im) = line.spectra[partition * spectrum..(partition + 1) * spectrum].split_at(bins);
+                let (tap_re, tap_im) =
+                    line.spectra[partition * spectrum..(partition + 1) * spectrum].split_at(bins);
                 let (sum_re, sum_im) = self.sum[..spectrum].split_at_mut(bins);
                 if partition == 0 {
                     sum_re.fill(0.0);
@@ -400,7 +404,9 @@ impl Tail {
             match line.progress {
                 Progress::Starting => line.progress = Progress::Playing,
                 // With the transform of this block there are enough for all its partitions
-                Progress::Waiting if self.known + 1 >= line.partitions => line.progress = Progress::Starting,
+                Progress::Waiting if self.known + 1 >= line.partitions => {
+                    line.progress = Progress::Starting
+                }
                 _ => {}
             }
             line.working = matches!(line.progress, Progress::Starting | Progress::Playing);
@@ -419,7 +425,8 @@ impl Tail {
     #[cfg(test)]
     pub fn buffers(&self) -> Vec<(usize, usize)> {
         let describe = |buffer: &Vec<f32>| (buffer.as_ptr() as usize, buffer.capacity());
-        let mut buffers = vec![describe(&self.inputs), describe(&self.samples), describe(&self.sum)];
+        let mut buffers =
+            vec![describe(&self.inputs), describe(&self.samples), describe(&self.sum)];
         for line in &self.lines {
             // The two change places at the end of every block
             let mut shares = [describe(&line.now), describe(&line.next)];
@@ -443,7 +450,11 @@ mod tests {
 
     /// A response that dies away, as long as asked for
     fn response(len: usize, seed: u32) -> Vec<f32> {
-        noise(len, seed).iter().enumerate().map(|(index, tap)| 0.05 * tap * (-4.0 * index as f32 / len as f32).exp()).collect()
+        noise(len, seed)
+            .iter()
+            .enumerate()
+            .map(|(index, tap)| 0.05 * tap * (-4.0 * index as f32 / len as f32).exp())
+            .collect()
     }
 
     /// The tail's share of the output for `input`, with the line loaded before anything
@@ -468,7 +479,9 @@ mod tests {
 
     /// What the taps behind the head give by the plain sum
     fn expected_tail(taps: &[f32], block: usize, input: &[f32], index: usize) -> f64 {
-        (head_len(block)..taps.len().min(index + 1)).map(|tap| taps[tap] as f64 * input[index - tap] as f64).sum()
+        (head_len(block)..taps.len().min(index + 1))
+            .map(|tap| taps[tap] as f64 * input[index - tap] as f64)
+            .sum()
     }
 
     #[test]
@@ -488,8 +501,14 @@ mod tests {
         let mut spectra = vec![0.0; MAX_SPECTRA_LEN];
         assert_eq!(partition(&response(SHORTEST_WITH_TAIL - 1, 1), 64, &mut spectra), 0);
         assert_eq!(partition(&response(SHORTEST_WITH_TAIL - 1, 1), 128, &mut spectra), 0);
-        assert_eq!(partition(&response(SHORTEST_WITH_TAIL, 1), 64, &mut spectra), 9 * spectrum_len(64));
-        assert_eq!(partition(&response(SHORTEST_WITH_TAIL, 1), 128, &mut spectra), 4 * spectrum_len(128));
+        assert_eq!(
+            partition(&response(SHORTEST_WITH_TAIL, 1), 64, &mut spectra),
+            9 * spectrum_len(64)
+        );
+        assert_eq!(
+            partition(&response(SHORTEST_WITH_TAIL, 1), 128, &mut spectra),
+            4 * spectrum_len(128)
+        );
         assert_eq!(partition(&response(1920, 1), 64, &mut spectra), 28 * spectrum_len(64));
         assert_eq!(partition(&response(7680, 1), 128, &mut spectra), 58 * spectrum_len(128));
         // Longer than the cabinet holds: what fits
@@ -507,7 +526,10 @@ mod tests {
             let output = run_tail(&mut tail, &taps, &input);
             for index in (0..input.len()).step_by(61) {
                 let expected = expected_tail(&taps, block, &input, index);
-                assert!((output[index] as f64 - expected).abs() < 2e-5, "Block {block}, {len} taps, sample {index}");
+                assert!(
+                    (output[index] as f64 - expected).abs() < 2e-5,
+                    "Block {block}, {len} taps, sample {index}"
+                );
             }
         }
     }
@@ -560,7 +582,9 @@ mod tests {
                 let expected = expected_tail(&other, block, &all, index);
                 assert!((tail.output(1) as f64 - expected).abs() < 2e-5, "Second, sample {index}");
             }
-            assert!((tail.output(0) as f64 - expected_tail(&taps, block, &all, index)).abs() < 2e-5);
+            assert!(
+                (tail.output(0) as f64 - expected_tail(&taps, block, &all, index)).abs() < 2e-5
+            );
             tail.advance(&history);
         }
 
@@ -595,7 +619,10 @@ mod tests {
             if index >= block && tail.position != 0 {
                 let done: usize = (0..tail.step).map(|step| tail.step_cost(step)).sum();
                 let share = tail.cost * tail.position / block;
-                assert!(done <= share && share - done < TRANSFORM_COST, "Sample {index}: {done} of {share}");
+                assert!(
+                    done <= share && share - done < TRANSFORM_COST,
+                    "Sample {index}: {done} of {share}"
+                );
                 assert!(tail.step - before <= 2);
             }
         }

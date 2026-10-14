@@ -41,11 +41,7 @@ pub struct PhaserSettings {
 
 impl Default for PhaserSettings {
     fn default() -> Self {
-        Self {
-            on: false,
-            rate_hz: 0.5,
-            depth: 0.5,
-        }
+        Self { on: false, rate_hz: 0.5, depth: 0.5 }
     }
 }
 
@@ -131,7 +127,12 @@ impl Phaser {
     }
 
     /// Behind the cabinet: two channels at the host's rate
-    pub fn process_stereo(&mut self, settings: &PhaserSettings, left: &mut [f32], right: &mut [f32]) {
+    pub fn process_stereo(
+        &mut self,
+        settings: &PhaserSettings,
+        left: &mut [f32],
+        right: &mut [f32],
+    ) {
         debug_assert_eq!(left.len(), right.len());
         let len = left.len().min(right.len());
         self.process(settings, [&mut left[..len], &mut right[..len]]);
@@ -139,11 +140,16 @@ impl Phaser {
 
     /// Where a channel's stages are in their sweep now, in Hz
     fn stage_hz(&self, channel: usize) -> f32 {
-        CENTRE_HZ * octaves_up(SWEEP_OCTAVES * self.width.value() * self.lfo.sine(TURNS_APART[channel]))
+        CENTRE_HZ
+            * octaves_up(SWEEP_OCTAVES * self.width.value() * self.lfo.sine(TURNS_APART[channel]))
     }
 
     /// Phases a block in place, each channel by itself
-    fn process<const N: usize>(&mut self, settings: &PhaserSettings, mut channels: [&mut [f32]; N]) {
+    fn process<const N: usize>(
+        &mut self,
+        settings: &PhaserSettings,
+        mut channels: [&mut [f32]; N],
+    ) {
         let rate = settings.rate_hz.clamp(RATE_MIN_HZ, RATE_MAX_HZ);
         let width = settings.depth.clamp(0.0, 1.0);
 
@@ -238,10 +244,16 @@ mod tests {
     #[test]
     fn test_stages_sweep_from_200_to_1600_hz_at_every_rate() {
         for sample_rate in [48000.0, 192_000.0, 384_000.0] {
-            for (depth, from_hz, to_hz) in [(1.0, 200.0, 1600.0), (0.5, 336.4, 951.4), (0.0, 565.7, 565.7)] {
+            for (depth, from_hz, to_hz) in
+                [(1.0, 200.0, 1600.0), (0.5, 336.4, 951.4), (0.0, 565.7, 565.7)]
+            {
                 for stereo in [false, true] {
-                    let (low, high) = swept_range::<Phaser>(sample_rate, &settings(2.0, depth), stereo);
-                    assert!((low / from_hz - 1.0).abs() < 0.002 && (high / to_hz - 1.0).abs() < 0.002, "{sample_rate} Hz, depth {depth}: {low} to {high} Hz");
+                    let (low, high) =
+                        swept_range::<Phaser>(sample_rate, &settings(2.0, depth), stereo);
+                    assert!(
+                        (low / from_hz - 1.0).abs() < 0.002 && (high / to_hz - 1.0).abs() < 0.002,
+                        "{sample_rate} Hz, depth {depth}: {low} to {high} Hz"
+                    );
                 }
             }
         }
@@ -262,10 +274,17 @@ mod tests {
         for sample_rate in [44100.0, 48000.0, 192_000.0, 384_000.0] {
             for notch_hz in notches_hz {
                 let depth = gain_db(notch_hz, sample_rate);
-                assert!((depth + 20.0).abs() < 0.5, "{sample_rate} Hz: {depth} dB at {notch_hz} Hz");
+                assert!(
+                    (depth + 20.0).abs() < 0.5,
+                    "{sample_rate} Hz: {depth} dB at {notch_hz} Hz"
+                );
                 // And nowhere near as deep less than an octave to either side
                 for beside_hz in [notch_hz * 0.6, notch_hz / 0.6] {
-                    assert!(gain_db(beside_hz, sample_rate) > -9.0, "{sample_rate} Hz: {} dB at {beside_hz} Hz", gain_db(beside_hz, sample_rate));
+                    assert!(
+                        gain_db(beside_hz, sample_rate) > -9.0,
+                        "{sample_rate} Hz: {} dB at {beside_hz} Hz",
+                        gain_db(beside_hz, sample_rate)
+                    );
                 }
             }
             // Between the notches the feedback lifts the signal by 1.3 dB, and below and
@@ -274,7 +293,10 @@ mod tests {
             assert!((1.2..1.4).contains(&lift), "{sample_rate} Hz: {lift} dB between the notches");
             for outside_hz in [30.0, 12000.0] {
                 let lift = gain_db(outside_hz, sample_rate);
-                assert!((0.5..1.4).contains(&lift), "{sample_rate} Hz: {lift} dB at {outside_hz} Hz");
+                assert!(
+                    (0.5..1.4).contains(&lift),
+                    "{sample_rate} Hz: {lift} dB at {outside_hz} Hz"
+                );
             }
         }
     }
@@ -284,7 +306,11 @@ mod tests {
         for stereo in [false, true] {
             for setting in [Phaser::defaults(), settings(0.5, 1.0)] {
                 let change = level_change_lu::<Phaser>(&setting, stereo);
-                assert!(change.abs() < 1.0, "Depth {}, stereo {stereo}: {change} LU", setting.depth);
+                assert!(
+                    change.abs() < 1.0,
+                    "Depth {}, stereo {stereo}: {change} LU",
+                    setting.depth
+                );
             }
             // With the notches standing still in the middle of the guitar it is quieter
             let still = level_change_lu::<Phaser>(&settings(0.5, 0.0), stereo);

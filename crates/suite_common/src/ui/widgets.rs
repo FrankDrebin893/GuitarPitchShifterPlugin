@@ -1,6 +1,7 @@
 use nih_plug::prelude::{BoolParam, Param, ParamSetter};
 use nih_plug_egui::egui::{
-    vec2, Align2, Color32, CornerRadius, Id, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, Vec2,
+    vec2, Align2, Color32, CornerRadius, Id, Painter, Pos2, Rect, Response, Sense, Shape, Stroke,
+    StrokeKind, Ui, Vec2,
 };
 
 use super::theme::*;
@@ -49,7 +50,13 @@ fn polar(center: Pos2, radius: f32, angle: f32) -> Pos2 {
 }
 
 /// Fluted amp knob with its printed scale. `scale` names the start, middle and end of the travel.
-pub fn knob(painter: &Painter, center: Pos2, radius: f32, normalized: f32, scale: Option<[&str; 3]>) {
+pub fn knob(
+    painter: &Painter,
+    center: Pos2,
+    radius: f32,
+    normalized: f32,
+    scale: Option<[&str; 3]>,
+) {
     // Scale printed on the enclosure
     for tick in 0..=10 {
         let angle = KNOB_START_ANGLE + KNOB_SWEEP * tick as f32 / 10.0;
@@ -63,7 +70,13 @@ pub fn knob(painter: &Painter, center: Pos2, radius: f32, normalized: f32, scale
     if let Some(scale) = scale {
         for (i, text) in scale.iter().enumerate() {
             let angle = KNOB_START_ANGLE + KNOB_SWEEP * i as f32 / 2.0;
-            painter.text(polar(center, radius + 24.0, angle), Align2::CENTER_CENTER, text, display(15.0), SILK);
+            painter.text(
+                polar(center, radius + 24.0, angle),
+                Align2::CENTER_CENTER,
+                text,
+                display(15.0),
+                SILK,
+            );
         }
     }
 
@@ -75,7 +88,11 @@ pub fn knob(painter: &Painter, center: Pos2, radius: f32, normalized: f32, scale
     painter.circle_filled(center, radius - flute_radius * 0.5, KNOB_SKIRT);
     for flute in 0..flutes {
         let angle = std::f32::consts::TAU * flute as f32 / flutes as f32;
-        painter.circle_filled(polar(center, radius - flute_radius, angle), flute_radius, KNOB_SKIRT);
+        painter.circle_filled(
+            polar(center, radius - flute_radius, angle),
+            flute_radius,
+            KNOB_SKIRT,
+        );
     }
 
     painter.circle_filled(center, radius * 0.7, KNOB_CAP);
@@ -221,13 +238,15 @@ pub enum Step {
 pub fn stepper(ui: &mut Ui, center: Pos2, width: f32, text: &str, id_source: &str) -> Option<Step> {
     let tape = Rect::from_center_size(center, vec2(width, STEPPER_TAPE_HEIGHT));
     let reach = width / 2.0 + STEPPER_BUTTON_GAP + STEPPER_BUTTON_RADIUS;
-    let tape_clicked = ui.interact(tape, Id::new(("stepper", id_source, "tape")), Sense::click()).clicked();
+    let tape_clicked =
+        ui.interact(tape, Id::new(("stepper", id_source, "tape")), Sense::click()).clicked();
 
     let mut step = tape_clicked.then_some(Step::Next);
     for (direction, side) in [(Step::Previous, -1.0), (Step::Next, 1.0)] {
         let button = center + vec2(side * reach, 0.0);
         let rect = Rect::from_center_size(button, Vec2::splat(STEPPER_BUTTON_RADIUS * 2.0 + 4.0));
-        let response = ui.interact(rect, Id::new(("stepper", id_source, side > 0.0)), Sense::click());
+        let response =
+            ui.interact(rect, Id::new(("stepper", id_source, side > 0.0)), Sense::click());
         push_button(ui.painter(), button, side, response.is_pointer_button_down_on());
         if response.clicked() {
             step = Some(direction);
@@ -240,7 +259,11 @@ pub fn stepper(ui: &mut Ui, center: Pos2, width: f32, text: &str, id_source: &st
     let galley = layout(painter, &text.to_uppercase(), mono(STEPPER_TEXT_SIZE), TAPE_TEXT, 0.1);
     // The letter spacing also follows the last letter: leave it out of the centring
     let text_width = galley.size().x - STEPPER_TEXT_SIZE * 0.1;
-    painter.galley(Pos2::new(center.x - text_width / 2.0, center.y - galley.size().y / 2.0), galley, TAPE_TEXT);
+    painter.galley(
+        Pos2::new(center.x - text_width / 2.0, center.y - galley.size().y / 2.0),
+        galley,
+        TAPE_TEXT,
+    );
 
     step
 }
@@ -248,7 +271,13 @@ pub fn stepper(ui: &mut Ui, center: Pos2, width: f32, text: &str, id_source: &st
 /// Display of a tuner: a strip of label tape `width` wide, centred on `center`, with the
 /// note's name at its left end and a `cents_meter` in the rest of it. Without a note the
 /// name is two dashes and the lamps are dark. As high as the tape of a `stepper`.
-pub fn tuner_display(painter: &Painter, center: Pos2, width: f32, note: Option<&str>, cents: Option<f32>) {
+pub fn tuner_display(
+    painter: &Painter,
+    center: Pos2,
+    width: f32,
+    note: Option<&str>,
+    cents: Option<f32>,
+) {
     let tape = Rect::from_center_size(center, vec2(width, STEPPER_TAPE_HEIGHT));
     painter.rect_filled(tape.translate(vec2(0.0, 2.0)), 2.0, SHADOW);
     painter.rect_filled(tape, 2.0, TAPE);
@@ -265,7 +294,8 @@ pub fn tuner_display(painter: &Painter, center: Pos2, width: f32, note: Option<&
         Stroke::new(1.0, KNOB_CAP_EDGE),
     );
 
-    let lamps = Rect::from_min_max(Pos2::new(divider, tape.top()), tape.max).shrink2(vec2(METER_PADDING, 0.0));
+    let lamps = Rect::from_min_max(Pos2::new(divider, tape.top()), tape.max)
+        .shrink2(vec2(METER_PADDING, 0.0));
     meter_lamps(painter, lamps, cents);
 }
 
@@ -294,34 +324,47 @@ fn meter_lamps(painter: &Painter, rect: Rect, cents: Option<f32>) {
     // lamp beside the middle one, so the middle one says in tune and nothing else
     let in_tune = cents.is_some_and(|cents| cents.abs() <= METER_IN_TUNE_CENTS);
     let spot = cents.filter(|_| !in_tune).map(|cents| {
-        let off = (cents.abs().min(METER_RANGE_CENTS) - METER_IN_TUNE_CENTS) / (METER_RANGE_CENTS - METER_IN_TUNE_CENTS);
+        let off = (cents.abs().min(METER_RANGE_CENTS) - METER_IN_TUNE_CENTS)
+            / (METER_RANGE_CENTS - METER_IN_TUNE_CENTS);
         (1.0 + off * (side - 1.0)).copysign(cents)
     });
 
     for lamp in -(METER_SIDE_LAMPS as i32)..=METER_SIDE_LAMPS as i32 {
         let middle = lamp == 0;
         let brightness = if middle {
-            if in_tune { 1.0 } else { 0.0 }
+            if in_tune {
+                1.0
+            } else {
+                0.0
+            }
         } else {
             // Fully lit until the spot is most of the way to the next lamp, then fading
             // as that one comes up
-            spot.map_or(0.0, |spot| ((1.0 - (lamp as f32 - spot).abs()) / METER_SHARED).clamp(0.0, 1.0))
+            spot.map_or(0.0, |spot| {
+                ((1.0 - (lamp as f32 - spot).abs()) / METER_SHARED).clamp(0.0, 1.0)
+            })
         };
         let size = if middle {
             vec2(even(pitch * 0.8), even(rect.height() * 0.72))
         } else {
             vec2(even(pitch * 0.5), even(rect.height() * 0.5))
         };
-        let lens = Rect::from_center_size(Pos2::new(middle_x + lamp as f32 * pitch, middle_y), size);
+        let lens =
+            Rect::from_center_size(Pos2::new(middle_x + lamp as f32 * pitch, middle_y), size);
         if brightness > 0.0 {
             for (grow, alpha) in [(3.5, 0.16), (1.8, 0.3)] {
-                painter.rect_filled(lens.expand(grow), 1.5 + grow, LED_ON.gamma_multiply(alpha * brightness));
+                painter.rect_filled(
+                    lens.expand(grow),
+                    1.5 + grow,
+                    LED_ON.gamma_multiply(alpha * brightness),
+                );
             }
         }
         painter.rect_filled(lens, 1.5, blend(LED_OFF, LED_ON, brightness));
         if brightness >= 1.0 {
             // The same highlight as on a round lamp
-            let shine = Rect::from_min_size(lens.min + vec2(1.0, 1.0), vec2((size.x - 2.0).max(1.0), 2.0));
+            let shine =
+                Rect::from_min_size(lens.min + vec2(1.0, 1.0), vec2((size.x - 2.0).max(1.0), 2.0));
             painter.rect_filled(shine, 1.0, Color32::from_rgb(255, 208, 196));
         }
     }
@@ -338,7 +381,11 @@ fn push_button(painter: &Painter, center: Pos2, side: f32, pressed: bool) {
 
     let cap = if pressed { center + vec2(0.0, 1.0) } else { center };
     painter.circle_filled(cap, radius - 2.5, CHROME_DARK);
-    painter.circle_filled(cap + vec2(-0.5, -0.8), radius - 3.5, if pressed { CHROME } else { CHROME_LIGHT });
+    painter.circle_filled(
+        cap + vec2(-0.5, -0.8),
+        radius - 3.5,
+        if pressed { CHROME } else { CHROME_LIGHT },
+    );
     painter.circle_stroke(cap, radius - 2.5, ring);
 
     let tip = cap + vec2(side * 4.0, 0.0);
@@ -361,7 +408,13 @@ pub fn small_footswitch(ui: &mut Ui, center: Pos2, id_source: &str) -> Response 
 }
 
 /// Small stomp switch with its LED, bound to an on/off parameter: lit while it is on, a click toggles it
-pub fn param_switch(ui: &mut Ui, setter: &ParamSetter, param: &BoolParam, switch_center: Pos2, led_center: Pos2) {
+pub fn param_switch(
+    ui: &mut Ui,
+    setter: &ParamSetter,
+    param: &BoolParam,
+    switch_center: Pos2,
+    led_center: Pos2,
+) {
     let on = param.value();
     rig_led(ui.painter(), led_center, on);
     if small_footswitch(ui, switch_center, param.name()).clicked() {
@@ -373,7 +426,13 @@ pub fn param_switch(ui: &mut Ui, setter: &ParamSetter, param: &BoolParam, switch
 
 /// Small stomp switch with its LED for a plain on/off value and not a parameter: lit while
 /// it is on, a click toggles it
-pub fn value_switch(ui: &mut Ui, id_source: &str, on: &mut bool, switch_center: Pos2, led_center: Pos2) {
+pub fn value_switch(
+    ui: &mut Ui,
+    id_source: &str,
+    on: &mut bool,
+    switch_center: Pos2,
+    led_center: Pos2,
+) {
     rig_led(ui.painter(), led_center, *on);
     if small_footswitch(ui, switch_center, id_source).clicked() {
         *on = !*on;
@@ -433,7 +492,11 @@ pub fn signal_lamp(painter: &Painter, center: Pos2, on: bool) {
 fn lamp(painter: &Painter, center: Pos2, on: bool, off_color: Color32, socket: bool, scale: f32) {
     if on {
         for (radius, alpha) in [(15.0, 22), (11.5, 40), (8.5, 70)] {
-            painter.circle_filled(center, radius * scale, LED_ON.gamma_multiply(alpha as f32 / 255.0));
+            painter.circle_filled(
+                center,
+                radius * scale,
+                LED_ON.gamma_multiply(alpha as f32 / 255.0),
+            );
         }
     }
     painter.circle_filled(center, 8.5 * scale, CHROME_LIGHT);
@@ -443,13 +506,25 @@ fn lamp(painter: &Painter, center: Pos2, on: bool, off_color: Color32, socket: b
     }
     painter.circle_filled(center, 5.5 * scale, if on { LED_ON } else { off_color });
     if on {
-        painter.circle_filled(center + vec2(-1.2, -1.5) * scale, 2.0 * scale, Color32::from_rgb(255, 208, 196));
+        painter.circle_filled(
+            center + vec2(-1.2, -1.5) * scale,
+            2.0 * scale,
+            Color32::from_rgb(255, 208, 196),
+        );
     }
 }
 
 /// Screen-printed caption, centred on `center`
 pub fn silk_label(painter: &Painter, center: Pos2, text: &str, size: f32) -> Rect {
-    spaced_text(painter, center, Align2::CENTER_CENTER, &text.to_uppercase(), display(size), SILK, 0.16)
+    spaced_text(
+        painter,
+        center,
+        Align2::CENTER_CENTER,
+        &text.to_uppercase(),
+        display(size),
+        SILK,
+        0.16,
+    )
 }
 
 /// Screen-printed frame around a group of controls, with its title set into the top line
@@ -477,7 +552,10 @@ pub fn badge(painter: &Painter, right_bottom: Pos2, size: f32) {
     let text_width = h.size().x + gap + o_width + gap + jt.size().x;
     let padding = vec2(size * 0.42, size * 0.2);
     let plate = Rect::from_min_max(
-        Pos2::new(right_bottom.x - text_width - padding.x * 2.0, right_bottom.y - size - padding.y * 2.0),
+        Pos2::new(
+            right_bottom.x - text_width - padding.x * 2.0,
+            right_bottom.y - size - padding.y * 2.0,
+        ),
         right_bottom,
     );
     painter.rect_filled(plate.translate(vec2(0.0, 3.0)), 6.0, SHADOW);
@@ -496,7 +574,10 @@ pub fn badge(painter: &Painter, right_bottom: Pos2, size: f32) {
     painter.circle_stroke(o_center, size * 0.3, Stroke::new(size * 0.105, SILK));
     let slash_angle = -55.0_f32.to_radians();
     painter.line_segment(
-        [polar(o_center, size * 0.5, slash_angle + std::f32::consts::PI), polar(o_center, size * 0.5, slash_angle)],
+        [
+            polar(o_center, size * 0.5, slash_angle + std::f32::consts::PI),
+            polar(o_center, size * 0.5, slash_angle),
+        ],
         Stroke::new(size * 0.085, BRAND_ORANGE),
     );
     x += o_width + gap;

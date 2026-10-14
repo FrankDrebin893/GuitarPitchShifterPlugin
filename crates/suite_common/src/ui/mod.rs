@@ -13,12 +13,12 @@ pub mod widgets;
 
 pub use art::Motif;
 pub use frame::{
-    amp_marker, enclosure, head, lifted, mini_pedal, pedal, rig, slim_pedal, title_grip, MiniStyle, Ornament,
-    PedalStyle,
-    BENCH_MARGIN, SLIM_KNOBS, SLIM_KNOB_RADIUS, SLIM_LED, SLIM_PEDAL_WIDTH, SLIM_SWITCH,
+    amp_marker, enclosure, head, lifted, mini_pedal, pedal, rig, slim_pedal, title_grip, MiniStyle,
+    Ornament, PedalStyle, BENCH_MARGIN, SLIM_KNOBS, SLIM_KNOB_RADIUS, SLIM_LED, SLIM_PEDAL_WIDTH,
+    SLIM_SWITCH,
 };
 pub use theme::install;
 pub use widgets::{
-    cents_meter, footswitch, led, param_knob, param_switch, rig_led, signal_lamp, silk_frame, silk_label,
-    small_footswitch, stepper, tuner_display, value_knob, value_switch, Step,
+    cents_meter, footswitch, led, param_knob, param_switch, rig_led, signal_lamp, silk_frame,
+    silk_label, small_footswitch, stepper, tuner_display, value_knob, value_switch, Step,
 };

@@ -1,0 +1,14 @@
+bundle HojtBassSynth
+name Hojt Bass Synth
+clap net.hojte.bass-synth
+vst3 HojtBassSynth001
+param brightness
+param drive
+param slide
+param sub
+param sustain
+param tone
+param transpose
+param voice
+param volume
+persist editor-state

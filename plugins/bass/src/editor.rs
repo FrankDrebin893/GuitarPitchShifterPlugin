@@ -3,7 +3,9 @@ use nih_plug_egui::egui::{pos2, vec2, Rect};
 use nih_plug_egui::{create_egui_editor, EguiState};
 use std::sync::Arc;
 
-use suite_common::ui::{self, footswitch, led, param_knob, silk_frame, silk_label, Ornament, PedalStyle};
+use suite_common::ui::{
+    self, footswitch, led, param_knob, silk_frame, silk_label, Ornament, PedalStyle,
+};
 
 use crate::bass::Voice;
 use crate::BassSynthParams;
@@ -21,7 +23,8 @@ const STYLE: PedalStyle = PedalStyle {
 };
 
 // One footswitch per voice, with its horizontal position
-const VOICE_SWITCHES: [(Voice, &str, f32); 2] = [(Voice::Metal, "Metal", 265.0), (Voice::Groove, "Groove", 395.0)];
+const VOICE_SWITCHES: [(Voice, &str, f32); 2] =
+    [(Voice::Metal, "Metal", 265.0), (Voice::Groove, "Groove", 395.0)];
 
 pub fn default_state() -> Arc<EguiState> {
     EguiState::from_size(WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -47,7 +50,10 @@ fn pick_voice(setter: &ParamSetter, params: &BassSynthParams, voice: Voice) {
     set(setter, &params.transpose, settings.transpose);
 }
 
-pub fn create(params: Arc<BassSynthParams>, editor_state: Arc<EguiState>) -> Option<Box<dyn Editor>> {
+pub fn create(
+    params: Arc<BassSynthParams>,
+    editor_state: Arc<EguiState>,
+) -> Option<Box<dyn Editor>> {
     create_egui_editor(
         editor_state,
         (),
@@ -56,19 +62,84 @@ pub fn create(params: Arc<BassSynthParams>, editor_state: Arc<EguiState>) -> Opt
             ui::pedal(egui_ctx, &STYLE, |ui, origin| {
                 // Overall sound
                 let sound_y = 98.0;
-                param_knob(ui, setter, &params.volume, origin + vec2(130.0, sound_y), 31.0, "Volume", None);
-                param_knob(ui, setter, &params.drive, origin + vec2(263.0, sound_y), 31.0, "Drive", None);
-                param_knob(ui, setter, &params.brightness, origin + vec2(397.0, sound_y), 31.0, "Brightness", None);
-                param_knob(ui, setter, &params.sub, origin + vec2(530.0, sound_y), 31.0, "Sub", None);
+                param_knob(
+                    ui,
+                    setter,
+                    &params.volume,
+                    origin + vec2(130.0, sound_y),
+                    31.0,
+                    "Volume",
+                    None,
+                );
+                param_knob(
+                    ui,
+                    setter,
+                    &params.drive,
+                    origin + vec2(263.0, sound_y),
+                    31.0,
+                    "Drive",
+                    None,
+                );
+                param_knob(
+                    ui,
+                    setter,
+                    &params.brightness,
+                    origin + vec2(397.0, sound_y),
+                    31.0,
+                    "Brightness",
+                    None,
+                );
+                param_knob(
+                    ui,
+                    setter,
+                    &params.sub,
+                    origin + vec2(530.0, sound_y),
+                    31.0,
+                    "Sub",
+                    None,
+                );
 
                 // The string
-                let frame = Rect::from_min_max(pos2(40.0, 206.0), pos2(620.0, 328.0)).translate(origin.to_vec2());
+                let frame = Rect::from_min_max(pos2(40.0, 206.0), pos2(620.0, 328.0))
+                    .translate(origin.to_vec2());
                 silk_frame(ui.painter(), frame, "String", STYLE.paint);
                 let string_y = 246.0;
-                param_knob(ui, setter, &params.tone, origin + vec2(115.0, string_y), 19.0, "Tone", None);
-                param_knob(ui, setter, &params.sustain, origin + vec2(258.0, string_y), 19.0, "Sustain", None);
-                param_knob(ui, setter, &params.slide, origin + vec2(402.0, string_y), 19.0, "Slide", None);
-                param_knob(ui, setter, &params.transpose, origin + vec2(545.0, string_y), 19.0, "Transpose", None);
+                param_knob(
+                    ui,
+                    setter,
+                    &params.tone,
+                    origin + vec2(115.0, string_y),
+                    19.0,
+                    "Tone",
+                    None,
+                );
+                param_knob(
+                    ui,
+                    setter,
+                    &params.sustain,
+                    origin + vec2(258.0, string_y),
+                    19.0,
+                    "Sustain",
+                    None,
+                );
+                param_knob(
+                    ui,
+                    setter,
+                    &params.slide,
+                    origin + vec2(402.0, string_y),
+                    19.0,
+                    "Slide",
+                    None,
+                );
+                param_knob(
+                    ui,
+                    setter,
+                    &params.transpose,
+                    origin + vec2(545.0, string_y),
+                    19.0,
+                    "Transpose",
+                    None,
+                );
 
                 // Voice selector
                 for (voice, label, x) in VOICE_SWITCHES {

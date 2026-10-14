@@ -25,3 +25,6 @@ suite_common = { workspace = true }
 
 [dev-dependencies]
 hound = "3.5"
+
+[lints]
+workspace = true

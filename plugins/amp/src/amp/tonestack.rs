@@ -19,14 +19,26 @@ impl ToneCurve {
         // -1.0 to 1.0 around the dial centre
         let (bass, mid, treble) = (bass * 2.0 - 1.0, mid * 2.0 - 1.0, treble * 2.0 - 1.0);
 
-        let mid_db = model.mid_centre_db + model.mid_db * mid - model.scoop_db * 0.5 * (bass + treble);
+        let mid_db =
+            model.mid_centre_db + model.mid_db * mid - model.scoop_db * 0.5 * (bass + treble);
         let mid_hz = model.mid_hz * 2.0f32.powf(model.mid_shift_octaves * 0.5 * (bass - treble));
         let level = db_to_gain(model.mid_level_db * mid);
 
         Self {
-            bass: BiquadCoeffs::low_shelf(model.bass_hz, SHELF_Q, model.bass_db * bass, sample_rate).scaled(level),
+            bass: BiquadCoeffs::low_shelf(
+                model.bass_hz,
+                SHELF_Q,
+                model.bass_db * bass,
+                sample_rate,
+            )
+            .scaled(level),
             mid: BiquadCoeffs::peak(mid_hz, model.mid_q, mid_db, sample_rate),
-            treble: BiquadCoeffs::high_shelf(model.treble_hz, SHELF_Q, model.treble_db * treble, sample_rate),
+            treble: BiquadCoeffs::high_shelf(
+                model.treble_hz,
+                SHELF_Q,
+                model.treble_db * treble,
+                sample_rate,
+            ),
         }
     }
 
@@ -47,11 +59,7 @@ pub struct ToneStack {
 
 impl ToneStack {
     pub fn new() -> Self {
-        Self {
-            bass: GlidingBiquad::new(),
-            mid: GlidingBiquad::new(),
-            treble: GlidingBiquad::new(),
-        }
+        Self { bass: GlidingBiquad::new(), mid: GlidingBiquad::new(), treble: GlidingBiquad::new() }
     }
 
     /// Moves to a curve over the next `steps` samples; at once with no steps
@@ -88,7 +96,8 @@ mod tests {
 
     fn response(amp: Amp, bass: f32, mid: f32, treble: f32, freq_hz: f32) -> f32 {
         let model = amp.model();
-        ToneCurve::new(&model.tone, bass, mid, treble, SAMPLE_RATE).magnitude_db(freq_hz, SAMPLE_RATE)
+        ToneCurve::new(&model.tone, bass, mid, treble, SAMPLE_RATE)
+            .magnitude_db(freq_hz, SAMPLE_RATE)
     }
 
     #[test]
@@ -96,7 +105,8 @@ mod tests {
         for amp in Amp::ALL {
             let mid_hz = amp.model().tone.mid_hz;
             let change = |low: [f32; 3], high: [f32; 3], freq: f32| {
-                response(amp, high[0], high[1], high[2], freq) - response(amp, low[0], low[1], low[2], freq)
+                response(amp, high[0], high[1], high[2], freq)
+                    - response(amp, low[0], low[1], low[2], freq)
             };
 
             let bass = |freq| change([0.0, 0.5, 0.5], [1.0, 0.5, 0.5], freq);
@@ -108,7 +118,13 @@ mod tests {
             assert!(mid(mid_hz) > mid(LOW_HZ) + 4.0 && mid(mid_hz) > mid(HIGH_HZ) + 4.0);
 
             let treble = |freq| change([0.5, 0.5, 0.0], [0.5, 0.5, 1.0], freq);
-            assert!(treble(HIGH_HZ) > 8.0, "{:?} treble at {} Hz: {:.1} dB", amp, HIGH_HZ, treble(HIGH_HZ));
+            assert!(
+                treble(HIGH_HZ) > 8.0,
+                "{:?} treble at {} Hz: {:.1} dB",
+                amp,
+                HIGH_HZ,
+                treble(HIGH_HZ)
+            );
             assert!(treble(HIGH_HZ) > treble(LOW_HZ) + 8.0);
         }
     }
@@ -120,11 +136,18 @@ mod tests {
             // The same Mid setting sits lower between a raised Bass and Treble: the mids
             // against the average of the two ends
             let mids = |bass: f32, treble: f32| {
-                let ends = response(amp, bass, 0.5, treble, LOW_HZ) + response(amp, bass, 0.5, treble, HIGH_HZ);
+                let ends = response(amp, bass, 0.5, treble, LOW_HZ)
+                    + response(amp, bass, 0.5, treble, HIGH_HZ);
                 response(amp, bass, 0.5, treble, mid_hz) - 0.5 * ends
             };
             let (both_up, centre) = (mids(1.0, 1.0), mids(0.5, 0.5));
-            assert!(both_up < centre - 8.0, "{:?}: {:.1} dB against {:.1} dB", amp, both_up, centre);
+            assert!(
+                both_up < centre - 8.0,
+                "{:?}: {:.1} dB against {:.1} dB",
+                amp,
+                both_up,
+                centre
+            );
 
             // Mid also lifts the level outside its band a little
             assert!(response(amp, 0.5, 1.0, 0.5, 30.0) > response(amp, 0.5, 0.0, 0.5, 30.0));

@@ -55,14 +55,7 @@ pub struct Mix {
 
 impl Default for Mix {
     fn default() -> Self {
-        Self {
-            kick: 1.0,
-            snare: 1.0,
-            toms: 1.0,
-            hihat: 1.0,
-            cymbals: 1.0,
-            room: 0.25,
-        }
+        Self { kick: 1.0, snare: 1.0, toms: 1.0, hihat: 1.0, cymbals: 1.0, room: 0.25 }
     }
 }
 
@@ -201,11 +194,8 @@ impl DrumKit {
             return;
         }
 
-        let hit = Hit {
-            velocity: velocity.min(1.0),
-            tune: self.tune_ratio,
-            decay: self.decay_scale,
-        };
+        let hit =
+            Hit { velocity: velocity.min(1.0), tune: self.tune_ratio, decay: self.decay_scale };
         let preset = match (self.kit, &self.presets[self.kit as usize]) {
             (_, Some(preset)) => preset,
             (Kit::Groove, None) => return self.groove.note_on(note, &hit),
@@ -293,7 +283,8 @@ mod tests {
     use super::*;
     use crate::dsp::BUS_CLIP_KNEE;
     use crate::test_util::{
-        band_rms, brightness, decay_time_s, peak, rms, spectrum_fill, spectrum_fill_by, zero_crossing_freq,
+        band_rms, brightness, decay_time_s, peak, rms, spectrum_fill, spectrum_fill_by,
+        zero_crossing_freq,
     };
 
     const SAMPLE_RATE: f32 = 44100.0;
@@ -304,9 +295,8 @@ mod tests {
     const HAT_CLOSED: u8 = 42;
     const HAT_OPEN: u8 = 46;
     const CRASH: u8 = 49;
-    const ALL_NOTES: [u8; 21] = [
-        35, 36, 37, 38, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 55, 57, 59,
-    ];
+    const ALL_NOTES: [u8; 21] =
+        [35, 36, 37, 38, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 55, 57, 59];
     const PIECES: [(&str, u8); 18] = [
         ("kick", 36),
         ("side stick", 37),
@@ -427,12 +417,24 @@ mod tests {
                 render_mono(&mut drums, 3.0)
             };
             let pitch = |output: &[f32]| zero_crossing_freq(seconds(output, 0.3, 0.6), SAMPLE_RATE);
-            let (plain, high, damped, quiet) = (tom(0.0, 0.0, 1.0), tom(6.0, 0.0, 1.0), tom(0.0, 1.0, 1.0), tom(0.0, 0.0, 0.5));
+            let (plain, high, damped, quiet) =
+                (tom(0.0, 0.0, 1.0), tom(6.0, 0.0, 1.0), tom(0.0, 1.0, 1.0), tom(0.0, 0.0, 0.5));
 
             let ratio = pitch(&high) / pitch(&plain);
-            assert!((ratio / semitones_to_ratio(6.0) - 1.0).abs() < 0.05, "{:?} tune ratio {}", kit, ratio);
+            assert!(
+                (ratio / semitones_to_ratio(6.0) - 1.0).abs() < 0.05,
+                "{:?} tune ratio {}",
+                kit,
+                ratio
+            );
             let decay = |output: &[f32]| decay_time_s(output, SAMPLE_RATE, -40.0);
-            assert!(decay(&damped) < decay(&plain) * 0.5, "{:?}: {} vs {}", kit, decay(&damped), decay(&plain));
+            assert!(
+                decay(&damped) < decay(&plain) * 0.5,
+                "{:?}: {} vs {}",
+                kit,
+                decay(&damped),
+                decay(&plain)
+            );
             assert!(peak(&quiet) < peak(&plain) * 0.7, "{:?}", kit);
         }
     }
@@ -554,7 +556,9 @@ mod tests {
 
     #[test]
     fn test_kits_differ() {
-        let kick_freq = |kit| zero_crossing_freq(seconds(&render_note(kit, KICK, 1.0, 0.5), 0.1, 0.3), SAMPLE_RATE);
+        let kick_freq = |kit| {
+            zero_crossing_freq(seconds(&render_note(kit, KICK, 1.0, 0.5), 0.1, 0.3), SAMPLE_RATE)
+        };
         let decay = |kit, note| decay_time_s(&render_note(kit, note, 1.0, 4.0), SAMPLE_RATE, -40.0);
         let crash_brightness = |kit| brightness(&render_note(kit, CRASH, 1.0, 1.0));
 
@@ -597,7 +601,13 @@ mod tests {
                 decay_time_s(&render_mono(&mut drums, 5.0), SAMPLE_RATE, -40.0)
             };
 
-            assert!(decay(1.0) < decay(0.0) * 0.5, "Note {}: {} s vs {} s", note, decay(1.0), decay(0.0));
+            assert!(
+                decay(1.0) < decay(0.0) * 0.5,
+                "Note {}: {} s vs {} s",
+                note,
+                decay(1.0),
+                decay(0.0)
+            );
         }
     }
 
@@ -631,8 +641,10 @@ mod tests {
         // Every kit starts from the same noise seeds, so the difference is the room alone
         let (dry_left, dry_right) = snare_hit(0.0);
         let (wet_left, wet_right) = snare_hit(1.0);
-        let room_left: Vec<f32> = wet_left.iter().zip(&dry_left).map(|(wet, dry)| wet - dry).collect();
-        let room_right: Vec<f32> = wet_right.iter().zip(&dry_right).map(|(wet, dry)| wet - dry).collect();
+        let room_left: Vec<f32> =
+            wet_left.iter().zip(&dry_left).map(|(wet, dry)| wet - dry).collect();
+        let room_right: Vec<f32> =
+            wet_right.iter().zip(&dry_right).map(|(wet, dry)| wet - dry).collect();
 
         let ratio = rms(&room_left) / rms(&dry_left);
         assert!((0.2..1.5).contains(&ratio), "Room level relative to the dry snare: {}", ratio);
@@ -671,7 +683,16 @@ mod tests {
                 println!("\n{:?}, velocity {}", kit, velocity);
                 println!(
                     "{:<16}{:>8}{:>8}{:>8}{:>8}{:>11}{:>12}{:>10}{:>7}{:>7}",
-                    "piece", "peak", "rms", "crack", ">4k", "decay (s)", "brightness", "low tail", "fill", "fine"
+                    "piece",
+                    "peak",
+                    "rms",
+                    "crack",
+                    ">4k",
+                    "decay (s)",
+                    "brightness",
+                    "low tail",
+                    "fill",
+                    "fine"
                 );
                 for (index, (name, note)) in PIECES.into_iter().enumerate() {
                     let output = render_note(kit, note, velocity, 12.0);
@@ -689,8 +710,15 @@ mod tests {
                     if index >= FIRST_CYMBAL_PIECE {
                         let tail = seconds(&output, 0.5, 1.5);
                         let low = band_rms(tail, SAMPLE_RATE, 20.0, 1000.0) / rms(tail).max(1e-9);
-                        let fill = spectrum_fill(seconds(&output, 0.1, 0.3), SAMPLE_RATE, 4000.0, 12000.0);
-                        let fine = spectrum_fill_by(seconds(&output, 0.1, 0.4), SAMPLE_RATE, 5000.0, 7000.0, 15.0);
+                        let fill =
+                            spectrum_fill(seconds(&output, 0.1, 0.3), SAMPLE_RATE, 4000.0, 12000.0);
+                        let fine = spectrum_fill_by(
+                            seconds(&output, 0.1, 0.4),
+                            SAMPLE_RATE,
+                            5000.0,
+                            7000.0,
+                            15.0,
+                        );
                         print!("{:>10.3}{:>7.2}{:>7.2}", low * low, fill, fine);
                     }
                     println!();
@@ -754,13 +782,22 @@ mod tests {
                     pieces.push(((i * 3 + j) as f32, *note, velocity));
                 }
             }
-            write_wav(&dir.join(format!("drums_{}_pieces.wav", name)), &render_pattern(kit, &pieces, 100.0));
+            write_wav(
+                &dir.join(format!("drums_{}_pieces.wav", name)),
+                &render_pattern(kit, &pieces, 100.0),
+            );
 
             let (groove, bpm) = groove(kit);
-            write_wav(&dir.join(format!("drums_{}_groove.wav", name)), &render_pattern(kit, &groove, bpm));
+            write_wav(
+                &dir.join(format!("drums_{}_groove.wav", name)),
+                &render_pattern(kit, &groove, bpm),
+            );
 
             if let Some((part, bpm)) = &part {
-                write_wav(&dir.join(format!("drums_{}_input.wav", name)), &render_pattern(kit, part, *bpm));
+                write_wav(
+                    &dir.join(format!("drums_{}_input.wav", name)),
+                    &render_pattern(kit, part, *bpm),
+                );
             }
         }
         println!("Wrote renders to {}", dir.display());
@@ -775,7 +812,8 @@ mod tests {
     fn midi_pattern(bytes: &[u8]) -> Result<(Pattern, f32), String> {
         use midly::{MetaMessage, MidiMessage, Timing, TrackEventKind};
 
-        let file = midly::Smf::parse(bytes).map_err(|error| format!("not a MIDI file ({error})"))?;
+        let file =
+            midly::Smf::parse(bytes).map_err(|error| format!("not a MIDI file ({error})"))?;
         let ticks_per_beat = match file.header.timing {
             Timing::Metrical(ticks) => ticks.as_int() as f64,
             Timing::Timecode(..) => return Err("timed in frames, not in beats".to_string()),
@@ -788,16 +826,17 @@ mod tests {
             for event in track {
                 tick += event.delta.as_int() as u64;
                 match event.kind {
-                    TrackEventKind::Midi {
-                        message: MidiMessage::NoteOn { key, vel },
-                        ..
-                    } if vel.as_int() > 0 => {
+                    TrackEventKind::Midi { message: MidiMessage::NoteOn { key, vel }, .. }
+                        if vel.as_int() > 0 =>
+                    {
                         let beat = (tick as f64 / ticks_per_beat) as f32;
                         pattern.push((beat, key.as_int(), vel.as_int() as f32 / 127.0));
                     }
                     TrackEventKind::Meta(MetaMessage::Tempo(tempo)) => {
                         if beat_us.is_some_and(|first| first != tempo.as_int()) {
-                            return Err("the tempo changes: a part is rendered at one tempo".to_string());
+                            return Err(
+                                "the tempo changes: a part is rendered at one tempo".to_string()
+                            );
                         }
                         beat_us = Some(tempo.as_int());
                     }
@@ -813,14 +852,12 @@ mod tests {
 
     /// A MIDI file of one track, 480 ticks to the beat, from (ticks since the event before, event)
     fn midi_file(events: &[(u32, midly::TrackEventKind<'static>)]) -> Vec<u8> {
-        let header = midly::Header::new(midly::Format::SingleTrack, midly::Timing::Metrical(480.into()));
+        let header =
+            midly::Header::new(midly::Format::SingleTrack, midly::Timing::Metrical(480.into()));
         let mut file = midly::Smf::new(header);
         let mut track: Vec<midly::TrackEvent> = events
             .iter()
-            .map(|&(delta, kind)| midly::TrackEvent {
-                delta: delta.into(),
-                kind,
-            })
+            .map(|&(delta, kind)| midly::TrackEvent { delta: delta.into(), kind })
             .collect();
         track.push(midly::TrackEvent {
             delta: 0.into(),
@@ -843,10 +880,7 @@ mod tests {
         } else {
             midly::MidiMessage::NoteOff { key, vel }
         };
-        midly::TrackEventKind::Midi {
-            channel: 9.into(),
-            message,
-        }
+        midly::TrackEventKind::Midi { channel: 9.into(), message }
     }
 
     #[test]
@@ -865,7 +899,12 @@ mod tests {
         assert_eq!(bpm, 100.0);
         assert_eq!(
             pattern,
-            vec![(0.0, 36, 1.0), (0.0, 42, 64.0 / 127.0), (1.0, 38, 100.0 / 127.0), (2.5, 36, 1.0 / 127.0)]
+            vec![
+                (0.0, 36, 1.0),
+                (0.0, 42, 64.0 / 127.0),
+                (1.0, 38, 100.0 / 127.0),
+                (2.5, 36, 1.0 / 127.0)
+            ]
         );
     }
 
@@ -877,10 +916,18 @@ mod tests {
 
     #[test]
     fn test_midi_part_that_cannot_be_a_pattern_is_refused() {
-        let changing = midi_file(&[(0, midi_tempo(100.0)), (0, midi_note(true, 36, 100)), (480, midi_tempo(140.0))]);
+        let changing = midi_file(&[
+            (0, midi_tempo(100.0)),
+            (0, midi_note(true, 36, 100)),
+            (480, midi_tempo(140.0)),
+        ]);
         assert!(midi_pattern(&changing).unwrap_err().contains("tempo"));
         // The same tempo written again is no change
-        let repeated = midi_file(&[(0, midi_tempo(100.0)), (0, midi_note(true, 36, 100)), (480, midi_tempo(100.0))]);
+        let repeated = midi_file(&[
+            (0, midi_tempo(100.0)),
+            (0, midi_note(true, 36, 100)),
+            (480, midi_tempo(100.0)),
+        ]);
         assert!(midi_pattern(&repeated).is_ok());
 
         assert!(midi_pattern(&midi_file(&[(0, midi_tempo(100.0))])).is_err());
@@ -899,7 +946,11 @@ mod tests {
                         let velocity = if eighth % 2 == 0 { 0.75 } else { 0.5 };
                         pattern.push((start + eighth as f32 * 0.5, 42, velocity));
                     }
-                    pattern.extend([(start, 36, 0.95), (start + 2.0, 36, 0.9), (start + 2.5, 36, 0.8)]);
+                    pattern.extend([
+                        (start, 36, 0.95),
+                        (start + 2.0, 36, 0.9),
+                        (start + 2.5, 36, 0.8),
+                    ]);
                     pattern.push((start + 1.0, 38, 0.95));
                     if bar < 3 {
                         pattern.push((start + 3.0, 38, 0.95));
@@ -916,7 +967,8 @@ mod tests {
                 for bar in 0..4 {
                     let start = bar as f32 * 4.0;
                     // Swing ride pattern with the hi-hat foot on two and four
-                    for (beat, velocity) in [(0.0, 0.7), (1.0, 0.8), (1.667, 0.5), (2.0, 0.7), (3.0, 0.8), (3.667, 0.5)]
+                    for (beat, velocity) in
+                        [(0.0, 0.7), (1.0, 0.8), (1.667, 0.5), (2.0, 0.7), (3.0, 0.8), (3.667, 0.5)]
                     {
                         pattern.push((start + beat, 51, velocity));
                     }
@@ -942,14 +994,20 @@ mod tests {
                         }
                     }
                     for beat in 0..4 {
-                        pattern.push((start + beat as f32, if bar == 0 && beat == 0 { 49 } else { 52 }, 0.9));
+                        pattern.push((
+                            start + beat as f32,
+                            if bar == 0 && beat == 0 { 49 } else { 52 },
+                            0.9,
+                        ));
                     }
                     pattern.push((start + 1.0, 38, 1.0));
                     if bar < 3 {
                         pattern.push((start + 3.0, 38, 1.0));
                     }
                 }
-                for (i, note) in [38, 38, 50, 50, 48, 48, 45, 45, 43, 43, 41, 41].into_iter().enumerate() {
+                for (i, note) in
+                    [38, 38, 50, 50, 48, 48, 45, 45, 43, 43, 41, 41].into_iter().enumerate()
+                {
                     pattern.push((15.0 + i as f32 / 12.0, note, 0.95));
                 }
                 pattern.extend([(16.0, 36, 1.0), (16.0, 49, 1.0), (16.0, 57, 1.0)]);
@@ -962,21 +1020,38 @@ mod tests {
                     for sixteenth in 0..16 {
                         let velocity = [0.75, 0.3, 0.5, 0.3][sixteenth % 4];
                         let open = bar % 2 == 1 && sixteenth == 14;
-                        pattern.push((start + sixteenth as f32 * 0.25, if open { 46 } else { 42 }, velocity));
+                        pattern.push((
+                            start + sixteenth as f32 * 0.25,
+                            if open { 46 } else { 42 },
+                            velocity,
+                        ));
                     }
                     for beat in 0..4 {
                         pattern.push((start + beat as f32 + 0.5, 70, 0.6));
                     }
                     // A laid back kick, the snare on two and four with ghost notes around it
-                    pattern.extend([(start, 36, 0.9), (start + 1.75, 36, 0.6), (start + 2.5, 36, 0.8)]);
+                    pattern.extend([
+                        (start, 36, 0.9),
+                        (start + 1.75, 36, 0.6),
+                        (start + 2.5, 36, 0.8),
+                    ]);
                     pattern.extend([(start + 1.0, 38, 0.85), (start + 3.0, 38, 0.9)]);
-                    pattern.extend([(start + 1.5, 38, 0.2), (start + 2.25, 38, 0.25), (start + 3.75, 38, 0.2)]);
+                    pattern.extend([
+                        (start + 1.5, 38, 0.2),
+                        (start + 2.25, 38, 0.25),
+                        (start + 3.75, 38, 0.2),
+                    ]);
                     if bar == 2 {
                         pattern.push((start + 3.5, 37, 0.7));
                     }
                 }
                 pattern.extend([(15.5, 47, 0.6), (15.75, 43, 0.65)]);
-                pattern.extend([(16.0, 36, 0.9), (16.0, 49, 0.8), (17.0, 53, 0.6), (18.0, 51, 0.6)]);
+                pattern.extend([
+                    (16.0, 36, 0.9),
+                    (16.0, 49, 0.8),
+                    (17.0, 53, 0.6),
+                    (18.0, 51, 0.6),
+                ]);
                 (pattern, 88.0)
             }
         }

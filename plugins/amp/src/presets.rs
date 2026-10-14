@@ -52,9 +52,11 @@ pub struct Preset {
 // The compressor and the modulation pedals switched off, with their dials where the
 // parameters start
 const COMP_OFF: (bool, [f32; 2]) = (OFF, [5.0, 5.0]);
-const MODS_OFF: [(bool, f32, f32); 4] = [(OFF, 0.8, 50.0), (OFF, 0.5, 50.0), (OFF, 0.3, 50.0), (OFF, 5.0, 50.0)];
+const MODS_OFF: [(bool, f32, f32); 4] =
+    [(OFF, 0.8, 50.0), (OFF, 0.5, 50.0), (OFF, 0.3, 50.0), (OFF, 5.0, 50.0)];
 // The order the chain starts in: `ChainOrder::default`
-const USUAL_ORDER: &[&str] = &["comp", "drive", "phaser", "amp", "chorus", "flanger", "tremolo", "delay", "reverb"];
+const USUAL_ORDER: &[&str] =
+    &["comp", "drive", "phaser", "amp", "chorus", "flanger", "tremolo", "delay", "reverb"];
 
 // Chosen from the amp models' constants and measured with `preset_report` below: nobody
 // has listened to them yet. Master is where their levels were matched, by how loud they
@@ -321,7 +323,9 @@ pub static PRESETS: [Preset; 17] = [
         reverb: (ON, 3.5, 35.0),
         comp: (ON, [4.0, 5.0]),
         mods: [(ON, 0.6, 50.0), (OFF, 0.5, 50.0), (OFF, 0.3, 50.0), (OFF, 5.0, 50.0)],
-        order: &["comp", "chorus", "drive", "phaser", "amp", "flanger", "tremolo", "reverb", "delay"],
+        order: &[
+            "comp", "chorus", "drive", "phaser", "amp", "flanger", "tremolo", "reverb", "delay",
+        ],
     },
 ];
 
@@ -445,7 +449,8 @@ impl Preset {
             && params.order.get() == self.chain_order()
             && self.switches(params).into_iter().all(|(param, on)| param.value() == on)
             && self.knobs(params).into_iter().all(|(param, value)| {
-                (param.unmodulated_normalized_value() - param.preview_normalized(value)).abs() <= MATCH_TOLERANCE
+                (param.unmodulated_normalized_value() - param.preview_normalized(value)).abs()
+                    <= MATCH_TOLERANCE
             })
     }
 
@@ -470,15 +475,15 @@ mod tests {
     use super::*;
     use crate::chain::{AmpChain, AmpSettings};
     use crate::comp::CompSettings;
+    use crate::delay::DelaySettings;
+    use crate::dsp::shaper::OUTPUT_CLIP_KNEE;
+    use crate::gate::tests::{decaying_note, gain_trace, hiss, transitions as gate_changes};
+    use crate::gate::Gate;
     use crate::mods::chorus::ChorusSettings;
     use crate::mods::flanger::FlangerSettings;
     use crate::mods::phaser::PhaserSettings;
     use crate::mods::tremolo::TremoloSettings;
     use crate::order::Pedal;
-    use crate::delay::DelaySettings;
-    use crate::dsp::shaper::OUTPUT_CLIP_KNEE;
-    use crate::gate::tests::{decaying_note, gain_trace, hiss, transitions as gate_changes};
-    use crate::gate::Gate;
     use crate::reverb::ReverbSettings;
     use crate::test_util::*;
 
@@ -496,11 +501,7 @@ mod tests {
             let [comp_sustain, comp_level] = self.comp.1.map(dial);
             let [chorus, phaser, flanger, tremolo] = self.mods;
             AmpSettings {
-                comp: CompSettings {
-                    on: self.comp.0,
-                    sustain: comp_sustain,
-                    level: comp_level,
-                },
+                comp: CompSettings { on: self.comp.0, sustain: comp_sustain, level: comp_level },
                 chorus: ChorusSettings {
                     on: chorus.0,
                     rate_hz: chorus.1,
@@ -581,7 +582,11 @@ mod tests {
     fn test_names_are_unique_and_fit_the_display() {
         for (index, preset) in PRESETS.iter().enumerate() {
             let length = preset.name.chars().count();
-            assert!((1..=NAME_MAX_CHARS).contains(&length), "{} has {length} characters", preset.name);
+            assert!(
+                (1..=NAME_MAX_CHARS).contains(&length),
+                "{} has {length} characters",
+                preset.name
+            );
             assert_eq!(preset.name, preset.name.trim());
             assert!(!preset.name.contains(EDITED_MARK), "{} looks edited", preset.name);
             for other in &PRESETS[..index] {
@@ -611,7 +616,12 @@ mod tests {
     fn test_printed_values_are_on_their_scales() {
         // Dials and percentages are written as the knobs show them, not as they are stored
         for preset in &PRESETS {
-            let dials = preset.dials.iter().chain(&preset.drive.1).chain(&preset.cab.1).chain(&preset.comp.1);
+            let dials = preset
+                .dials
+                .iter()
+                .chain(&preset.drive.1)
+                .chain(&preset.cab.1)
+                .chain(&preset.comp.1);
             for &shown in dials {
                 assert!((0.0..=10.0).contains(&shown), "{}: dial at {shown}", preset.name);
             }
@@ -674,7 +684,11 @@ mod tests {
         let params = GuitarAmpParams::default();
         for preset in &PRESETS {
             let switches = preset.switches(&params);
-            assert!(switches.iter().all(|(param, _)| !std::ptr::eq(*param, &params.tuner_on)), "{}", preset.name);
+            assert!(
+                switches.iter().all(|(param, _)| !std::ptr::eq(*param, &params.tuner_on)),
+                "{}",
+                preset.name
+            );
             assert!(!preset.settings().tuner_on);
         }
     }
@@ -683,7 +697,13 @@ mod tests {
     fn test_presets_differ_from_each_other() {
         for (index, preset) in PRESETS.iter().enumerate() {
             for other in &PRESETS[..index] {
-                assert_ne!(preset.settings(), other.settings(), "{} and {}", preset.name, other.name);
+                assert_ne!(
+                    preset.settings(),
+                    other.settings(),
+                    "{} and {}",
+                    preset.name,
+                    other.name
+                );
             }
         }
     }
@@ -717,7 +737,11 @@ mod tests {
             let level = to_db(peak(&left).max(peak(&right)));
             assert!(level < to_db(OUTPUT_CLIP_KNEE), "{} peaks at {level:.1} dBFS", preset.name);
             let loudness = to_db(rms(&left));
-            assert!((-20.0..-12.0).contains(&loudness), "{} is at {loudness:.1} dBFS RMS", preset.name);
+            assert!(
+                (-20.0..-12.0).contains(&loudness),
+                "{} is at {loudness:.1} dBFS RMS",
+                preset.name
+            );
         }
     }
 
@@ -727,12 +751,19 @@ mod tests {
         // recorded at the reference level every preset is heard within 2 LU of the middle
         // one. The first is not levelled: it is the parameters' defaults
         let recording = guitar_di(SAMPLE_RATE);
-        let heard: Vec<f32> = PRESETS[1..].iter().map(|preset| loudness_at(preset, &recording, REFERENCE_DI_DB)).collect();
+        let heard: Vec<f32> = PRESETS[1..]
+            .iter()
+            .map(|preset| loudness_at(preset, &recording, REFERENCE_DI_DB))
+            .collect();
         let mut sorted = heard.clone();
         sorted.sort_by(f32::total_cmp);
         let middle = sorted[sorted.len() / 2];
         for (preset, loudness) in PRESETS[1..].iter().zip(&heard) {
-            assert!((loudness - middle).abs() < 2.0, "{} is at {loudness:.1} LUFS, the middle one at {middle:.1}", preset.name);
+            assert!(
+                (loudness - middle).abs() < 2.0,
+                "{} is at {loudness:.1} LUFS, the middle one at {middle:.1}",
+                preset.name
+            );
         }
     }
 
@@ -776,9 +807,12 @@ mod tests {
     /// opened. Levels are peaks over 30 ms, as a listener and the gate's detector hear them
     fn cut(trace: &[f32], input: &[f32]) -> Option<(f32, f32)> {
         let opened = trace.iter().position(|&gain| gain == 1.0)?;
-        let closing = opened + trace[opened..].iter().position(|&gain| gain < 1.0).unwrap_or(trace.len() - opened);
+        let closing = opened
+            + trace[opened..].iter().position(|&gain| gain < 1.0).unwrap_or(trace.len() - opened);
         let window = (0.03 * SAMPLE_RATE) as usize;
-        let level_at = |at: usize| peak(&input[at.saturating_sub(window).min(input.len() - window)..][..window]);
+        let level_at = |at: usize| {
+            peak(&input[at.saturating_sub(window).min(input.len() - window)..][..window])
+        };
         let fallen = to_db(peak(input) / level_at(closing.min(input.len())).max(1e-9));
         Some((fallen, closing as f32 / SAMPLE_RATE))
     }
@@ -796,14 +830,22 @@ mod tests {
 
             // Palm mutes played quietly open the gate and it stays open through the bar
             let trace = gate_trace(preset, &quiet_mutes);
-            assert!(trace[lead..bar].iter().all(|&gain| gain == 1.0), "{} chops quiet palm mutes", preset.name);
+            assert!(
+                trace[lead..bar].iter().all(|&gain| gain == 1.0),
+                "{} chops quiet palm mutes",
+                preset.name
+            );
 
             // And in the rest behind the bar it shuts: the rhythm presets of the high gain
             // amp within an eighth of a second of the last mute
             let shut = trace[bar - lead..].iter().position(|&gain| gain == 0.0);
             if preset.amp == Amp::Torden && preset.gate.2 <= 60.0 {
                 let limit = (0.125 * SAMPLE_RATE) as usize;
-                assert!(shut.is_some_and(|samples| samples <= limit), "{} shuts after {shut:?} samples", preset.name);
+                assert!(
+                    shut.is_some_and(|samples| samples <= limit),
+                    "{} shuts after {shut:?} samples",
+                    preset.name
+                );
             }
         }
     }
@@ -824,7 +866,16 @@ mod tests {
         println!("the last mute of a bar to silence in ms. `hiss`: the gate on noise at -70 and -76 dBFS RMS");
         println!(
             "{:<8} {:>6} {:>5} {:>13} {:>13} {:>13} {:>13} {:>10} {:>10} {:>13}",
-            "preset", "thresh", "rel", "note -12", "note -30", "chord -12", "chord -30", "mutes -12", "mutes -30", "hiss -70/-76"
+            "preset",
+            "thresh",
+            "rel",
+            "note -12",
+            "note -30",
+            "chord -12",
+            "chord -30",
+            "mutes -12",
+            "mutes -30",
+            "hiss -70/-76"
         );
         for preset in &PRESETS {
             print!("{:<8} {:>6.0} {:>5.0}", preset.name, preset.gate.1, preset.gate.2);
@@ -832,7 +883,9 @@ mod tests {
                 for peak_db in [-12.0, -30.0] {
                     let input = at_peak_db(sound.clone(), peak_db);
                     match cut(&gate_trace(preset, &input), &input) {
-                        Some((fallen, at_s)) => print!(" {:>13}", format!("{fallen:.0} dB {at_s:.2} s")),
+                        Some((fallen, at_s)) => {
+                            print!(" {:>13}", format!("{fallen:.0} dB {at_s:.2} s"))
+                        }
                         None => print!(" {:>13}", "shut"),
                     }
                 }
@@ -844,14 +897,20 @@ mod tests {
                 let bar = (1.2 * SAMPLE_RATE) as usize;
                 let period = (1.7 * SAMPLE_RATE) as usize;
                 let lead = (0.01 * SAMPLE_RATE) as usize;
-                let gaps: usize = (0..2).map(|index| gate_changes(&trace[index * period + lead..index * period + bar]) / 2).sum();
-                let opened = trace[..bar].iter().any(|&gain| gain == 1.0);
+                let gaps: usize = (0..2)
+                    .map(|index| {
+                        gate_changes(&trace[index * period + lead..index * period + bar]) / 2
+                    })
+                    .sum();
+                let opened = trace[..bar].contains(&1.0);
                 // The last mute is cut off 10 ms before the bar ends
                 let last_ends = bar - (0.01 * SAMPLE_RATE) as usize;
                 let silent = trace[last_ends..period].iter().position(|&gain| gain == 0.0);
                 let rest = match (opened, silent) {
                     (false, _) => "shut".to_string(),
-                    (true, Some(samples)) => format!("{gaps} {:.0} ms", samples as f32 / SAMPLE_RATE * 1000.0),
+                    (true, Some(samples)) => {
+                        format!("{gaps} {:.0} ms", samples as f32 / SAMPLE_RATE * 1000.0)
+                    }
                     (true, None) => format!("{gaps} open"),
                 };
                 print!(" {rest:>10}");
@@ -881,7 +940,10 @@ mod tests {
         let input = match std::env::var("AMP_INPUT_WAV") {
             Ok(path) => {
                 let (recording, sample_rate) = read_wav_mono(&path);
-                assert_eq!(sample_rate as f32, SAMPLE_RATE, "The presets are rendered at {SAMPLE_RATE} Hz");
+                assert_eq!(
+                    sample_rate as f32, SAMPLE_RATE,
+                    "The presets are rendered at {SAMPLE_RATE} Hz"
+                );
                 recording
             }
             Err(_) => at_rms_db(&guitar_di(SAMPLE_RATE), REFERENCE_DI_DB),
@@ -895,7 +957,11 @@ mod tests {
             row_left.extend_from_slice(&left[..part]);
             row_right.extend_from_slice(&right[..part]);
         }
-        write_wav(&dir.join("amp_presets_in_a_row.wav"), &[&row_left, &row_right], SAMPLE_RATE as u32);
+        write_wav(
+            &dir.join("amp_presets_in_a_row.wav"),
+            &[&row_left, &row_right],
+            SAMPLE_RATE as u32,
+        );
     }
 
     /// Level and balance of every preset. Run after changing a preset or the amps:
@@ -907,10 +973,22 @@ mod tests {
         let mutes = palm_mutes(SAMPLE_RATE, 2.4);
         let recordings = [guitar_di(SAMPLE_RATE), clean_di(SAMPLE_RATE)];
         println!("\nChords: level in dBFS. Palm mutes: dB relative to the whole signal. Loudness: LUFS of the");
-        println!("left channel, for riffs and for clean playing recorded at -30, -24 and -18 dBFS RMS");
+        println!(
+            "left channel, for riffs and for clean playing recorded at -30, -24 and -18 dBFS RMS"
+        );
         println!(
             "{:<8} {:<8} {:>7} {:>7} {:>8} {:>8} {:>8} {:>8} {:>8} {:>20} {:>20}",
-            "preset", "amp", "RMS", "peak", "to 100", "100-400", "400-1k6", "1k6-6k4", "6k4 up", "riffs", "clean"
+            "preset",
+            "amp",
+            "RMS",
+            "peak",
+            "to 100",
+            "100-400",
+            "400-1k6",
+            "1k6-6k4",
+            "6k4 up",
+            "riffs",
+            "clean"
         );
         for preset in &PRESETS {
             let settings = preset.settings();
@@ -928,7 +1006,8 @@ mod tests {
                 print!(" {band:>8.1}");
             }
             for recording in &recordings {
-                let heard = REPORT_DI_LEVELS_DB.map(|level| format!("{:.1}", loudness_at(preset, recording, level)));
+                let heard = REPORT_DI_LEVELS_DB
+                    .map(|level| format!("{:.1}", loudness_at(preset, recording, level)));
                 print!(" {:>20}", heard.join(" / "));
             }
             println!();

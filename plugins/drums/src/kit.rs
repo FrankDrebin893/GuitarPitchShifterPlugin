@@ -168,21 +168,23 @@ fn cymbals(character: &CymbalCharacter) -> CymbalSet {
     };
     // The modes are the body and pitch of a cymbal and stop where the wash takes over: above
     // a few kHz resonators are heard as tones that beat, noise is heard as a sizzle
-    let hat = |decay_low_ms, decay_high_ms, mode_level, wash_level, wash_decay_ms, attack_level| CymbalPreset {
-        modes: 64,
-        low_hz: 900.0,
-        high_hz: 6500.0,
-        body_hz: 3000.0,
-        tilt: 1.0,
-        decay_low_ms,
-        decay_high_ms,
-        mode_level,
-        wash_level,
-        wash_hp_hz: 3500.0,
-        wash_lp_hz: 16000.0,
-        wash_decay_ms,
-        attack_level,
-        attack_ms: 5.0,
+    let hat = |decay_low_ms, decay_high_ms, mode_level, wash_level, wash_decay_ms, attack_level| {
+        CymbalPreset {
+            modes: 64,
+            low_hz: 900.0,
+            high_hz: 6500.0,
+            body_hz: 3000.0,
+            tilt: 1.0,
+            decay_low_ms,
+            decay_high_ms,
+            mode_level,
+            wash_level,
+            wash_hp_hz: 3500.0,
+            wash_lp_hz: 16000.0,
+            wash_decay_ms,
+            attack_level,
+            attack_ms: 5.0,
+        }
     };
 
     CymbalSet {

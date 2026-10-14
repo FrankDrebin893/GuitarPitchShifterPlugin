@@ -20,12 +20,7 @@ pub struct Lfo {
 
 impl Lfo {
     pub fn new() -> Self {
-        Self {
-            phase: 0.0,
-            rate: 0.0,
-            rate_coeff: 1.0,
-            turns_per_hz: 0.0,
-        }
+        Self { phase: 0.0, rate: 0.0, rate_coeff: 1.0, turns_per_hz: 0.0 }
     }
 
     /// Keeps the place in the turn
@@ -90,8 +85,15 @@ mod tests {
         let mut lfo = new_lfo(1000.0, 1.0);
         for index in 0..3000 {
             for ahead in [0.0, 0.25, 0.7] {
-                let expected = (std::f64::consts::TAU * (index as f64 / 1000.0 + ahead as f64)).sin() as f32;
-                assert!((lfo.sine(ahead) - expected).abs() < 3e-4, "sample {}: {} against {}", index, lfo.sine(ahead), expected);
+                let expected =
+                    (std::f64::consts::TAU * (index as f64 / 1000.0 + ahead as f64)).sin() as f32;
+                assert!(
+                    (lfo.sine(ahead) - expected).abs() < 3e-4,
+                    "sample {}: {} against {}",
+                    index,
+                    lfo.sine(ahead),
+                    expected
+                );
                 assert!(lfo.sine(ahead).abs() <= 1.0);
             }
             lfo.step(1.0);
@@ -113,7 +115,13 @@ mod tests {
                     last = lfo.phase;
                 }
                 let measured = (turns + lfo.phase) / seconds;
-                assert!((measured / rate_hz as f64 - 1.0).abs() < 1e-4, "{} Hz at {} Hz: {}", rate_hz, sample_rate, measured);
+                assert!(
+                    (measured / rate_hz as f64 - 1.0).abs() < 1e-4,
+                    "{} Hz at {} Hz: {}",
+                    rate_hz,
+                    sample_rate,
+                    measured
+                );
             }
         }
     }

@@ -346,27 +346,9 @@ impl GrooveKit {
                 };
             }
             // The closed and pedal sounds have a short decay, which chokes an open hi-hat
-            42 => {
-                self.hat = Hat {
-                    env: level,
-                    level,
-                    decay: decay(0.022 + 0.025 * level),
-                }
-            }
-            44 => {
-                self.hat = Hat {
-                    env: level * 0.5,
-                    level: level * 0.6,
-                    decay: decay(0.016),
-                }
-            }
-            46 => {
-                self.hat = Hat {
-                    env: level,
-                    level,
-                    decay: decay(0.32),
-                }
-            }
+            42 => self.hat = Hat { env: level, level, decay: decay(0.022 + 0.025 * level) },
+            44 => self.hat = Hat { env: level * 0.5, level: level * 0.6, decay: decay(0.016) },
+            46 => self.hat = Hat { env: level, level, decay: decay(0.32) },
             51 | 59 => {
                 self.ride.env = level * 0.7;
                 self.ride.ping = level;
@@ -437,7 +419,8 @@ impl GrooveKit {
             let voice = &mut self.snare;
             advance(&mut voice.phases[0], (178.0 + 30.0 * voice.pitch_env) * voice.tune, rate);
             advance(&mut voice.phases[1], (318.0 + 25.0 * voice.pitch_env) * voice.tune, rate);
-            let body = (sine(voice.phases[0]) * 0.9 + sine(voice.phases[1]) * 0.35) * voice.body_env;
+            let body =
+                (sine(voice.phases[0]) * 0.9 + sine(voice.phases[1]) * 0.35) * voice.body_env;
             let band = self.snare_bp.process(noise).band;
             let low = self.snare_lp.process(noise).low;
             let wires = (band * (0.35 + 0.65 * voice.level) + low * 0.45) * voice.wire_env;
@@ -474,7 +457,11 @@ impl GrooveKit {
             if !voice.on {
                 continue;
             }
-            advance(&mut voice.phase, TOM_FREQS_HZ[index] * (1.0 + 0.35 * voice.pitch_env) * voice.tune, rate);
+            advance(
+                &mut voice.phase,
+                TOM_FREQS_HZ[index] * (1.0 + 0.35 * voice.pitch_env) * voice.tune,
+                rate,
+            );
             let tom = sine(voice.phase) * voice.env + self.noise.next() * voice.noise_env * 0.08;
             voice.env *= voice.decay;
             voice.pitch_env *= voice.pitch_decay;
@@ -511,7 +498,8 @@ impl GrooveKit {
             advance(&mut voice.bell_phases[0], 740.0, rate);
             advance(&mut voice.bell_phases[1], 1119.0, rate);
             let bell = (sine(voice.bell_phases[0]) + 0.6 * sine(voice.bell_phases[1])) * voice.bell;
-            ride = ((band * 0.6 + high * 0.15) * voice.env + band * voice.ping * 0.8 + bell * 0.25) * cymbal_gain;
+            ride = ((band * 0.6 + high * 0.15) * voice.env + band * voice.ping * 0.8 + bell * 0.25)
+                * cymbal_gain;
             voice.env *= voice.decay;
             voice.ping *= voice.ping_decay;
             voice.bell *= voice.bell_decay;
@@ -537,7 +525,8 @@ impl GrooveKit {
         let mut shaker = 0.0;
         if self.shaker.env > ENV_FLOOR {
             self.shaker.fade_in(0.010, rate);
-            let grains = self.shaker_bp.process(noise).band * 0.8 + self.shaker_hp.process(noise).high * 0.25;
+            let grains = self.shaker_bp.process(noise).band * 0.8
+                + self.shaker_hp.process(noise).high * 0.25;
             shaker = grains * self.shaker.env * self.shaker.attack * shaker_gain;
             if self.shaker.attack >= 1.0 {
                 self.shaker.env *= self.shaker.decay;
@@ -574,18 +563,11 @@ mod tests {
     const SAMPLE_RATE: f32 = 44100.0;
 
     fn hit(velocity: f32) -> Hit {
-        Hit {
-            velocity,
-            tune: 1.0,
-            decay: 1.0,
-        }
+        Hit { velocity, tune: 1.0, decay: 1.0 }
     }
 
     fn dry() -> Mix {
-        Mix {
-            room: 0.0,
-            ..Mix::default()
-        }
+        Mix { room: 0.0, ..Mix::default() }
     }
 
     fn kit() -> GrooveKit {
@@ -639,7 +621,12 @@ mod tests {
             let output = render_note(38, velocity, 0.2);
             band_rms(&output, SAMPLE_RATE, 3000.0, SAMPLE_RATE) / rms(&output)
         };
-        assert!(top_share(1.0) > top_share(0.25) * 1.3, "{} vs {}", top_share(1.0), top_share(0.25));
+        assert!(
+            top_share(1.0) > top_share(0.25) * 1.3,
+            "{} vs {}",
+            top_share(1.0),
+            top_share(0.25)
+        );
     }
 
     #[test]

@@ -55,10 +55,7 @@ pub struct GlassBellsParams {
 
 impl Default for GlassBellsPlugin {
     fn default() -> Self {
-        Self {
-            params: Arc::new(GlassBellsParams::default()),
-            bells: GlassBells::new(),
-        }
+        Self { params: Arc::new(GlassBellsParams::default()), bells: GlassBells::new() }
     }
 }
 
@@ -75,7 +72,10 @@ impl Default for GlassBellsParams {
                 FloatRange::Skewed {
                     min: util::db_to_gain(bells::VOLUME_MIN_DB),
                     max: util::db_to_gain(bells::VOLUME_MAX_DB),
-                    factor: FloatRange::gain_skew_factor(bells::VOLUME_MIN_DB, bells::VOLUME_MAX_DB),
+                    factor: FloatRange::gain_skew_factor(
+                        bells::VOLUME_MIN_DB,
+                        bells::VOLUME_MAX_DB,
+                    ),
                 },
             )
             .with_smoother(SmoothingStyle::Logarithmic(20.0))
@@ -116,7 +116,11 @@ impl Default for GlassBellsParams {
             .with_step_size(1.0)
             .with_unit(" ms"),
 
-            delay_feedback: percent_param("Delay Feedback", defaults.delay_feedback, bells::FEEDBACK_MAX),
+            delay_feedback: percent_param(
+                "Delay Feedback",
+                defaults.delay_feedback,
+                bells::FEEDBACK_MAX,
+            ),
             delay_mix: percent_param("Delay Mix", defaults.delay_mix, 1.0),
 
             reverb_on: BoolParam::new("Reverb", defaults.reverb_on),
@@ -145,11 +149,7 @@ fn seconds_param(name: &str, default: f32, min: f32, max: f32) -> FloatParam {
     FloatParam::new(
         name,
         default,
-        FloatRange::Skewed {
-            min,
-            max,
-            factor: FloatRange::skew_factor(-1.0),
-        },
+        FloatRange::Skewed { min, max, factor: FloatRange::skew_factor(-1.0) },
     )
     .with_step_size(0.1)
     .with_unit(" s")
@@ -239,7 +239,9 @@ impl Plugin for GlassBellsPlugin {
 
                 match event {
                     NoteEvent::NoteOn { note, velocity, .. } => self.bells.note_on(note, velocity),
-                    NoteEvent::MidiCC { cc, .. } if cc == control_change::ALL_SOUND_OFF => self.bells.reset(),
+                    NoteEvent::MidiCC { cc, .. } if cc == control_change::ALL_SOUND_OFF => {
+                        self.bells.reset()
+                    }
                     _ => {}
                 }
 
@@ -260,20 +262,19 @@ impl Plugin for GlassBellsPlugin {
 
 impl ClapPlugin for GlassBellsPlugin {
     const CLAP_ID: &'static str = "net.hojte.glass-bells";
-    const CLAP_DESCRIPTION: Option<&'static str> = Some("Soft glassy bells with a ping-pong delay and a hall");
+    const CLAP_DESCRIPTION: Option<&'static str> =
+        Some("Soft glassy bells with a ping-pong delay and a hall");
     const CLAP_MANUAL_URL: Option<&'static str> = None;
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
-    const CLAP_FEATURES: &'static [ClapFeature] = &[
-        ClapFeature::Instrument,
-        ClapFeature::Synthesizer,
-        ClapFeature::Stereo,
-    ];
+    const CLAP_FEATURES: &'static [ClapFeature] =
+        &[ClapFeature::Instrument, ClapFeature::Synthesizer, ClapFeature::Stereo];
 }
 
 impl Vst3Plugin for GlassBellsPlugin {
     // Frozen: DAW projects find the plugin by this ID. Never change it
     const VST3_CLASS_ID: [u8; 16] = *b"HojtGlassBells01";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Instrument, Vst3SubCategory::Synth];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Instrument, Vst3SubCategory::Synth];
 }
 
 nih_export_clap!(GlassBellsPlugin);
@@ -286,5 +287,18 @@ mod tests {
     #[test]
     fn test_parameter_defaults_are_those_of_the_dsp() {
         assert_eq!(GlassBellsParams::default().settings(), BellSettings::default());
+    }
+}
+
+#[cfg(test)]
+mod ids {
+    /// Bundle name, plugin ids and every parameter id stay as saved projects know them
+    #[test]
+    fn ids() {
+        suite_common::ids::check::<super::GlassBellsPlugin>(
+            env!("CARGO_MANIFEST_DIR"),
+            include_str!("../../../bundler.toml"),
+            "bells",
+        );
     }
 }

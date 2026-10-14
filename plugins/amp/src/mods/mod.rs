@@ -152,7 +152,8 @@ pub(crate) mod tests {
         ($pedal:ident, $settings:ident, $module:ident, $name:literal, $unit:literal, wide: $wide:literal) => {
             impl Pedal for $pedal {
                 const NAME: &'static str = $name;
-                const RATE_HZ: (f32, f32) = (super::$module::RATE_MIN_HZ, super::$module::RATE_MAX_HZ);
+                const RATE_HZ: (f32, f32) =
+                    (super::$module::RATE_MIN_HZ, super::$module::RATE_MAX_HZ);
                 const UNIT: &'static str = $unit;
                 const WIDE: bool = $wide;
                 type Settings = $settings;
@@ -223,7 +224,13 @@ pub(crate) mod tests {
 
     /// Runs a signal through in blocks: on one channel, or the same on two. Returns the
     /// channels
-    pub(crate) fn run<P: Pedal>(pedal: &mut P, settings: &P::Settings, input: &[f32], stereo: bool, block: usize) -> Vec<Vec<f32>> {
+    pub(crate) fn run<P: Pedal>(
+        pedal: &mut P,
+        settings: &P::Settings,
+        input: &[f32],
+        stereo: bool,
+        block: usize,
+    ) -> Vec<Vec<f32>> {
         let mut left = input.to_vec();
         if !stereo {
             left.chunks_mut(block).for_each(|piece| pedal.mono(settings, piece));
@@ -236,11 +243,21 @@ pub(crate) mod tests {
         vec![left, right]
     }
 
-    pub(crate) fn run_mono<P: Pedal>(pedal: &mut P, settings: &P::Settings, input: &[f32], block: usize) -> Vec<f32> {
+    pub(crate) fn run_mono<P: Pedal>(
+        pedal: &mut P,
+        settings: &P::Settings,
+        input: &[f32],
+        block: usize,
+    ) -> Vec<f32> {
         run(pedal, settings, input, false, block).remove(0)
     }
 
-    pub(crate) fn run_stereo<P: Pedal>(pedal: &mut P, settings: &P::Settings, input: &[f32], block: usize) -> (Vec<f32>, Vec<f32>) {
+    pub(crate) fn run_stereo<P: Pedal>(
+        pedal: &mut P,
+        settings: &P::Settings,
+        input: &[f32],
+        block: usize,
+    ) -> (Vec<f32>, Vec<f32>) {
         let mut channels = run(pedal, settings, input, true, block);
         let right = channels.remove(1);
         (channels.remove(0), right)
@@ -260,7 +277,12 @@ pub(crate) mod tests {
 
     /// Where each channel is in its sweep, every `LOOK` samples of `time_s` seconds of
     /// playing
-    fn sweep<P: Pedal>(sample_rate: f32, settings: &P::Settings, stereo: bool, time_s: f32) -> Vec<Vec<f32>> {
+    fn sweep<P: Pedal>(
+        sample_rate: f32,
+        settings: &P::Settings,
+        stereo: bool,
+        time_s: f32,
+    ) -> Vec<Vec<f32>> {
         let mut pedal = P::at(sample_rate);
         let mut swept = vec![Vec::new(); if stereo { 2 } else { 1 }];
         for piece in noise(0.1, seconds(time_s, sample_rate)).chunks(LOOK) {
@@ -273,17 +295,27 @@ pub(crate) mod tests {
     }
 
     fn range(values: &[f32]) -> (f32, f32) {
-        values.iter().fold((f32::MAX, f32::MIN), |(low, high), &value| (low.min(value), high.max(value)))
+        values
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(low, high), &value| (low.min(value), high.max(value)))
     }
 
     /// The lowest and highest place of the sweep in a turn and a half, over all channels
-    pub(crate) fn swept_range<P: Pedal>(sample_rate: f32, settings: &P::Settings, stereo: bool) -> (f32, f32) {
+    pub(crate) fn swept_range<P: Pedal>(
+        sample_rate: f32,
+        settings: &P::Settings,
+        stereo: bool,
+    ) -> (f32, f32) {
         range(&sweep::<P>(sample_rate, settings, stereo, 1.5 / P::rate_of(settings)).concat())
     }
 
     /// The rate the sweep turns at, in Hz, and how many turns the right channel is ahead
     /// of the left one (0.0 on one channel)
-    pub(crate) fn measured_rate<P: Pedal>(sample_rate: f32, settings: &P::Settings, stereo: bool) -> (f32, f32) {
+    pub(crate) fn measured_rate<P: Pedal>(
+        sample_rate: f32,
+        settings: &P::Settings,
+        stereo: bool,
+    ) -> (f32, f32) {
         let rate = P::rate_of(settings);
         let swept = sweep::<P>(sample_rate, settings, stereo, 3.6 / rate);
         // The moments a sweep goes up through its middle, in samples
@@ -292,13 +324,18 @@ pub(crate) mod tests {
             let middle = 0.5 * (low + high);
             (1..values.len())
                 .filter(|&index| values[index - 1] <= middle && values[index] > middle)
-                .map(|index| (index as f64 - ((values[index] - middle) / (values[index] - values[index - 1])) as f64) * LOOK as f64)
+                .map(|index| {
+                    (index as f64
+                        - ((values[index] - middle) / (values[index] - values[index - 1])) as f64)
+                        * LOOK as f64
+                })
                 .collect()
         };
         let left = crossings(&swept[0]);
         assert!(left.len() >= 3, "{}: {} turns in the time of three", P::NAME, left.len());
         let turn = (left[left.len() - 1] - left[0]) / (left.len() - 1) as f64;
-        let ahead = if stereo { ((left[0] - crossings(&swept[1])[0]) / turn).rem_euclid(1.0) } else { 0.0 };
+        let ahead =
+            if stereo { ((left[0] - crossings(&swept[1])[0]) / turn).rem_euclid(1.0) } else { 0.0 };
         ((sample_rate as f64 / turn) as f32, ahead as f32)
     }
 
@@ -313,7 +350,8 @@ pub(crate) mod tests {
 
     /// How alike left and right are behind the pedal, for clean playing in the middle
     pub(crate) fn stereo_correlation<P: Pedal>(settings: &P::Settings) -> f32 {
-        let (left, right) = run_stereo(&mut P::at(SAMPLE_RATE), settings, &clean_di(SAMPLE_RATE), BLOCK);
+        let (left, right) =
+            run_stereo(&mut P::at(SAMPLE_RATE), settings, &clean_di(SAMPLE_RATE), BLOCK);
         correlation(&left, &right)
     }
 
@@ -337,13 +375,19 @@ pub(crate) mod tests {
             let freq_hz = 100.0 * 40f32.powf(step as f32 / 23.0);
             let input = sine(freq_hz, 0.25, SAMPLE_RATE, seconds(1.1 * turn_s + 0.1, SAMPLE_RATE));
             let output = run(&mut P::at(SAMPLE_RATE), settings, &input, mono_sum, BLOCK);
-            let heard: Vec<f32> = (0..input.len()).map(|index| output.iter().map(|channel| channel[index]).sum::<f32>() / output.len() as f32).collect();
+            let heard: Vec<f32> = (0..input.len())
+                .map(|index| {
+                    output.iter().map(|channel| channel[index]).sum::<f32>() / output.len() as f32
+                })
+                .collect();
 
             // The level of the tone in pieces of whole periods, 8 ms or a little more
             let periods = (0.008 * freq_hz).ceil();
             let piece = (periods * SAMPLE_RATE / freq_hz).round() as usize;
             let turn = std::f32::consts::TAU * freq_hz / SAMPLE_RATE;
-            for (number, heard) in heard.chunks_exact(piece).enumerate().skip(seconds(0.1, SAMPLE_RATE) / piece) {
+            for (number, heard) in
+                heard.chunks_exact(piece).enumerate().skip(seconds(0.1, SAMPLE_RATE) / piece)
+            {
                 let (mut sin, mut cos) = (0.0, 0.0);
                 for (index, sample) in heard.iter().enumerate() {
                     let angle = turn * (number * piece + index) as f32;
@@ -361,7 +405,12 @@ pub(crate) mod tests {
 
     /// Median time to process a sample, in nanoseconds, in the blocks the place gives the
     /// pedal. Timed over 16 blocks at a time
-    fn time_ns<P: Pedal>(pedal: &mut P, settings: &P::Settings, input: &[f32], stereo: bool) -> f64 {
+    fn time_ns<P: Pedal>(
+        pedal: &mut P,
+        settings: &P::Settings,
+        input: &[f32],
+        stereo: bool,
+    ) -> f64 {
         let block = if stereo { 32 } else { 128 };
         let (mut left, mut right) = (input.to_vec(), input.to_vec());
         let mut times: Vec<f64> = left
@@ -397,7 +446,10 @@ pub(crate) mod tests {
             }
         }
         assert_eq!(dial.value(), 0.7);
-        assert!(faded_at.unwrap().abs_diff(seconds(0.01, MAX_RATE_HZ)) <= 2, "Faded in after {faded_at:?} samples");
+        assert!(
+            faded_at.unwrap().abs_diff(seconds(0.01, MAX_RATE_HZ)) <= 2,
+            "Faded in after {faded_at:?} samples"
+        );
         // After 250 ms it is 1/e away
         dial.snap(0.0);
         for _ in 0..seconds(0.25, MAX_RATE_HZ) {
@@ -424,7 +476,8 @@ pub(crate) mod tests {
     }
 
     fn off_is_transparent_once_it_has_faded<P: Pedal>() {
-        let (on, off) = (P::settings(true, P::RATE_HZ.1, 1.0), P::settings(false, P::RATE_HZ.1, 1.0));
+        let (on, off) =
+            (P::settings(true, P::RATE_HZ.1, 1.0), P::settings(false, P::RATE_HZ.1, 1.0));
         for (sample_rate, stereo) in PLACES {
             let input = noise(0.5, seconds(0.3, sample_rate));
             let mut pedal = P::at(sample_rate);
@@ -455,12 +508,14 @@ pub(crate) mod tests {
             for (sample_rate, stereo) in PLACES {
                 let input = noise(0.5, seconds(1.0, sample_rate));
                 let mut pedal = P::at(sample_rate);
-                for channel in run(&mut pedal, &P::settings(true, 1.0, 0.0), &input, stereo, BLOCK) {
+                for channel in run(&mut pedal, &P::settings(true, 1.0, 0.0), &input, stereo, BLOCK)
+                {
                     assert!(channel == input, "{}", P::NAME);
                 }
                 run(&mut pedal, &P::settings(true, 1.0, 1.0), &input, stereo, BLOCK);
                 run(&mut pedal, &P::settings(true, 1.0, 0.0), &input, stereo, BLOCK);
-                for channel in run(&mut pedal, &P::settings(true, 1.0, 0.0), &input, stereo, BLOCK) {
+                for channel in run(&mut pedal, &P::settings(true, 1.0, 0.0), &input, stereo, BLOCK)
+                {
                     assert!(channel == input, "{}", P::NAME);
                 }
             }
@@ -486,14 +541,27 @@ pub(crate) mod tests {
             for (index, piece) in input.chunks(BLOCK).enumerate() {
                 // Off at first, then on and off again every 150 ms while the sine goes on
                 let on = (index * BLOCK / seconds(0.15, sample_rate)) % 2 == 1;
-                let channels = run(&mut pedal, &P::settings(on, P::defaults_rate(), 1.0), piece, stereo, BLOCK);
+                let channels = run(
+                    &mut pedal,
+                    &P::settings(on, P::defaults_rate(), 1.0),
+                    piece,
+                    stereo,
+                    BLOCK,
+                );
                 for (output, channel) in output.iter_mut().zip(channels) {
                     output.extend(channel);
                 }
             }
             let limit = LOUDEST * 0.5 * std::f32::consts::TAU * 220.0 / sample_rate;
             for channel in &output {
-                assert!(largest_step(channel) < limit, "{} at {} Hz: step {} against {}", P::NAME, sample_rate, largest_step(channel), limit);
+                assert!(
+                    largest_step(channel) < limit,
+                    "{} at {} Hz: step {} against {}",
+                    P::NAME,
+                    sample_rate,
+                    largest_step(channel),
+                    limit
+                );
             }
             assert!(output[0] != input, "{}", P::NAME);
         }
@@ -506,21 +574,36 @@ pub(crate) mod tests {
 
     fn dial_jumps_do_not_click<P: Pedal>() {
         let (slowest, fastest) = P::RATE_HZ;
-        let jumps = [(slowest, 0.0), (fastest, 1.0), (P::defaults_rate(), 0.5), (fastest, 0.0), (slowest, 1.0)];
+        let jumps = [
+            (slowest, 0.0),
+            (fastest, 1.0),
+            (P::defaults_rate(), 0.5),
+            (fastest, 0.0),
+            (slowest, 1.0),
+        ];
         for (sample_rate, stereo) in PLACES {
             let input = sine(220.0, 0.5, sample_rate, seconds(2.0, sample_rate));
             let mut pedal = P::at(sample_rate);
             let mut output = vec![Vec::new(); 2];
             for (index, piece) in input.chunks(BLOCK).enumerate() {
-                let (rate, depth) = jumps[(index * BLOCK / seconds(0.1, sample_rate)) % jumps.len()];
-                let channels = run(&mut pedal, &P::settings(true, rate, depth), piece, stereo, BLOCK);
+                let (rate, depth) =
+                    jumps[(index * BLOCK / seconds(0.1, sample_rate)) % jumps.len()];
+                let channels =
+                    run(&mut pedal, &P::settings(true, rate, depth), piece, stereo, BLOCK);
                 for (output, channel) in output.iter_mut().zip(channels) {
                     output.extend(channel);
                 }
             }
             let limit = LOUDEST * 0.5 * std::f32::consts::TAU * 220.0 / sample_rate;
             for channel in &output {
-                assert!(largest_step(channel) < limit, "{} at {} Hz: step {} against {}", P::NAME, sample_rate, largest_step(channel), limit);
+                assert!(
+                    largest_step(channel) < limit,
+                    "{} at {} Hz: step {} against {}",
+                    P::NAME,
+                    sample_rate,
+                    largest_step(channel),
+                    limit
+                );
             }
         }
     }
@@ -543,7 +626,14 @@ pub(crate) mod tests {
         // A sweep that started anew would jump by a good part of its range. A few times
         // the steepest a sine of that range is at the fast rate is far less
         let limit = 4.0 * (high - low) * std::f32::consts::PI * fastest / SAMPLE_RATE;
-        assert!(largest_step(&swept) < limit, "{}: step of {} {} against {}", P::NAME, largest_step(&swept), P::UNIT, limit);
+        assert!(
+            largest_step(&swept) < limit,
+            "{}: step of {} {} against {}",
+            P::NAME,
+            largest_step(&swept),
+            P::UNIT,
+            limit
+        );
         let (_, late) = swept.split_at(72000);
         assert!(range(late).1 - range(late).0 > 0.1 * (high - low), "{}", P::NAME);
     }
@@ -560,7 +650,10 @@ pub(crate) mod tests {
         input.extend(vec![0.0; 14400]);
         input.extend(noise(0.3, 19200));
         let (played, rest) = input.split_at(input.len() - 9600);
-        let (on, off) = (P::settings(true, P::defaults_rate(), 1.0), P::settings(false, P::defaults_rate(), 1.0));
+        let (on, off) = (
+            P::settings(true, P::defaults_rate(), 1.0),
+            P::settings(false, P::defaults_rate(), 1.0),
+        );
         let both = |block: usize, stereo: bool| {
             let mut pedal = P::at(SAMPLE_RATE);
             let mut output = run(&mut pedal, &on, played, stereo, block);
@@ -572,7 +665,13 @@ pub(crate) mod tests {
             let whole = both(input.len(), stereo);
             assert!(whole[0][..played.len()] != *played, "{}", P::NAME);
             for block in [1, 7, 32, 64, 128] {
-                assert!(both(block, stereo) == whole, "{}: block of {}, stereo {}", P::NAME, block, stereo);
+                assert!(
+                    both(block, stereo) == whole,
+                    "{}: block of {}, stereo {}",
+                    P::NAME,
+                    block,
+                    stereo
+                );
             }
         }
     }
@@ -585,16 +684,34 @@ pub(crate) mod tests {
     fn sweep_turns_at_the_set_rate<P: Pedal>() {
         for sample_rate in [48000.0, 192_000.0, MAX_RATE_HZ] {
             for rate in [2.0, P::RATE_HZ.1] {
-                let (measured, _) = measured_rate::<P>(sample_rate, &P::settings(true, rate, 1.0), false);
-                assert!((measured / rate - 1.0).abs() < 0.002, "{} at {} Hz: {} Hz for {}", P::NAME, sample_rate, measured, rate);
+                let (measured, _) =
+                    measured_rate::<P>(sample_rate, &P::settings(true, rate, 1.0), false);
+                assert!(
+                    (measured / rate - 1.0).abs() < 0.002,
+                    "{} at {} Hz: {} Hz for {}",
+                    P::NAME,
+                    sample_rate,
+                    measured,
+                    rate
+                );
             }
         }
         // Behind the cabinet the right side is a quarter turn ahead, but for the tremolo
         let (measured, ahead) = measured_rate::<P>(SAMPLE_RATE, &P::settings(true, 2.0, 1.0), true);
         assert!((measured / 2.0 - 1.0).abs() < 0.002, "{}: {} Hz", P::NAME, measured);
         let expected = if P::WIDE { 0.25 } else { 0.0 };
-        assert!((ahead - expected + 0.5).rem_euclid(1.0) - 0.5 < 0.005, "{}: right is {} turns ahead", P::NAME, ahead);
-        assert!((ahead - expected + 0.5).rem_euclid(1.0) - 0.5 > -0.005, "{}: right is {} turns ahead", P::NAME, ahead);
+        assert!(
+            (ahead - expected + 0.5).rem_euclid(1.0) - 0.5 < 0.005,
+            "{}: right is {} turns ahead",
+            P::NAME,
+            ahead
+        );
+        assert!(
+            (ahead - expected + 0.5).rem_euclid(1.0) - 0.5 > -0.005,
+            "{}: right is {} turns ahead",
+            P::NAME,
+            ahead
+        );
     }
 
     #[test]
@@ -611,14 +728,32 @@ pub(crate) mod tests {
         fn check<P: Pedal>(rates: &[f32; 3], inputs: &[Vec<f32>; 3]) {
             let measured: Vec<[f32; 4]> = (0..3)
                 .map(|index| {
-                    let output = run_mono(&mut P::at(rates[index]), &P::settings(true, 2.0, 1.0), &inputs[index], 128);
-                    let band = |from_hz: f32, to_hz: f32| spectrum_level_db(&output, rates[index], from_hz, to_hz);
-                    [loudness_lufs(&[&output], rates[index]), band(60.0, 300.0), band(300.0, 1500.0), band(1500.0, 6000.0)]
+                    let output = run_mono(
+                        &mut P::at(rates[index]),
+                        &P::settings(true, 2.0, 1.0),
+                        &inputs[index],
+                        128,
+                    );
+                    let band = |from_hz: f32, to_hz: f32| {
+                        spectrum_level_db(&output, rates[index], from_hz, to_hz)
+                    };
+                    [
+                        loudness_lufs(&[&output], rates[index]),
+                        band(60.0, 300.0),
+                        band(300.0, 1500.0),
+                        band(1500.0, 6000.0),
+                    ]
                 })
                 .collect();
             for other in &measured[1..] {
                 for (here, there) in measured[0].iter().zip(other) {
-                    assert!((here - there).abs() < 0.3, "{}: {:?} against {:?}", P::NAME, measured[0], other);
+                    assert!(
+                        (here - there).abs() < 0.3,
+                        "{}: {:?} against {:?}",
+                        P::NAME,
+                        measured[0],
+                        other
+                    );
                 }
             }
         }
@@ -634,12 +769,33 @@ pub(crate) mod tests {
             let mut signal = noise(1.0, seconds(0.2, sample_rate));
             for period_ms in [1.0, 12.0] {
                 let half = seconds(0.0005 * period_ms, sample_rate);
-                signal.extend((0..seconds(0.3, sample_rate)).map(|index| if (index / half) % 2 == 0 { 1.0 } else { -1.0 }));
+                signal.extend((0..seconds(0.3, sample_rate)).map(|index| {
+                    if (index / half).is_multiple_of(2) {
+                        1.0
+                    } else {
+                        -1.0
+                    }
+                }));
             }
-            for (rate, depth) in [(P::RATE_HZ.0, 1.0), (P::RATE_HZ.1, 1.0), (P::RATE_HZ.1 * 100.0, 5.0), (0.0, -1.0)] {
-                for channel in run(&mut P::at(sample_rate), &P::settings(true, rate, depth), &signal, stereo, BLOCK) {
+            for (rate, depth) in
+                [(P::RATE_HZ.0, 1.0), (P::RATE_HZ.1, 1.0), (P::RATE_HZ.1 * 100.0, 5.0), (0.0, -1.0)]
+            {
+                for channel in run(
+                    &mut P::at(sample_rate),
+                    &P::settings(true, rate, depth),
+                    &signal,
+                    stereo,
+                    BLOCK,
+                ) {
                     assert!(channel.iter().all(|sample| sample.is_finite()), "{}", P::NAME);
-                    assert!(peak(&channel) < 4.0, "{} at {} Hz, rate {}: peak {}", P::NAME, sample_rate, rate, peak(&channel));
+                    assert!(
+                        peak(&channel) < 4.0,
+                        "{} at {} Hz, rate {}: peak {}",
+                        P::NAME,
+                        sample_rate,
+                        rate,
+                        peak(&channel)
+                    );
                 }
             }
         }
@@ -654,7 +810,9 @@ pub(crate) mod tests {
         // Whole turns of the sweep and whole periods of the tone
         let input = sine(110.0, 0.3, SAMPLE_RATE, 3 * 48000);
         for stereo in [false, true] {
-            for channel in run(&mut P::at(SAMPLE_RATE), &P::settings(true, 2.0, 1.0), &input, stereo, BLOCK) {
+            for channel in
+                run(&mut P::at(SAMPLE_RATE), &P::settings(true, 2.0, 1.0), &input, stereo, BLOCK)
+            {
                 let offset = channel[48000..].iter().sum::<f32>() / 96000.0;
                 assert!(offset.abs() < 1e-4, "{}: offset of {}", P::NAME, offset);
             }
@@ -677,7 +835,8 @@ pub(crate) mod tests {
             let mut attempts = 0;
             let mut pedal = loop {
                 let mut pedal = P::at(sample_rate);
-                let playing = time_ns(&mut pedal, &on, &noise(0.5, seconds(0.25, sample_rate)), stereo);
+                let playing =
+                    time_ns(&mut pedal, &on, &noise(0.5, seconds(0.25, sample_rate)), stereo);
                 let mut slowest: f64 = 0.0;
                 for _ in 0..3 {
                     slowest = slowest.max(time_ns(&mut pedal, &on, &silence, stereo));
@@ -686,7 +845,13 @@ pub(crate) mod tests {
                     break pedal;
                 }
                 attempts += 1;
-                assert!(attempts < 3, "{}: {:.1} ns per sample playing, {:.1} ns in silence", P::NAME, playing, slowest);
+                assert!(
+                    attempts < 3,
+                    "{}: {:.1} ns per sample playing, {:.1} ns in silence",
+                    P::NAME,
+                    playing,
+                    slowest
+                );
             };
 
             assert!(pedal.idle(), "{}", P::NAME);
@@ -705,14 +870,23 @@ pub(crate) mod tests {
     }
 
     fn off_and_rung_out_costs_next_to_nothing<P: Pedal>() {
-        let (on, off) = (P::settings(true, P::defaults_rate(), 1.0), P::settings(false, P::defaults_rate(), 1.0));
+        let (on, off) = (
+            P::settings(true, P::defaults_rate(), 1.0),
+            P::settings(false, P::defaults_rate(), 1.0),
+        );
         let input = noise(0.5, 48000);
         let mut pedal = P::at(SAMPLE_RATE);
         let playing = time_ns(&mut pedal, &on, &input, true);
         run(&mut pedal, &off, &input[..14400], true, BLOCK);
         assert!(pedal.idle(), "{}", P::NAME);
         let resting = time_ns(&mut pedal, &off, &input, true);
-        assert!(resting < 0.5 * playing, "{}: {:.1} ns per sample on, {:.1} ns off", P::NAME, playing, resting);
+        assert!(
+            resting < 0.5 * playing,
+            "{}: {:.1} ns per sample on, {:.1} ns off",
+            P::NAME,
+            playing,
+            resting
+        );
     }
 
     #[test]
@@ -727,7 +901,13 @@ pub(crate) mod tests {
             pedal.retune(sample_rate);
             for (index, piece) in noise(0.5, seconds(0.5, sample_rate)).chunks(BLOCK).enumerate() {
                 let rate = [P::RATE_HZ.0, P::RATE_HZ.1][(index / 60) % 2];
-                run(&mut pedal, &P::settings((index / 100) % 2 == 0, rate, 1.0), piece, stereo, BLOCK);
+                run(
+                    &mut pedal,
+                    &P::settings((index / 100) % 2 == 0, rate, 1.0),
+                    piece,
+                    stereo,
+                    BLOCK,
+                );
             }
             pedal.start_over();
             assert_eq!(pedal.buffers(), before, "{}", P::NAME);
@@ -766,7 +946,12 @@ pub(crate) mod tests {
         let deepest = P::settings(true, rate, 1.0);
         println!("{}", P::NAME);
 
-        let rates: Vec<String> = [48000.0, 192_000.0, MAX_RATE_HZ].iter().map(|&sample_rate| format!("{:.4}", measured_rate::<P>(sample_rate, &default, false).0)).collect();
+        let rates: Vec<String> = [48000.0, 192_000.0, MAX_RATE_HZ]
+            .iter()
+            .map(|&sample_rate| {
+                format!("{:.4}", measured_rate::<P>(sample_rate, &default, false).0)
+            })
+            .collect();
         let (_, ahead) = measured_rate::<P>(SAMPLE_RATE, &default, true);
         println!("  rate       set {rate} Hz, measured {} Hz at 48 / 192 / 384 kHz; right {ahead:.3} turns ahead", rates.join(" / "));
         for (name, setting) in [("depth 5", &default), ("depth 10", &deepest)] {
@@ -777,7 +962,11 @@ pub(crate) mod tests {
                     format!("{low:.3} to {high:.3}")
                 })
                 .collect();
-            println!("  sweep      {name}: {} {} at 48 / 192 / 384 kHz", ranges.join(" / "), P::UNIT);
+            println!(
+                "  sweep      {name}: {} {} at 48 / 192 / 384 kHz",
+                ranges.join(" / "),
+                P::UNIT
+            );
         }
         for (name, setting) in [("depth 5", &default), ("depth 10", &deepest)] {
             println!(
@@ -788,7 +977,10 @@ pub(crate) mod tests {
             );
         }
         for (name, setting) in [("depth 5", &default), ("depth 10", &deepest)] {
-            println!("  stereo     {name}: left against right {:.2}", stereo_correlation::<P>(setting));
+            println!(
+                "  stereo     {name}: left against right {:.2}",
+                stereo_correlation::<P>(setting)
+            );
             // The tremolo has no notches, and its dips are its sweep
             if P::WIDE {
                 let (one, one_hz) = deepest_notch_db::<P>(setting, false);
@@ -831,7 +1023,8 @@ pub(crate) mod tests {
 
         fn render<P: Pedal>(dir: &std::path::Path, input: &[f32]) {
             let default = P::defaults();
-            let renders = [("default", default), ("depth10", P::settings(true, P::rate_of(&default), 1.0))];
+            let renders =
+                [("default", default), ("depth10", P::settings(true, P::rate_of(&default), 1.0))];
             for (name, setting) in renders {
                 let (left, right) = run_stereo(&mut P::at(SAMPLE_RATE), &setting, input, 32);
                 let file = format!("amp_mod_{}_{}.wav", P::NAME.to_lowercase(), name);

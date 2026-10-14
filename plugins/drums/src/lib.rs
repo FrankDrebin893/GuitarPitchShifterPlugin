@@ -61,10 +61,7 @@ pub struct DrumSynthParams {
 
 impl Default for DrumSynthPlugin {
     fn default() -> Self {
-        Self {
-            params: Arc::new(DrumSynthParams::default()),
-            drums: DrumKit::new(),
-        }
+        Self { params: Arc::new(DrumSynthParams::default()), drums: DrumKit::new() }
     }
 }
 
@@ -226,11 +223,22 @@ impl ClapPlugin for DrumSynthPlugin {
 impl Vst3Plugin for DrumSynthPlugin {
     // Frozen: DAW projects find the plugin by this ID. Never change it
     const VST3_CLASS_ID: [u8; 16] = *b"SuiteDrumSyn0002";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
-        Vst3SubCategory::Instrument,
-        Vst3SubCategory::Drum,
-    ];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Instrument, Vst3SubCategory::Drum];
 }
 
 nih_export_clap!(DrumSynthPlugin);
 nih_export_vst3!(DrumSynthPlugin);
+
+#[cfg(test)]
+mod ids {
+    /// Bundle name, plugin ids and every parameter id stay as saved projects know them
+    #[test]
+    fn ids() {
+        suite_common::ids::check::<super::DrumSynthPlugin>(
+            env!("CARGO_MANIFEST_DIR"),
+            include_str!("../../../bundler.toml"),
+            "drums",
+        );
+    }
+}

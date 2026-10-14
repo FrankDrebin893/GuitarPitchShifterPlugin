@@ -225,7 +225,9 @@ impl ShimmerPad {
         self.shimmer_line.fill(0.0);
         self.shimmer_feedback = 0.0;
         self.hall.reset();
-        for filter in [&mut self.shimmer_hp, &mut self.shimmer_lp].into_iter().chain(&mut self.out_hps) {
+        for filter in
+            [&mut self.shimmer_hp, &mut self.shimmer_lp].into_iter().chain(&mut self.out_hps)
+        {
             filter.reset();
         }
         self.chorus_gain = if self.settings.chorus_on { 1.0 } else { 0.0 };
@@ -380,7 +382,8 @@ impl ShimmerPad {
         let target = if settings.chorus_on { 1.0 } else { 0.0 };
         self.chorus_gain += (target - self.chorus_gain).clamp(-self.switch_step, self.switch_step);
         let target = if settings.shimmer_on { 1.0 } else { 0.0 };
-        self.shimmer_gain += (target - self.shimmer_gain).clamp(-self.switch_step, self.switch_step);
+        self.shimmer_gain +=
+            (target - self.shimmer_gain).clamp(-self.switch_step, self.switch_step);
 
         // Chorus: each side hears the other, delayed by a time that slowly sways
         self.chorus_write = (self.chorus_write + 1) & self.chorus_mask;
@@ -393,7 +396,8 @@ impl ShimmerPad {
             let whole = delay.ceil();
             let fraction = whole - delay;
             let position = self.chorus_write + line.len() - whole as usize;
-            line[position & self.chorus_mask] * (1.0 - fraction) + line[(position + 1) & self.chorus_mask] * fraction
+            line[position & self.chorus_mask] * (1.0 - fraction)
+                + line[(position + 1) & self.chorus_mask] * fraction
         };
         let swayed_left = tap(&self.chorus_left, 0.011, self.chorus_phases[0]);
         let swayed_right = tap(&self.chorus_right, 0.014, self.chorus_phases[1]);
@@ -401,22 +405,28 @@ impl ShimmerPad {
         let pad_left = left * (1.0 - 0.4 * chorus) + swayed_right * chorus * 0.8;
         let pad_right = right * (1.0 - 0.4 * chorus) + swayed_left * chorus * 0.8;
 
-        let (hall_left, hall_right) = self.hall.process((pad_left + pad_right) * 0.35 + self.shimmer_feedback);
+        let (hall_left, hall_right) =
+            self.hall.process((pad_left + pad_right) * 0.35 + self.shimmer_feedback);
 
         // Shimmer: the delay shrinks by a sample each sample, which reads the tail an octave
         // up; a second reader half a window away covers the first one's jump back
         self.shimmer_write = (self.shimmer_write + 1) & self.shimmer_mask;
         self.shimmer_line[self.shimmer_write] = (hall_left + hall_right) * 0.5;
         let window = self.shimmer_window;
-        self.shimmer_delay = if self.shimmer_delay == 0 { window - 1 } else { self.shimmer_delay - 1 };
+        self.shimmer_delay =
+            if self.shimmer_delay == 0 { window - 1 } else { self.shimmer_delay - 1 };
         let other_delay = (self.shimmer_delay + window / 2) % window;
         let read = |delay: usize| {
             let fade = (PI * delay as f32 / window as f32).sin();
-            self.shimmer_line[(self.shimmer_write + self.shimmer_line.len() - delay) & self.shimmer_mask] * fade * fade
+            self.shimmer_line
+                [(self.shimmer_write + self.shimmer_line.len() - delay) & self.shimmer_mask]
+                * fade
+                * fade
         };
         let octave_up = read(self.shimmer_delay) + read(other_delay);
         let octave_up = self.shimmer_lp.process(self.shimmer_hp.process(octave_up).high).low;
-        self.shimmer_feedback = (octave_up * settings.shimmer * self.shimmer_gain * 1.2).tanh() * 0.5;
+        self.shimmer_feedback =
+            (octave_up * settings.shimmer * self.shimmer_gain * 1.2).tanh() * 0.5;
 
         let left = pad_left * settings.dry + hall_left * settings.reverb * 0.9;
         let right = pad_right * settings.dry + hall_right * settings.reverb * 0.9;
@@ -476,26 +486,25 @@ mod tests {
     fn test_notes_are_in_tune_at_every_rate() {
         for sample_rate in [44100.0, 96000.0] {
             for note in [45u8, 57, 69] {
-                let settings = PadSettings {
-                    detune_cents: 0.0,
-                    ..plain()
-                };
+                let settings = PadSettings { detune_cents: 0.0, ..plain() };
                 let mut pad = pad(&settings, sample_rate);
                 pad.note_on(note, 0.8);
                 let (left, _) = render(&mut pad, sample_rate, 0.6);
-                let found = pitch_hz(&left[(0.3 * sample_rate) as usize..], sample_rate, 60.0, 1000.0);
-                assert!((found / note_hz(note as f32) - 1.0).abs() < 0.003, "Note {} at {} Hz", note, found);
+                let found =
+                    pitch_hz(&left[(0.3 * sample_rate) as usize..], sample_rate, 60.0, 1000.0);
+                assert!(
+                    (found / note_hz(note as f32) - 1.0).abs() < 0.003,
+                    "Note {} at {} Hz",
+                    note,
+                    found
+                );
             }
         }
     }
 
     #[test]
     fn test_swells_with_the_attack_and_fades_with_the_release() {
-        let settings = PadSettings {
-            attack_s: 1.0,
-            release_s: 1.0,
-            ..plain()
-        };
+        let settings = PadSettings { attack_s: 1.0, release_s: 1.0, ..plain() };
         let mut pad = pad(&settings, SAMPLE_RATE);
         pad.note_on(57, 0.8);
         let (swell, _) = render(&mut pad, SAMPLE_RATE, 2.0);
@@ -688,7 +697,13 @@ mod tests {
             }
             let (left, right) = render(&mut pad, SAMPLE_RATE, 1.0);
             let mono: Vec<f32> = left.iter().zip(&right).map(|(l, r)| (l + r) * 0.5).collect();
-            println!("{:<10}{:>8.3}{:>8.3}{:>12.4}", second, peak(&mono), rms(&mono), brightness(&mono));
+            println!(
+                "{:<10}{:>8.3}{:>8.3}{:>12.4}",
+                second,
+                peak(&mono),
+                rms(&mono),
+                brightness(&mono)
+            );
         }
 
         let mut pad = self::pad(&PadSettings::default(), SAMPLE_RATE);
@@ -702,7 +717,12 @@ mod tests {
             sum += pad.process().0;
         }
         let per_frame_ns = started.elapsed().as_nanos() as f64 / frames as f64;
-        println!("\nTwelve voices at 48 kHz: {:.0} ns per frame ({:.2} % of a core) ({})", per_frame_ns, per_frame_ns * 48000.0 / 1e7, sum.is_finite());
+        println!(
+            "\nTwelve voices at 48 kHz: {:.0} ns per frame ({:.2} % of a core) ({})",
+            per_frame_ns,
+            per_frame_ns * 48000.0 / 1e7,
+            sum.is_finite()
+        );
     }
 
     /// Writes target/renders/pad.wav for listening:
@@ -714,7 +734,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         // Three slow chords that overlap, each held for six seconds
-        let chords: [(f32, [u8; 4]); 3] = [(0.0, [45, 52, 60, 64]), (5.0, [41, 53, 57, 60]), (10.0, [43, 50, 59, 62])];
+        let chords: [(f32, [u8; 4]); 3] =
+            [(0.0, [45, 52, 60, 64]), (5.0, [41, 53, 57, 60]), (10.0, [43, 50, 59, 62])];
         let length = SAMPLE_RATE as usize * 26;
         let volume = suite_common::dsp::db_to_gain(VOLUME_DEFAULT_DB);
 
@@ -739,7 +760,9 @@ mod tests {
             }
             let (left, right) = pad.process();
             for channel in [left, right] {
-                writer.write_sample(((channel * volume).clamp(-1.0, 1.0) * 32767.0) as i16).unwrap();
+                writer
+                    .write_sample(((channel * volume).clamp(-1.0, 1.0) * 32767.0) as i16)
+                    .unwrap();
             }
         }
         writer.finalize().unwrap();

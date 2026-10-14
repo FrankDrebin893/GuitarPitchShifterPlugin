@@ -4,8 +4,9 @@ use nih_plug_egui::{create_egui_editor, EguiState};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, PoisonError};
 use suite_common::ui::{
-    self, param_knob, param_switch, rig_led, signal_lamp, silk_label, small_footswitch, stepper, theme,
-    tuner_display, MiniStyle, Motif, Ornament, PedalStyle, Step, BENCH_MARGIN, SLIM_KNOBS, SLIM_KNOB_RADIUS, SLIM_LED, SLIM_SWITCH,
+    self, param_knob, param_switch, rig_led, signal_lamp, silk_label, small_footswitch, stepper,
+    theme, tuner_display, MiniStyle, Motif, Ornament, PedalStyle, Step, BENCH_MARGIN, SLIM_KNOBS,
+    SLIM_KNOB_RADIUS, SLIM_LED, SLIM_SWITCH,
 };
 
 use crate::cab_stage::{CabLoader, CabStatus};
@@ -63,7 +64,8 @@ const LAMP_CAPTION_SIZE: f32 = 13.0;
 // sits under the dials, the bypass under the output knob, and the tuner beside the bypass,
 // further from the amps than they are from each other: it is not a fourth amp
 const SWITCH_Y: f32 = 320.0;
-const AMP_SWITCHES: [(Amp, &str, f32); 3] = [(Amp::Klar, "Klar", 255.0), (Amp::Brol, "Brøl", 385.0), (Amp::Torden, "Torden", 515.0)];
+const AMP_SWITCHES: [(Amp, &str, f32); 3] =
+    [(Amp::Klar, "Klar", 255.0), (Amp::Brol, "Brøl", 385.0), (Amp::Torden, "Torden", 515.0)];
 const BYPASS_X: f32 = 790.0;
 const TUNER_X: f32 = 680.0;
 const CAPTION_OFFSET: f32 = -58.0;
@@ -75,7 +77,8 @@ const CAPTION_SIZE: f32 = 17.0;
 const WIDE_PEDALS: usize = 5;
 const PEDAL_SLOTS: usize = 10;
 pub(crate) const PEDAL_TOP: f32 = BENCH_MARGIN + HEAD_HEIGHT + BENCH_MARGIN;
-pub(crate) const PEDAL_WIDTH: f32 = (RIG_WIDTH as f32 - BENCH_MARGIN) / WIDE_PEDALS as f32 - BENCH_MARGIN;
+pub(crate) const PEDAL_WIDTH: f32 =
+    (RIG_WIDTH as f32 - BENCH_MARGIN) / WIDE_PEDALS as f32 - BENCH_MARGIN;
 pub(crate) const PEDAL_HEIGHT: f32 = WINDOW_HEIGHT as f32 - BENCH_MARGIN - PEDAL_TOP;
 
 // On every pedal, from its top centre: the LED under the title, the knobs, the switch at the bottom.
@@ -133,25 +136,65 @@ impl Pedals<'_> {
             (
                 look("Gate", theme::PAINT_GRANITE, Motif::Sluice),
                 &params.gate_on,
-                &[(&params.in_gain, "Input"), (&params.gate_thresh, "Thresh"), (&params.gate_release, "Release")],
+                &[
+                    (&params.in_gain, "Input"),
+                    (&params.gate_thresh, "Thresh"),
+                    (&params.gate_release, "Release"),
+                ],
             ),
             (
                 look("Drive", theme::PAINT_OCHRE, Motif::Bonfire),
                 &params.drive_on,
-                &[(&params.drive_gain, "Drive"), (&params.drive_tone, "Tone"), (&params.drive_level, "Level")],
+                &[
+                    (&params.drive_gain, "Drive"),
+                    (&params.drive_tone, "Tone"),
+                    (&params.drive_level, "Level"),
+                ],
             ),
-            (look("Cab", theme::PAINT_BARK, Motif::Timber), &params.cab_on, &[(&params.cab_mic, "Mic"), (&params.cab_res, "Res")]),
+            (
+                look("Cab", theme::PAINT_BARK, Motif::Timber),
+                &params.cab_on,
+                &[(&params.cab_mic, "Mic"), (&params.cab_res, "Res")],
+            ),
             (
                 look("Delay", theme::PAINT_PETROL, Motif::Ridges),
                 &params.delay_on,
-                &[(&params.delay_time, "Time"), (&params.delay_feedback, "Repeat"), (&params.delay_mix, "Mix")],
+                &[
+                    (&params.delay_time, "Time"),
+                    (&params.delay_feedback, "Repeat"),
+                    (&params.delay_mix, "Mix"),
+                ],
             ),
-            (look("Reverb", theme::PAINT_FJORD, Motif::Fjord), &params.reverb_on, &[(&params.reverb_decay, "Decay"), (&params.reverb_mix, "Mix")]),
-            (look("Comp", theme::PAINT_MOSS, Motif::Isobars), &params.comp_on, &[(&params.comp_sustain, "Sustain"), (&params.comp_level, "Level")]),
-            (look("Chorus", theme::PAINT_SEA, Motif::Swell), &params.chorus_on, &[(&params.chorus_rate, "Rate"), (&params.chorus_depth, "Depth")]),
-            (look("Phaser", theme::PAINT_VIOLET, Motif::Moons), &params.phaser_on, &[(&params.phaser_rate, "Rate"), (&params.phaser_depth, "Depth")]),
-            (look("Flanger", theme::PAINT_AURORA, Motif::Aurora), &params.flanger_on, &[(&params.flanger_rate, "Rate"), (&params.flanger_depth, "Depth")]),
-            (look("Tremolo", theme::PAINT_HEATHER, Motif::Rain), &params.trem_on, &[(&params.trem_rate, "Rate"), (&params.trem_depth, "Depth")]),
+            (
+                look("Reverb", theme::PAINT_FJORD, Motif::Fjord),
+                &params.reverb_on,
+                &[(&params.reverb_decay, "Decay"), (&params.reverb_mix, "Mix")],
+            ),
+            (
+                look("Comp", theme::PAINT_MOSS, Motif::Isobars),
+                &params.comp_on,
+                &[(&params.comp_sustain, "Sustain"), (&params.comp_level, "Level")],
+            ),
+            (
+                look("Chorus", theme::PAINT_SEA, Motif::Swell),
+                &params.chorus_on,
+                &[(&params.chorus_rate, "Rate"), (&params.chorus_depth, "Depth")],
+            ),
+            (
+                look("Phaser", theme::PAINT_VIOLET, Motif::Moons),
+                &params.phaser_on,
+                &[(&params.phaser_rate, "Rate"), (&params.phaser_depth, "Depth")],
+            ),
+            (
+                look("Flanger", theme::PAINT_AURORA, Motif::Aurora),
+                &params.flanger_on,
+                &[(&params.flanger_rate, "Rate"), (&params.flanger_depth, "Depth")],
+            ),
+            (
+                look("Tremolo", theme::PAINT_HEATHER, Motif::Rain),
+                &params.trem_on,
+                &[(&params.trem_rate, "Rate"), (&params.trem_depth, "Depth")],
+            ),
         ];
         let (style, on, knobs) = pedals[slot];
         if Self::is_slim(slot) {
@@ -187,7 +230,8 @@ impl Pedals<'_> {
             let chosen = params.cabinet.lock().unwrap_or_else(PoisonError::into_inner).clone();
             let shown = self.cab_loader.display_name(&chosen, CAB_NAME_CHARS);
             silk_label(ui.painter(), top + CAB_CAPTION, "Speaker", 13.0);
-            if let Some(step) = stepper(ui, top + CAB_STEPPER, CAB_STEPPER_WIDTH, &shown, "cabinet") {
+            if let Some(step) = stepper(ui, top + CAB_STEPPER, CAB_STEPPER_WIDTH, &shown, "cabinet")
+            {
                 step_cabinet(params, self.cab_loader, self.async_executor, step == Step::Next);
             }
         }
@@ -267,7 +311,12 @@ pub fn create(
                     // The note the tuner hears and how far off it is, where the preset was
                     let note = tuner.hz().map(Note::nearest);
                     let name = note.map(|note| format!("{}{}", note.name, note.octave));
-                    silk_label(ui.painter(), origin + vec2(PRESET_X, PRESET_CAPTION_Y), "Tuner", 13.0);
+                    silk_label(
+                        ui.painter(),
+                        origin + vec2(PRESET_X, PRESET_CAPTION_Y),
+                        "Tuner",
+                        13.0,
+                    );
                     tuner_display(
                         ui.painter(),
                         origin + vec2(PRESET_X, PRESET_Y),
@@ -281,9 +330,20 @@ pub fn create(
                     // The preset loaded last, marked once a knob was moved away from it. The
                     // buttons step through the list and load what they arrive at
                     let loaded = presets::index_or_first(params.preset.load(Ordering::Relaxed));
-                    silk_label(ui.painter(), origin + vec2(PRESET_X, PRESET_CAPTION_Y), "Preset", 13.0);
+                    silk_label(
+                        ui.painter(),
+                        origin + vec2(PRESET_X, PRESET_CAPTION_Y),
+                        "Preset",
+                        13.0,
+                    );
                     let shown = PRESETS[loaded].display_name(&params);
-                    if let Some(step) = stepper(ui, origin + vec2(PRESET_X, PRESET_Y), PRESET_WIDTH, &shown, "preset") {
+                    if let Some(step) = stepper(
+                        ui,
+                        origin + vec2(PRESET_X, PRESET_Y),
+                        PRESET_WIDTH,
+                        &shown,
+                        "preset",
+                    ) {
                         let next = presets::neighbour(loaded, step == Step::Next);
                         PRESETS[next].load(&params, setter);
                         params.preset.store(next as u32, Ordering::Relaxed);
@@ -291,17 +351,48 @@ pub fn create(
                 }
 
                 let dials = ["Gain", "Bass", "Mid", "Treble", "Presence", "Master"];
-                for (index, (param, label)) in params.amp_dials().into_iter().zip(dials).enumerate() {
+                for (index, (param, label)) in params.amp_dials().into_iter().zip(dials).enumerate()
+                {
                     let x = DIAL_X + DIAL_SPACING * index as f32;
-                    param_knob(ui, setter, param, origin + vec2(x, KNOB_Y), KNOB_RADIUS, label, None);
+                    param_knob(
+                        ui,
+                        setter,
+                        param,
+                        origin + vec2(x, KNOB_Y),
+                        KNOB_RADIUS,
+                        label,
+                        None,
+                    );
                 }
-                param_knob(ui, setter, &params.out_level, origin + vec2(OUTPUT_X, KNOB_Y), KNOB_RADIUS, "Output", None);
+                param_knob(
+                    ui,
+                    setter,
+                    &params.out_level,
+                    origin + vec2(OUTPUT_X, KNOB_Y),
+                    KNOB_RADIUS,
+                    "Output",
+                    None,
+                );
                 signal_lamp(ui.painter(), origin + CLIP_LAMP, clipping);
-                silk_label(ui.painter(), origin + CLIP_LAMP + LAMP_CAPTION, "Clip", LAMP_CAPTION_SIZE);
+                silk_label(
+                    ui.painter(),
+                    origin + CLIP_LAMP + LAMP_CAPTION,
+                    "Clip",
+                    LAMP_CAPTION_SIZE,
+                );
 
                 for (amp, label, x) in AMP_SWITCHES {
-                    rig_led(ui.painter(), origin + vec2(x + CAPTION_OFFSET, LED_Y), params.amp.value() == amp);
-                    silk_label(ui.painter(), origin + vec2(x + CAPTION_OFFSET, CAPTION_Y), label, CAPTION_SIZE);
+                    rig_led(
+                        ui.painter(),
+                        origin + vec2(x + CAPTION_OFFSET, LED_Y),
+                        params.amp.value() == amp,
+                    );
+                    silk_label(
+                        ui.painter(),
+                        origin + vec2(x + CAPTION_OFFSET, CAPTION_Y),
+                        label,
+                        CAPTION_SIZE,
+                    );
                     if small_footswitch(ui, origin + vec2(x, SWITCH_Y), label).clicked() {
                         // The amp that is left keeps its dials, and the one picked gets its own back
                         dial_memory::switch_amp(&params, setter, amp);
@@ -310,7 +401,12 @@ pub fn create(
 
                 // Tuner switch, lit while tuning: the amp is silent then
                 rig_led(ui.painter(), origin + vec2(TUNER_X + CAPTION_OFFSET, LED_Y), tuning);
-                silk_label(ui.painter(), origin + vec2(TUNER_X + CAPTION_OFFSET, CAPTION_Y), "Tuner", CAPTION_SIZE);
+                silk_label(
+                    ui.painter(),
+                    origin + vec2(TUNER_X + CAPTION_OFFSET, CAPTION_Y),
+                    "Tuner",
+                    CAPTION_SIZE,
+                );
                 if small_footswitch(ui, origin + vec2(TUNER_X, SWITCH_Y), "tuner").clicked() {
                     setter.begin_set_parameter(&params.tuner_on);
                     setter.set_parameter(&params.tuner_on, !tuning);
@@ -320,7 +416,12 @@ pub fn create(
                 // Bypass switch, lit while the amp is on
                 let bypassed = params.bypass.value();
                 rig_led(ui.painter(), origin + vec2(BYPASS_X + CAPTION_OFFSET, LED_Y), !bypassed);
-                silk_label(ui.painter(), origin + vec2(BYPASS_X + CAPTION_OFFSET, CAPTION_Y), "On", CAPTION_SIZE);
+                silk_label(
+                    ui.painter(),
+                    origin + vec2(BYPASS_X + CAPTION_OFFSET, CAPTION_Y),
+                    "On",
+                    CAPTION_SIZE,
+                );
                 if small_footswitch(ui, origin + vec2(BYPASS_X, SWITCH_Y), "bypass").clicked() {
                     setter.begin_set_parameter(&params.bypass);
                     setter.set_parameter(&params.bypass, !bypassed);

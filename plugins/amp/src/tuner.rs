@@ -116,9 +116,7 @@ pub struct TunerReading {
 
 impl TunerReading {
     pub fn new() -> Self {
-        Self {
-            hz: AtomicU32::new(0.0f32.to_bits()),
-        }
+        Self { hz: AtomicU32::new(0.0f32.to_bits()) }
     }
 
     /// The pitch in Hz, or nothing: silence, noise, a chord, or the tuner is off
@@ -215,7 +213,8 @@ impl Probe {
         let (window_step_cos, window_step_sin) = self.window_step;
         let (mut real, mut imaginary) = self.sum;
         for index in 0..count {
-            let sample = ring[(self.position.wrapping_add(index)) & RING_MASK] as f64 * (0.5 - 0.5 * window_cos);
+            let sample = ring[(self.position.wrapping_add(index)) & RING_MASK] as f64
+                * (0.5 - 0.5 * window_cos);
             real += sample * cos;
             imaginary -= sample * sin;
             (cos, sin) = (cos * step_cos - sin * step_sin, sin * step_cos + cos * step_sin);
@@ -273,7 +272,8 @@ fn measure(
     if weight <= 1e-30 || newer_power <= 0.0 {
         return None;
     }
-    let mean = pitches.iter().zip(&weights).map(|(pitch, weight)| pitch * weight).sum::<f64>() / weight;
+    let mean =
+        pitches.iter().zip(&weights).map(|(pitch, weight)| pitch * weight).sum::<f64>() / weight;
     if mean <= 0.0 {
         return None;
     }
@@ -281,7 +281,8 @@ fn measure(
     // the others alone. With three that are all really there the one in the middle is
     // taken: it is never the one that was pushed
     let strongest = weights.iter().fold(0.0, |most: f64, &weight| most.max(weight));
-    let all_there = count == FINE_HARMONICS && weights.iter().all(|&weight| weight >= MEDIAN_SHARE * strongest);
+    let all_there =
+        count == FINE_HARMONICS && weights.iter().all(|&weight| weight >= MEDIAN_SHARE * strongest);
     let pitch = if all_there {
         let [a, b, c] = pitches;
         a.max(b).min(a.min(b).max(c))
@@ -292,7 +293,15 @@ fn measure(
     let spread = pitches[..count]
         .iter()
         .zip(&weights)
-        .map(|(&each, weight)| if each > 0.0 { weight * cents_between(each, mean).powi(2) } else { weight * 1e6 })
+        .map(
+            |(&each, weight)| {
+                if each > 0.0 {
+                    weight * cents_between(each, mean).powi(2)
+                } else {
+                    weight * 1e6
+                }
+            },
+        )
         .sum::<f64>()
         / weight;
     Some((pitch, spread.sqrt(), older_power / newer_power))
@@ -506,7 +515,8 @@ impl Tuner {
     /// Whether the newest stretch of the ring is above the level of silence
     fn is_loud_enough(&self) -> bool {
         let from = self.end.wrapping_sub(self.span);
-        let energy: f32 = (0..self.span).map(|index| self.at(from.wrapping_add(index)).powi(2)).sum();
+        let energy: f32 =
+            (0..self.span).map(|index| self.at(from.wrapping_add(index)).powi(2)).sum();
         energy >= self.level_min * self.level_min * self.span as f32
     }
 
@@ -548,12 +558,15 @@ impl Tuner {
         let mut sum = 0.0f32;
         for lag in 1..=self.max_lag + 1 {
             sum += self.difference[lag];
-            self.difference[lag] = if sum > 0.0 { self.difference[lag] * lag as f32 / sum } else { 1.0 };
+            self.difference[lag] =
+                if sum > 0.0 { self.difference[lag] * lag as f32 / sum } else { 1.0 };
         }
         self.difference[0] = 1.0;
         let normalised = &self.difference;
 
-        let best = normalised[self.min_lag..=self.max_lag].iter().fold(f32::MAX, |best, &value| best.min(value));
+        let best = normalised[self.min_lag..=self.max_lag]
+            .iter()
+            .fold(f32::MAX, |best, &value| best.min(value));
         if best > CLARITY_MAX {
             return None;
         }
@@ -645,7 +658,14 @@ impl Tuner {
                 if harmonic + 1 < fine {
                     self.begin_probe(Stage::Older, harmonic + 1, self.first_apart());
                 } else {
-                    match measure(&self.older, &self.newer, fine, self.pitch, self.rate, self.first_apart()) {
+                    match measure(
+                        &self.older,
+                        &self.newer,
+                        fine,
+                        self.pitch,
+                        self.rate,
+                        self.first_apart(),
+                    ) {
                         Some((pitch, _, _)) => {
                             self.first = pitch;
                             self.pitch = pitch;
@@ -713,7 +733,10 @@ impl Tuner {
         // Nothing at the pitch itself. If all there is sits at the multiples of one harmonic,
         // that one is the note. If not, more than one note is sounding
         let multiple = lowest + 1;
-        let all_multiples = powers.iter().enumerate().all(|(index, &power)| !is_there(power) || (index + 1) % multiple == 0);
+        let all_multiples = powers
+            .iter()
+            .enumerate()
+            .all(|(index, &power)| !is_there(power) || (index + 1) % multiple == 0);
         let pitch = self.pitch * multiple as f64;
         if all_multiples && !self.moved && pitch <= MAX_HZ as f64 * 1.05 {
             self.pitch = pitch;
@@ -726,7 +749,8 @@ impl Tuner {
 
     /// Checks for a note an octave under the pitch, whose first harmonic is weak
     fn judge_under(&mut self) {
-        let strongest = self.newer[..self.harmonics].iter().fold(0.0, |most: f64, &sum| most.max(power(sum)));
+        let strongest =
+            self.newer[..self.harmonics].iter().fold(0.0, |most: f64, &sum| most.max(power(sum)));
         let [half, third] = self.under.map(power);
         let third_in_reach = self.pitch * 1.5 <= TOP_RATIO * self.rate;
         let found = if third_in_reach {
@@ -749,14 +773,21 @@ impl Tuner {
         let whole = measure(&self.older, &self.newer, fine, self.pitch, self.rate, self.apart);
         let earlier = measure(&self.older, &self.middle, fine, self.pitch, self.rate, half);
         let later = measure(&self.middle, &self.newer, fine, self.pitch, self.rate, half);
-        let (Some((pitch, spread, older_share)), Some((earlier, _, _)), Some((later, _, _))) = (whole, earlier, later) else {
+        let (Some((pitch, spread, older_share)), Some((earlier, _, _)), Some((later, _, _))) =
+            (whole, earlier, later)
+        else {
             self.miss();
             return;
         };
         let in_range = pitch >= MIN_HZ as f64 && pitch <= MAX_HZ as f64;
         let passes_agree = cents_between(pitch, self.first).abs() <= PASSES_AGREE_CENTS;
         let steady = cents_between(later, earlier).abs() <= STEADY_CENTS;
-        if in_range && passes_agree && steady && spread <= HARMONICS_AGREE_CENTS && older_share >= OLDER_POWER_MIN {
+        if in_range
+            && passes_agree
+            && steady
+            && spread <= HARMONICS_AGREE_CENTS
+            && older_share >= OLDER_POWER_MIN
+        {
             self.accept(pitch as f32);
         } else {
             self.miss();
@@ -767,10 +798,15 @@ impl Tuner {
     fn accept(&mut self, hz: f32) {
         self.stage = Stage::Waiting;
         self.misses = 0;
-        if self.kept > 0 && cents_between(hz as f64, self.median() as f64).abs() > NOTE_CHANGE_CENTS as f64 {
+        if self.kept > 0
+            && cents_between(hz as f64, self.median() as f64).abs() > NOTE_CHANGE_CENTS as f64
+        {
             // One stray reading, or the first of the next note: the reading after it tells
             match self.pending.take() {
-                Some(pending) if cents_between(hz as f64, pending as f64).abs() <= NOTE_CHANGE_CENTS as f64 => {
+                Some(pending)
+                    if cents_between(hz as f64, pending as f64).abs()
+                        <= NOTE_CHANGE_CENTS as f64 =>
+                {
                     self.shown[0] = pending;
                     self.shown[1] = hz;
                     self.kept = 2;
@@ -841,7 +877,8 @@ pub(crate) mod tests {
     /// Every open string of the tunings above, each also at the twelfth fret, and the
     /// highest note, low to high
     fn all_notes() -> Vec<i32> {
-        let mut notes: Vec<i32> = STANDARD.iter().chain(&LOWERED).flat_map(|&open| [open, open + 12]).collect();
+        let mut notes: Vec<i32> =
+            STANDARD.iter().chain(&LOWERED).flat_map(|&open| [open, open + 12]).collect();
         notes.push(HIGHEST);
         notes.sort();
         notes.dedup();
@@ -865,7 +902,9 @@ pub(crate) mod tests {
         for (index, level) in levels.iter().enumerate() {
             let partial_hz = freq_hz * (index + 1) as f32;
             if partial_hz < 0.45 * sample_rate {
-                for (sample, partial) in tone.iter_mut().zip(sine(partial_hz, 0.15 * level, sample_rate, len)) {
+                for (sample, partial) in
+                    tone.iter_mut().zip(sine(partial_hz, 0.15 * level, sample_rate, len))
+                {
                     *sample += partial;
                 }
             }
@@ -885,7 +924,13 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn string(freq_hz: f32, sample_rate: f32, seconds: f32) -> Vec<f32> {
-        stiff_string(freq_hz, stiffness(freq_hz), Pluck::OPEN, sample_rate, (seconds * sample_rate) as usize)
+        stiff_string(
+            freq_hz,
+            stiffness(freq_hz),
+            Pluck::OPEN,
+            sample_rate,
+            (seconds * sample_rate) as usize,
+        )
     }
 
     fn new_tuner(sample_rate: f32) -> Tuner {
@@ -924,11 +969,19 @@ pub(crate) mod tests {
 
     /// The reading furthest from `expected_hz` among those from `from_s` on, in cents, and
     /// how many of the blocks from there on had one
-    fn worst_from(signal: &[f32], sample_rate: f32, expected_hz: f32, from_s: f32) -> (f32, usize, usize) {
+    fn worst_from(
+        signal: &[f32],
+        sample_rate: f32,
+        expected_hz: f32,
+        from_s: f32,
+    ) -> (f32, usize, usize) {
         let all = readings(signal, sample_rate);
         let from = (from_s * sample_rate) as usize / BLOCK;
-        let heard: Vec<f32> = all[from..].iter().flatten().map(|&hz| cents(hz, expected_hz)).collect();
-        let worst = heard.iter().fold(0.0f32, |worst, &off| if off.abs() > worst.abs() { off } else { worst });
+        let heard: Vec<f32> =
+            all[from..].iter().flatten().map(|&hz| cents(hz, expected_hz)).collect();
+        let worst = heard
+            .iter()
+            .fold(0.0f32, |worst, &off| if off.abs() > worst.abs() { off } else { worst });
         (worst, heard.len(), all.len() - from)
     }
 
@@ -978,7 +1031,10 @@ pub(crate) mod tests {
             let len = (0.4 * sample_rate) as usize;
             for number in notes {
                 let freq = note_hz(number);
-                let tones = [("sine", sine(freq, 0.2, sample_rate, len)), ("weak fundamental", weak_fundamental(freq, sample_rate, len))];
+                let tones = [
+                    ("sine", sine(freq, 0.2, sample_rate, len)),
+                    ("weak fundamental", weak_fundamental(freq, sample_rate, len)),
+                ];
                 for (kind, tone) in tones {
                     let heard = settled(&tone, sample_rate);
                     let off = heard.map(|hz| cents(hz, freq));
@@ -1003,11 +1059,20 @@ pub(crate) mod tests {
                 let freq = note_hz(number) * 2.0f32.powf(detune / 1200.0);
                 let heard = settled(&weak_fundamental(freq, sample_rate, len), sample_rate);
                 let off = heard.map(|hz| cents(hz, freq));
-                assert!(off.is_some_and(|off| off.abs() < 1.0), "{} {detune:+} cents: {heard:?}", name_of(number));
+                assert!(
+                    off.is_some_and(|off| off.abs() < 1.0),
+                    "{} {detune:+} cents: {heard:?}",
+                    name_of(number)
+                );
                 if step.abs() < 10 {
                     let note = Note::nearest(heard.unwrap());
                     assert_eq!(format!("{}{}", note.name, note.octave), name_of(number));
-                    assert!((note.cents - detune).abs() < 1.0, "{} {detune:+} cents shows {}", name_of(number), note.cents);
+                    assert!(
+                        (note.cents - detune).abs() < 1.0,
+                        "{} {detune:+} cents shows {}",
+                        name_of(number),
+                        note.cents
+                    );
                 }
             }
         }
@@ -1023,12 +1088,25 @@ pub(crate) mod tests {
                 // amp is tested with. The latter cannot reach the highest notes
                 let mut plucks = vec![("stiff string", string(freq, sample_rate, 1.2))];
                 if freq < 700.0 {
-                    plucks.push(("delay line", pluck(freq, Pluck::OPEN, 3, sample_rate, (1.2 * sample_rate) as usize)));
+                    plucks.push((
+                        "delay line",
+                        pluck(freq, Pluck::OPEN, 3, sample_rate, (1.2 * sample_rate) as usize),
+                    ));
                 }
                 for (kind, note) in plucks {
                     let (worst, heard, blocks) = worst_from(&note, sample_rate, freq, 0.25);
-                    assert_eq!(heard, blocks, "{} {kind} at {sample_rate} Hz: lost for {} blocks", name_of(number), blocks - heard);
-                    assert!(worst.abs() < 3.0, "{} {kind} at {sample_rate} Hz: {worst} cents", name_of(number));
+                    assert_eq!(
+                        heard,
+                        blocks,
+                        "{} {kind} at {sample_rate} Hz: lost for {} blocks",
+                        name_of(number),
+                        blocks - heard
+                    );
+                    assert!(
+                        worst.abs() < 3.0,
+                        "{} {kind} at {sample_rate} Hz: {worst} cents",
+                        name_of(number)
+                    );
                 }
             }
         }
@@ -1042,7 +1120,13 @@ pub(crate) mod tests {
         for (how, seconds) in [(Pluck::MUTED, 1.0), (Pluck::OPEN, 6.0)] {
             for number in [33, 40, 59] {
                 let freq = note_hz(number);
-                let note = stiff_string(freq, stiffness(freq), how, sample_rate, (seconds * sample_rate) as usize);
+                let note = stiff_string(
+                    freq,
+                    stiffness(freq),
+                    how,
+                    sample_rate,
+                    (seconds * sample_rate) as usize,
+                );
                 let (worst, heard, _) = worst_from(&note, sample_rate, freq, 0.0);
                 assert!(heard > 0, "{} was never read", name_of(number));
                 assert!(worst.abs() < 3.0, "{}: {worst} cents", name_of(number));
@@ -1063,12 +1147,18 @@ pub(crate) mod tests {
         for sample_rate in RATES {
             let freq = note_hz(40);
             let len = (0.5 * sample_rate) as usize;
-            for (kind, note) in [("stiff string", string(freq, sample_rate, 0.5)), ("delay line", pluck(freq, Pluck::OPEN, 3, sample_rate, len))] {
+            for (kind, note) in [
+                ("stiff string", string(freq, sample_rate, 0.5)),
+                ("delay line", pluck(freq, Pluck::OPEN, 3, sample_rate, len)),
+            ] {
                 // The pluck comes after a moment of silence, as it does when tuning
                 let mut signal = vec![0.0; (0.1 * sample_rate) as usize];
                 signal.extend(note);
                 let first = first_reading_s(&signal, sample_rate).map(|first| first - 0.1);
-                assert!(first.is_some_and(|first| first < 0.15), "{kind} at {sample_rate} Hz: {first:?} s");
+                assert!(
+                    first.is_some_and(|first| first < 0.15),
+                    "{kind} at {sample_rate} Hz: {first:?} s"
+                );
             }
         }
     }
@@ -1079,7 +1169,12 @@ pub(crate) mod tests {
         let len = (2.0 * sample_rate) as usize;
         let never = |name: &str, signal: &[f32]| {
             let heard: Vec<f32> = readings(signal, sample_rate).into_iter().flatten().collect();
-            assert!(heard.is_empty(), "{name}: read as {:?} Hz in {} blocks", heard[0], heard.len());
+            assert!(
+                heard.is_empty(),
+                "{name}: read as {:?} Hz in {} blocks",
+                heard[0],
+                heard.len()
+            );
         };
 
         never("silence", &vec![0.0; len]);
@@ -1099,7 +1194,13 @@ pub(crate) mod tests {
             let mut chord = vec![0.0f32; len];
             for interval in [0, 7, 12] {
                 let freq = note_hz(root + interval);
-                for (sample, string) in chord.iter_mut().zip(stiff_string(freq, stiffness(freq), Pluck::OPEN, sample_rate, len)) {
+                for (sample, string) in chord.iter_mut().zip(stiff_string(
+                    freq,
+                    stiffness(freq),
+                    Pluck::OPEN,
+                    sample_rate,
+                    len,
+                )) {
                     *sample += 0.5 * string;
                 }
             }
@@ -1123,8 +1224,18 @@ pub(crate) mod tests {
                     *sample += hum + 0.0012 * noise.next();
                 }
                 let (worst, heard, blocks) = worst_from(&note, sample_rate, freq, 0.25);
-                assert_eq!(heard, blocks, "{} over {hum_hz} Hz hum: lost for {} blocks", name_of(number), blocks - heard);
-                assert!(worst.abs() < 3.0, "{} over {hum_hz} Hz hum: {worst} cents", name_of(number));
+                assert_eq!(
+                    heard,
+                    blocks,
+                    "{} over {hum_hz} Hz hum: lost for {} blocks",
+                    name_of(number),
+                    blocks - heard
+                );
+                assert!(
+                    worst.abs() < 3.0,
+                    "{} over {hum_hz} Hz hum: {worst} cents",
+                    name_of(number)
+                );
             }
         }
     }
@@ -1143,7 +1254,10 @@ pub(crate) mod tests {
             let off = cents(*hz, note_hz(40)).abs().min(cents(*hz, note_hz(45)).abs());
             assert!(off < 3.0, "Read {hz} Hz between the two");
         }
-        let changed = all.iter().position(|reading| reading.is_some_and(|hz| cents(hz, note_hz(45)).abs() < 3.0)).unwrap();
+        let changed = all
+            .iter()
+            .position(|reading| reading.is_some_and(|hz| cents(hz, note_hz(45)).abs() < 3.0))
+            .unwrap();
         let after_s = (changed * BLOCK) as f32 / sample_rate - 0.6;
         assert!((0.0..0.2).contains(&after_s), "The next string was read after {after_s} s");
     }
@@ -1158,7 +1272,11 @@ pub(crate) mod tests {
             let seen = readings_in_blocks(&signal, sample_rate, block);
             for (index, reading) in seen.iter().enumerate() {
                 let at = ((index + 1) * block).min(signal.len()) - 1;
-                assert_eq!(reading.map(f32::to_bits), reference[at].map(f32::to_bits), "Blocks of {block}, sample {at}");
+                assert_eq!(
+                    reading.map(f32::to_bits),
+                    reference[at].map(f32::to_bits),
+                    "Blocks of {block}, sample {at}"
+                );
             }
         }
     }
@@ -1184,10 +1302,18 @@ pub(crate) mod tests {
         for sample_rate in [8000.0, 11025.0, 22050.0, 32000.0, 384000.0] {
             let tuner = new_tuner(sample_rate);
             assert!(tuner.max_lag <= MAX_LAG && tuner.min_lag >= 2, "{sample_rate} Hz");
-            assert!(tuner.rate <= 1.5 * TARGET_RATE_HZ as f64 + 1.0, "{sample_rate} Hz runs at {}", tuner.rate);
+            assert!(
+                tuner.rate <= 1.5 * TARGET_RATE_HZ as f64 + 1.0,
+                "{sample_rate} Hz runs at {}",
+                tuner.rate
+            );
             let freq = note_hz(40);
-            let heard = settled(&sine(freq, 0.2, sample_rate, (0.4 * sample_rate) as usize), sample_rate);
-            assert!(heard.is_some_and(|hz| cents(hz, freq).abs() < 1.0), "{sample_rate} Hz: {heard:?}");
+            let heard =
+                settled(&sine(freq, 0.2, sample_rate, (0.4 * sample_rate) as usize), sample_rate);
+            assert!(
+                heard.is_some_and(|hz| cents(hz, freq).abs() < 1.0),
+                "{sample_rate} Hz: {heard:?}"
+            );
         }
     }
 
@@ -1213,13 +1339,19 @@ pub(crate) mod tests {
     #[ignore]
     fn tuner_report() {
         crate::test_util::pin_thread();
-        let off_of = |heard: Option<f32>, freq: f32| heard.map_or("     none".to_owned(), |hz| format!("{:>+9.2}", cents(hz, freq)));
+        let off_of = |heard: Option<f32>, freq: f32| {
+            heard.map_or("     none".to_owned(), |hz| format!("{:>+9.2}", cents(hz, freq)))
+        };
         let delay_line = |freq: f32, sample_rate: f32, seconds: f32| {
-            (freq < 700.0).then(|| pluck(freq, Pluck::OPEN, 3, sample_rate, (seconds * sample_rate) as usize))
+            (freq < 700.0)
+                .then(|| pluck(freq, Pluck::OPEN, 3, sample_rate, (seconds * sample_rate) as usize))
         };
 
         println!("\nError in cents at 48 kHz. Tones after 0.4 s; strings: the worst reading from 0.25 to 1.2 s");
-        println!("{:<5} {:>8} {:>9} {:>9} {:>9} {:>9} {:>9}", "note", "Hz", "sine", "weak 1st", "stiff", "delay ln", "first ms");
+        println!(
+            "{:<5} {:>8} {:>9} {:>9} {:>9} {:>9} {:>9}",
+            "note", "Hz", "sine", "weak 1st", "stiff", "delay ln", "first ms"
+        );
         let sample_rate = 48000.0;
         for number in all_notes() {
             let freq = note_hz(number);
@@ -1227,7 +1359,11 @@ pub(crate) mod tests {
             let stiff = string(freq, sample_rate, 1.2);
             let worst = |note: &[f32]| {
                 let (worst, heard, blocks) = worst_from(note, sample_rate, freq, 0.25);
-                if heard == blocks { format!("{worst:>+9.2}") } else { format!("{:>9}", format!("lost {}", blocks - heard)) }
+                if heard == blocks {
+                    format!("{worst:>+9.2}")
+                } else {
+                    format!("{:>9}", format!("lost {}", blocks - heard))
+                }
             };
             println!(
                 "{:<5} {:>8.2} {} {} {} {} {:>9}",
@@ -1236,13 +1372,18 @@ pub(crate) mod tests {
                 off_of(settled(&sine(freq, 0.2, sample_rate, len), sample_rate), freq),
                 off_of(settled(&weak_fundamental(freq, sample_rate, len), sample_rate), freq),
                 worst(&stiff),
-                delay_line(freq, sample_rate, 1.2).map_or(format!("{:>9}", "-"), |note| worst(&note)),
-                first_reading_s(&stiff, sample_rate).map_or("none".to_owned(), |first| format!("{:.0}", first * 1000.0)),
+                delay_line(freq, sample_rate, 1.2)
+                    .map_or(format!("{:>9}", "-"), |note| worst(&note)),
+                first_reading_s(&stiff, sample_rate)
+                    .map_or("none".to_owned(), |first| format!("{:.0}", first * 1000.0)),
             );
         }
 
         println!("\nWorst error in cents over all notes, per sample rate");
-        println!("{:<8} {:>9} {:>9} {:>9} {:>9} {:>14}", "rate", "sine", "weak 1st", "stiff", "delay ln", "first ms (E2)");
+        println!(
+            "{:<8} {:>9} {:>9} {:>9} {:>9} {:>14}",
+            "rate", "sine", "weak 1st", "stiff", "delay ln", "first ms (E2)"
+        );
         for sample_rate in RATES {
             let len = (0.4 * sample_rate) as usize;
             let mut worst = [0.0f32; 4];
@@ -1254,9 +1395,18 @@ pub(crate) mod tests {
             for number in all_notes() {
                 let freq = note_hz(number);
                 let lost = 999.0;
-                keep(0, settled(&sine(freq, 0.2, sample_rate, len), sample_rate).map_or(lost, |hz| cents(hz, freq)));
-                keep(1, settled(&weak_fundamental(freq, sample_rate, len), sample_rate).map_or(lost, |hz| cents(hz, freq)));
-                let (off, heard, blocks) = worst_from(&string(freq, sample_rate, 1.2), sample_rate, freq, 0.25);
+                keep(
+                    0,
+                    settled(&sine(freq, 0.2, sample_rate, len), sample_rate)
+                        .map_or(lost, |hz| cents(hz, freq)),
+                );
+                keep(
+                    1,
+                    settled(&weak_fundamental(freq, sample_rate, len), sample_rate)
+                        .map_or(lost, |hz| cents(hz, freq)),
+                );
+                let (off, heard, blocks) =
+                    worst_from(&string(freq, sample_rate, 1.2), sample_rate, freq, 0.25);
                 keep(2, if heard == blocks { off } else { lost });
                 if let Some(note) = delay_line(freq, sample_rate, 1.2) {
                     let (off, heard, blocks) = worst_from(&note, sample_rate, freq, 0.25);
@@ -1286,7 +1436,10 @@ pub(crate) mod tests {
             for step in -10i32..=10 {
                 let freq = note_hz(number) * 2.0f32.powf(step as f32 * 5.0 / 1200.0);
                 let heard = settled(&weak_fundamental(freq, 44100.0, 17_640), 44100.0);
-                print!(" {}", heard.map_or(" none".to_owned(), |hz| format!("{:>+5.2}", cents(hz, freq))));
+                print!(
+                    " {}",
+                    heard.map_or(" none".to_owned(), |hz| format!("{:>+5.2}", cents(hz, freq)))
+                );
             }
             println!();
         }
@@ -1305,7 +1458,11 @@ pub(crate) mod tests {
             print!("{:<5}", name_of(number));
             for time in times {
                 let block = (time * 48000.0) as usize / BLOCK - 1;
-                print!(" {}", all[block].map_or("   none".to_owned(), |hz| format!("{:>+7.2}", cents(hz, freq))));
+                print!(
+                    " {}",
+                    all[block]
+                        .map_or("   none".to_owned(), |hz| format!("{:>+7.2}", cents(hz, freq)))
+                );
             }
             println!();
             print!("{:<5}", "");
@@ -1320,7 +1477,10 @@ pub(crate) mod tests {
         println!("{:<5} {:>12} {:>12}", "note", "stiff", "delay line");
         for number in [33, 35, 36, 38, 40, 45, 50, 55, 59, 64, 76] {
             let freq = note_hz(number);
-            let ms = |note: &[f32]| first_reading_s(note, 48000.0).map_or("none".to_owned(), |first| format!("{:.0}", first * 1000.0));
+            let ms = |note: &[f32]| {
+                first_reading_s(note, 48000.0)
+                    .map_or("none".to_owned(), |first| format!("{:.0}", first * 1000.0))
+            };
             println!(
                 "{:<5} {:>12} {:>12}",
                 name_of(number),
@@ -1336,11 +1496,14 @@ pub(crate) mod tests {
             let low = string(note_hz(33), sample_rate, 4.0);
             let high = sine(note_hz(HIGHEST), 0.2, sample_rate, len);
             let silence = vec![0.0f32; len];
-            for (name, signal) in [("low A string", &low), ("highest note", &high), ("silence", &silence)] {
+            for (name, signal) in
+                [("low A string", &low), ("highest note", &high), ("silence", &silence)]
+            {
                 let mut times = block_times_ns(signal, sample_rate);
                 times.sort_by(f64::total_cmp);
                 let block_ns = BLOCK as f64 / sample_rate as f64 * 1e9;
-                let share = |time: f64| format!("{:.2} ({:.2} %)", time / 1000.0, 100.0 * time / block_ns);
+                let share =
+                    |time: f64| format!("{:.2} ({:.2} %)", time / 1000.0, 100.0 * time / block_ns);
                 println!(
                     "{:<8} {:<16} {:>16} {:>16} {:>16}",
                     sample_rate,

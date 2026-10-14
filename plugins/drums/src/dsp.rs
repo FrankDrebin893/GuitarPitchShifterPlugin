@@ -38,9 +38,7 @@ pub struct Noise {
 
 impl Noise {
     pub fn new(seed: u32) -> Self {
-        Self {
-            state: seed.wrapping_mul(0x9E37_79B9) | 1,
-        }
+        Self { state: seed.wrapping_mul(0x9E37_79B9) | 1 }
     }
 
     pub fn next(&mut self) -> f32 {
@@ -69,14 +67,7 @@ pub struct Svf {
 
 impl Svf {
     pub fn new() -> Self {
-        Self {
-            k: 1.0,
-            a1: 0.0,
-            a2: 0.0,
-            a3: 0.0,
-            ic1: 0.0,
-            ic2: 0.0,
-        }
+        Self { k: 1.0, a1: 0.0, a2: 0.0, a3: 0.0, ic1: 0.0, ic2: 0.0 }
     }
 
     pub fn set(&mut self, freq_hz: f32, q: f32, sample_rate: f32) {
@@ -99,11 +90,7 @@ impl Svf {
         self.ic1 = 2.0 * v1 - self.ic1;
         self.ic2 = 2.0 * v2 - self.ic2;
 
-        SvfOutput {
-            low: v2,
-            band: v1,
-            high: input - self.k * v1 - v2,
-        }
+        SvfOutput { low: v2, band: v1, high: input - self.k * v1 - v2 }
     }
 }
 
@@ -146,13 +133,7 @@ pub struct Modes<const N: usize> {
 
 impl<const N: usize> Modes<N> {
     pub fn new() -> Self {
-        Self {
-            phase: [0.0; N],
-            freq: [0.0; N],
-            amp: [0.0; N],
-            env: [0.0; N],
-            coeff: [0.0; N],
-        }
+        Self { phase: [0.0; N], freq: [0.0; N], amp: [0.0; N], env: [0.0; N], coeff: [0.0; N] }
     }
 
     pub fn set(&mut self, index: usize, freq_hz: f32, amp: f32, decay_ms: f32, sample_rate: f32) {

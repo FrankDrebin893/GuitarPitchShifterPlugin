@@ -44,11 +44,7 @@ pub struct ChorusSettings {
 
 impl Default for ChorusSettings {
     fn default() -> Self {
-        Self {
-            on: false,
-            rate_hz: 0.8,
-            depth: 0.5,
-        }
+        Self { on: false, rate_hz: 0.8, depth: 0.5 }
     }
 }
 
@@ -141,7 +137,12 @@ impl Chorus {
     }
 
     /// Behind the cabinet: two channels at the host's rate
-    pub fn process_stereo(&mut self, settings: &ChorusSettings, left: &mut [f32], right: &mut [f32]) {
+    pub fn process_stereo(
+        &mut self,
+        settings: &ChorusSettings,
+        left: &mut [f32],
+        right: &mut [f32],
+    ) {
         debug_assert_eq!(left.len(), right.len());
         let len = left.len().min(right.len());
         self.process(settings, [&mut left[..len], &mut right[..len]]);
@@ -153,7 +154,11 @@ impl Chorus {
     }
 
     /// Adds the voices to a block in place
-    fn process<const N: usize>(&mut self, settings: &ChorusSettings, mut channels: [&mut [f32]; N]) {
+    fn process<const N: usize>(
+        &mut self,
+        settings: &ChorusSettings,
+        mut channels: [&mut [f32]; N],
+    ) {
         let rate = settings.rate_hz.clamp(RATE_MIN_HZ, RATE_MAX_HZ);
         let depth = settings.depth.clamp(0.0, 1.0);
         let wet = WET * depth.sqrt();
@@ -197,7 +202,10 @@ impl Chorus {
             // rung out
             self.line.push(0.0);
             self.quiet_run += 1;
-            if self.quiet_run >= self.reach && self.highpass.state().abs() < SILENCE && self.lowpass.state().abs() < SILENCE {
+            if self.quiet_run >= self.reach
+                && self.highpass.state().abs() < SILENCE
+                && self.lowpass.state().abs() < SILENCE
+            {
                 self.line.keep_newest(self.quiet_run);
                 self.feed.snap(settings.on);
                 self.rest();
@@ -233,8 +241,12 @@ mod tests {
         for sample_rate in [48000.0, 192_000.0, 384_000.0] {
             for (depth, from_ms, to_ms) in [(1.0, 7.0, 12.0), (0.5, 8.25, 10.75), (0.0, 9.5, 9.5)] {
                 for stereo in [false, true] {
-                    let (low, high) = swept_range::<Chorus>(sample_rate, &settings(1.0, depth), stereo);
-                    assert!((low - from_ms).abs() < 0.01 && (high - to_ms).abs() < 0.01, "{sample_rate} Hz, depth {depth}: {low} to {high} ms");
+                    let (low, high) =
+                        swept_range::<Chorus>(sample_rate, &settings(1.0, depth), stereo);
+                    assert!(
+                        (low - from_ms).abs() < 0.01 && (high - to_ms).abs() < 0.01,
+                        "{sample_rate} Hz, depth {depth}: {low} to {high} ms"
+                    );
                 }
             }
         }
@@ -255,13 +267,22 @@ mod tests {
                 .skip(1)
                 .map(|piece| {
                     let wet = &piece[1..];
-                    let at = (0..wet.len()).max_by(|&a, &b| wet[a].abs().total_cmp(&wet[b].abs())).unwrap() + 1;
+                    let at = (0..wet.len())
+                        .max_by(|&a, &b| wet[a].abs().total_cmp(&wet[b].abs()))
+                        .unwrap()
+                        + 1;
                     at as f32 * 1000.0 / sample_rate
                 })
                 .collect();
-            let (nearest, furthest) = delays_ms.iter().fold((f32::MAX, f32::MIN), |(low, high), &delay| (low.min(delay), high.max(delay)));
+            let (nearest, furthest) =
+                delays_ms.iter().fold((f32::MAX, f32::MIN), |(low, high), &delay| {
+                    (low.min(delay), high.max(delay))
+                });
             // The filters on the voice smear a click over a few samples
-            assert!((6.9..7.5).contains(&nearest) && (11.6..12.3).contains(&furthest), "{sample_rate} Hz: {nearest} to {furthest} ms");
+            assert!(
+                (6.9..7.5).contains(&nearest) && (11.6..12.3).contains(&furthest),
+                "{sample_rate} Hz: {nearest} to {furthest} ms"
+            );
         }
     }
 
@@ -283,7 +304,11 @@ mod tests {
                 last = Some(delay);
             }
             let expected = if rate_hz < 1.0 { 27.0 * rate_hz } else { 27.0 };
-            assert!((cents(steepest) - expected).abs() < 0.5, "{rate_hz} Hz: {} cents", cents(steepest));
+            assert!(
+                (cents(steepest) - expected).abs() < 0.5,
+                "{rate_hz} Hz: {} cents",
+                cents(steepest)
+            );
         }
     }
 
@@ -312,9 +337,14 @@ mod tests {
         let wet: Vec<f32> = output.iter().zip(&input).map(|(out, dry)| out - dry).collect();
         let level = to_db(rms(&wet) / rms(&input));
         assert!((-12.0..-6.0).contains(&level), "Voice at {level} dB");
-        let highs = band_level_db(&wet, 48000.0, Some(10000.0), None) - band_level_db(&input, 48000.0, Some(10000.0), None);
-        let lows = band_level_db(&wet, 48000.0, None, Some(60.0)) - band_level_db(&input, 48000.0, None, Some(60.0));
-        assert!(highs < -3.0 && lows < -4.0, "Highs {highs} dB, lows {lows} dB against the voice as a whole");
+        let highs = band_level_db(&wet, 48000.0, Some(10000.0), None)
+            - band_level_db(&input, 48000.0, Some(10000.0), None);
+        let lows = band_level_db(&wet, 48000.0, None, Some(60.0))
+            - band_level_db(&input, 48000.0, None, Some(60.0));
+        assert!(
+            highs < -3.0 && lows < -4.0,
+            "Highs {highs} dB, lows {lows} dB against the voice as a whole"
+        );
     }
 
     #[test]
@@ -336,6 +366,9 @@ mod tests {
         let (sum, at_hz) = deepest_notch_db::<Chorus>(&setting, true);
         // A voice at 0.66 against the dry signal takes 9.4 dB out at most
         assert!(one > -9.5, "One channel {one} dB");
-        assert!(sum > -9.5 && sum > one - 0.5, "Mono sum {sum} dB at {at_hz} Hz, one channel {one} dB");
+        assert!(
+            sum > -9.5 && sum > one - 0.5,
+            "Mono sum {sum} dB at {at_hz} Hz, one channel {one} dB"
+        );
     }
 }

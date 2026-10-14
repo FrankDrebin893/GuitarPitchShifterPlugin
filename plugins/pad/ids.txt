@@ -1,0 +1,19 @@
+bundle HojtShimmerPad
+name Hojt Shimmer Pad
+clap net.hojte.shimmer-pad
+vst3 HojtShimmerPad01
+param attack
+param breath
+param chorus
+param chorus_on
+param cutoff
+param detune
+param dry
+param motion
+param release
+param reverb
+param reverb_decay
+param shimmer
+param shimmer_on
+param volume
+persist editor-state

@@ -61,10 +61,7 @@ pub struct ShimmerPadParams {
 
 impl Default for ShimmerPadPlugin {
     fn default() -> Self {
-        Self {
-            params: Arc::new(ShimmerPadParams::default()),
-            pad: ShimmerPad::new(),
-        }
+        Self { params: Arc::new(ShimmerPadParams::default()), pad: ShimmerPad::new() }
     }
 }
 
@@ -89,8 +86,18 @@ impl Default for ShimmerPadParams {
             .with_value_to_string(formatters::v2s_f32_gain_to_db(1))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
 
-            attack: seconds_param("Attack", defaults.attack_s, pad::ATTACK_MIN_S, pad::ATTACK_MAX_S),
-            release: seconds_param("Release", defaults.release_s, pad::RELEASE_MIN_S, pad::RELEASE_MAX_S),
+            attack: seconds_param(
+                "Attack",
+                defaults.attack_s,
+                pad::ATTACK_MIN_S,
+                pad::ATTACK_MAX_S,
+            ),
+            release: seconds_param(
+                "Release",
+                defaults.release_s,
+                pad::RELEASE_MIN_S,
+                pad::RELEASE_MAX_S,
+            ),
 
             cutoff: FloatParam::new(
                 "Cutoff",
@@ -107,10 +114,7 @@ impl Default for ShimmerPadParams {
             detune: FloatParam::new(
                 "Detune",
                 defaults.detune_cents,
-                FloatRange::Linear {
-                    min: 0.0,
-                    max: pad::DETUNE_MAX_CENTS,
-                },
+                FloatRange::Linear { min: 0.0, max: pad::DETUNE_MAX_CENTS },
             )
             .with_step_size(0.1)
             .with_unit(" ct")
@@ -150,11 +154,7 @@ fn seconds_param(name: &str, default: f32, min: f32, max: f32) -> FloatParam {
     FloatParam::new(
         name,
         default,
-        FloatRange::Skewed {
-            min,
-            max,
-            factor: FloatRange::skew_factor(-1.0),
-        },
+        FloatRange::Skewed { min, max, factor: FloatRange::skew_factor(-1.0) },
     )
     .with_step_size(0.01)
     .with_unit(" s")
@@ -246,8 +246,12 @@ impl Plugin for ShimmerPadPlugin {
                 match event {
                     NoteEvent::NoteOn { note, velocity, .. } => self.pad.note_on(note, velocity),
                     NoteEvent::NoteOff { note, .. } => self.pad.note_off(note),
-                    NoteEvent::MidiCC { cc, .. } if cc == control_change::ALL_NOTES_OFF => self.pad.release(),
-                    NoteEvent::MidiCC { cc, .. } if cc == control_change::ALL_SOUND_OFF => self.pad.reset(),
+                    NoteEvent::MidiCC { cc, .. } if cc == control_change::ALL_NOTES_OFF => {
+                        self.pad.release()
+                    }
+                    NoteEvent::MidiCC { cc, .. } if cc == control_change::ALL_SOUND_OFF => {
+                        self.pad.reset()
+                    }
                     _ => {}
                 }
 
@@ -268,20 +272,19 @@ impl Plugin for ShimmerPadPlugin {
 
 impl ClapPlugin for ShimmerPadPlugin {
     const CLAP_ID: &'static str = "net.hojte.shimmer-pad";
-    const CLAP_DESCRIPTION: Option<&'static str> = Some("A slow ambient pad with a chorus and a shimmering hall");
+    const CLAP_DESCRIPTION: Option<&'static str> =
+        Some("A slow ambient pad with a chorus and a shimmering hall");
     const CLAP_MANUAL_URL: Option<&'static str> = None;
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
-    const CLAP_FEATURES: &'static [ClapFeature] = &[
-        ClapFeature::Instrument,
-        ClapFeature::Synthesizer,
-        ClapFeature::Stereo,
-    ];
+    const CLAP_FEATURES: &'static [ClapFeature] =
+        &[ClapFeature::Instrument, ClapFeature::Synthesizer, ClapFeature::Stereo];
 }
 
 impl Vst3Plugin for ShimmerPadPlugin {
     // Frozen: DAW projects find the plugin by this ID. Never change it
     const VST3_CLASS_ID: [u8; 16] = *b"HojtShimmerPad01";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Instrument, Vst3SubCategory::Synth];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Instrument, Vst3SubCategory::Synth];
 }
 
 nih_export_clap!(ShimmerPadPlugin);
@@ -294,5 +297,18 @@ mod tests {
     #[test]
     fn test_parameter_defaults_are_those_of_the_dsp() {
         assert_eq!(ShimmerPadParams::default().settings(), PadSettings::default());
+    }
+}
+
+#[cfg(test)]
+mod ids {
+    /// Bundle name, plugin ids and every parameter id stay as saved projects know them
+    #[test]
+    fn ids() {
+        suite_common::ids::check::<super::ShimmerPadPlugin>(
+            env!("CARGO_MANIFEST_DIR"),
+            include_str!("../../../bundler.toml"),
+            "pad",
+        );
     }
 }

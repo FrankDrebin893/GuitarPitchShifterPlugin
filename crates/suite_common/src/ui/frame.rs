@@ -1,7 +1,7 @@
 use nih_plug_egui::egui::epaint::TextShape;
 use nih_plug_egui::egui::{
-    self, vec2, Align2, Color32, Context, CursorIcon, Id, Painter, Pos2, Rect, Response, Sense, Shape, Stroke,
-    StrokeKind, Ui, Vec2,
+    self, vec2, Align2, Color32, Context, CursorIcon, Id, Painter, Pos2, Rect, Response, Sense,
+    Shape, Stroke, StrokeKind, Ui, Vec2,
 };
 
 use super::art::{self, Motif};
@@ -115,12 +115,10 @@ pub fn pedal(ctx: &Context, style: &PedalStyle, add_controls: impl FnOnce(&mut U
 ///
 /// The closure gets the window's top left corner. Enclosures and controls are placed relative to it.
 pub fn rig(ctx: &Context, add_contents: impl FnOnce(&mut Ui, Pos2)) {
-    egui::CentralPanel::default()
-        .frame(egui::Frame::default().fill(BENCH))
-        .show(ctx, |ui| {
-            let origin = ui.max_rect().min;
-            add_contents(ui, origin);
-        });
+    egui::CentralPanel::default().frame(egui::Frame::default().fill(BENCH)).show(ctx, |ui| {
+        let origin = ui.max_rect().min;
+        add_contents(ui, origin);
+    });
 }
 
 /// Amp head: a wide enclosure filling `rect`, with everything a pedal has printed on it.
@@ -182,7 +180,11 @@ pub fn title_grip(ui: &mut Ui, top: Rect, id_source: &str) -> Response {
 /// Where a mini pedal that is held by its title is drawn: `rect` a little higher, with its
 /// shadow on what is under it. Call it before drawing the pedal in the rectangle it returns.
 pub fn lifted(painter: &Painter, rect: Rect) -> Rect {
-    painter.rect_filled(rect.translate(vec2(0.0, LIFT)).expand(3.0), MINI_CORNER_RADIUS + 3.0, SHADOW);
+    painter.rect_filled(
+        rect.translate(vec2(0.0, LIFT)).expand(3.0),
+        MINI_CORNER_RADIUS + 3.0,
+        SHADOW,
+    );
     rect.translate(vec2(0.0, -LIFT))
 }
 
@@ -195,12 +197,18 @@ pub fn amp_marker(painter: &Painter, gap: Rect, head_bottom: f32) {
     let ring = Stroke::new(1.0, Color32::from_black_alpha(110));
     for (edge, side) in [(gap.left(), 1.0), (gap.right(), -1.0)] {
         let x = edge + side * CABLE_INSET;
-        painter.line_segment([Pos2::new(x, head_bottom), Pos2::new(x, plug_y)], Stroke::new(CABLE_WIDTH, CABLE));
+        painter.line_segment(
+            [Pos2::new(x, head_bottom), Pos2::new(x, plug_y)],
+            Stroke::new(CABLE_WIDTH, CABLE),
+        );
         // The sleeve where the cable goes in under the head
         let sleeve = Rect::from_center_size(Pos2::new(x, head_bottom + 5.0), vec2(9.0, 10.0));
         painter.rect_filled(sleeve, 1.5, CHROME_DARK);
         // An angled plug in the side of the pedal: its barrel, and the housing the cable leaves upwards
-        let barrel = Rect::from_min_max(Pos2::new(edge.min(x), plug_y - 3.5), Pos2::new(edge.max(x), plug_y + 3.5));
+        let barrel = Rect::from_min_max(
+            Pos2::new(edge.min(x), plug_y - 3.5),
+            Pos2::new(edge.max(x), plug_y + 3.5),
+        );
         painter.rect_filled(barrel, 0.0, CHROME_LIGHT);
         let housing = Rect::from_center_size(Pos2::new(x, plug_y), vec2(13.0, 17.0));
         painter.rect_filled(housing.translate(vec2(0.0, 2.0)), 3.0, SHADOW);
@@ -218,7 +226,11 @@ pub fn amp_marker(painter: &Painter, gap: Rect, head_bottom: f32) {
     let galley = layout(painter, "AMP", display(14.0), INK, 0.16);
     // The letter spacing also follows the last letter: leave it out of the centring
     let text_width = galley.size().x - 14.0 * 0.16;
-    painter.galley(Pos2::new(tag.center().x - text_width / 2.0, tag.center().y - galley.size().y / 2.0 + 1.0), galley, INK);
+    painter.galley(
+        Pos2::new(tag.center().x - text_width / 2.0, tag.center().y - galley.size().y / 2.0 + 1.0),
+        galley,
+        INK,
+    );
 }
 
 /// Painted box with a screw in each corner, filling `rect`. Returns the top face,
@@ -227,7 +239,14 @@ pub fn enclosure(painter: &Painter, rect: Rect, paint: Color32) -> Rect {
     shell(painter, rect, paint, CORNER_RADIUS, SCREW_INSET, 1.0)
 }
 
-fn shell(painter: &Painter, rect: Rect, paint: Color32, radius: f32, screw_inset: f32, screw_scale: f32) -> Rect {
+fn shell(
+    painter: &Painter,
+    rect: Rect,
+    paint: Color32,
+    radius: f32,
+    screw_inset: f32,
+    screw_scale: f32,
+) -> Rect {
     let top = painted_box(painter, rect, paint, radius);
     screws(painter, top, screw_inset, screw_scale);
     top
@@ -261,11 +280,27 @@ fn screws(painter: &Painter, top: Rect, screw_inset: f32, screw_scale: f32) {
 }
 
 /// Everything printed on the top face `top`: jack captions, name band, model number, logo
-fn print(painter: &Painter, top: Rect, band_center_y: f32, band_angle_deg: f32, style: &PedalStyle) {
+fn print(
+    painter: &Painter,
+    top: Rect,
+    band_center_y: f32,
+    band_angle_deg: f32,
+    style: &PedalStyle,
+) {
     let jack_y = top.top() + 29.0;
     let [left_jack, right_jack] = style.jacks;
-    jack_label(painter, Pos2::new(top.left() + PRINT_INSET, jack_y), left_jack, Align2::LEFT_CENTER);
-    jack_label(painter, Pos2::new(top.right() - PRINT_INSET, jack_y), right_jack, Align2::RIGHT_CENTER);
+    jack_label(
+        painter,
+        Pos2::new(top.left() + PRINT_INSET, jack_y),
+        left_jack,
+        Align2::LEFT_CENTER,
+    );
+    jack_label(
+        painter,
+        Pos2::new(top.right() - PRINT_INSET, jack_y),
+        right_jack,
+        Align2::RIGHT_CENTER,
+    );
 
     name_band(painter, top, band_center_y, band_angle_deg, style);
 
@@ -320,7 +355,13 @@ fn screw(painter: &Painter, center: Pos2, slot_angle: f32, scale: f32) {
 }
 
 /// Tilted cream band across the enclosure, with the plugin name in heavy letters
-fn name_band(painter: &Painter, enclosure: Rect, center_y: f32, angle_deg: f32, style: &PedalStyle) {
+fn name_band(
+    painter: &Painter,
+    enclosure: Rect,
+    center_y: f32,
+    angle_deg: f32,
+    style: &PedalStyle,
+) {
     let angle = angle_deg.to_radians();
     let center = Pos2::new(enclosure.center().x, center_y);
     // Height of a line through the band's centre at horizontal position x, shifted by `offset`
@@ -405,7 +446,11 @@ fn waves(painter: &Painter, center: Pos2) {
         let points = (0..=24)
             .map(|step| {
                 let along = step as f32 / 24.0;
-                center + vec2((along - 0.5) * 28.0, row - (along * 3.0 * std::f32::consts::PI).sin() * 3.2)
+                center
+                    + vec2(
+                        (along - 0.5) * 28.0,
+                        row - (along * 3.0 * std::f32::consts::PI).sin() * 3.2,
+                    )
             })
             .collect();
         painter.add(Shape::line(points, Stroke::new(2.8, INK)));

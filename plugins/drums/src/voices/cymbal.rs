@@ -159,7 +159,8 @@ impl Cymbal {
         }
         self.mode_scale = preset.mode_level / (modes as f32).sqrt();
 
-        let strike_cutoff = STRIKE_CUTOFF_MIN_HZ + STRIKE_CUTOFF_RANGE_HZ * hit.velocity * hit.velocity;
+        let strike_cutoff =
+            STRIKE_CUTOFF_MIN_HZ + STRIKE_CUTOFF_RANGE_HZ * hit.velocity * hit.velocity;
 
         for i in 0..modes {
             // Where in its slot a mode sits is new for every hit on a cymbal at rest, so no two
@@ -170,8 +171,9 @@ impl Cymbal {
             }
             let position = (i as f32 + self.jitter[i]) / modes as f32;
             let freq = preset.low_hz + (preset.high_hz - preset.low_hz) * position;
-            let decay_ms =
-                preset.decay_low_ms * (preset.decay_high_ms / preset.decay_low_ms).powf(position) * hit.decay;
+            let decay_ms = preset.decay_low_ms
+                * (preset.decay_high_ms / preset.decay_low_ms).powf(position)
+                * hit.decay;
             let radius = decay_coeff(decay_ms, sample_rate);
             let omega = TAU * freq / sample_rate;
 
@@ -195,8 +197,8 @@ impl Cymbal {
             self.state[1 - self.newest][i] += level * (phase - omega).sin();
         }
 
-        let wash_top =
-            preset.wash_lp_hz * (WASH_SOFT_TOP + (1.0 - WASH_SOFT_TOP) * hit.velocity * hit.velocity);
+        let wash_top = preset.wash_lp_hz
+            * (WASH_SOFT_TOP + (1.0 - WASH_SOFT_TOP) * hit.velocity * hit.velocity);
         let span = preset.wash_lp_hz / preset.wash_hp_hz;
         for b in 0..WASH_BANDS {
             let position = (b as f32 + 0.5) / WASH_BANDS as f32;
@@ -209,7 +211,9 @@ impl Cymbal {
                 let reach = 1.0 / (1.0 + (centre / wash_top).powi(2)).sqrt();
                 WASH_NORM * reach * (centre / preset.wash_hp_hz).powf(WASH_TILT) / WASH_BAND_Q
             };
-            let decay_ms = preset.wash_decay_ms * WASH_TOP_DECAY.powf(b as f32 / (WASH_BANDS - 1) as f32) * hit.decay;
+            let decay_ms = preset.wash_decay_ms
+                * WASH_TOP_DECAY.powf(b as f32 / (WASH_BANDS - 1) as f32)
+                * hit.decay;
             self.wash_coeff[b] = decay_coeff(decay_ms, sample_rate);
             self.wash_env[b] = self.wash_env[b].max(amplitude);
         }
@@ -218,7 +222,8 @@ impl Cymbal {
         self.attack_level = preset.attack_level;
         self.attack_env = self.attack_env.max(amplitude * hit.velocity);
 
-        let longest_ms = preset.decay_low_ms.max(preset.decay_high_ms).max(preset.wash_decay_ms) * hit.decay;
+        let longest_ms =
+            preset.decay_low_ms.max(preset.decay_high_ms).max(preset.wash_decay_ms) * hit.decay;
         self.remaining = (longest_ms * 0.001 * TAIL_TIME_CONSTANTS * sample_rate) as usize + 1;
     }
 
@@ -318,7 +323,12 @@ mod tests {
         // heard as a bell that beats. Looked at 15 Hz at a time, noise fills nearly every slot
         // and a comb of tones (0.03 to 0.2 before the wash carried the top) leaves most empty
         let set = KitPreset::new(Kit::Rock).unwrap().cymbals;
-        for (name, preset) in [("crash", set.crash1), ("ride", set.ride), ("open hat", set.hat_open), ("china", set.china)] {
+        for (name, preset) in [
+            ("crash", set.crash1),
+            ("ride", set.ride),
+            ("open hat", set.hat_open),
+            ("china", set.china),
+        ] {
             let mut cymbal = Cymbal::new(1);
             cymbal.trigger(&preset, &hit(1.0));
             let output = render(&mut cymbal, SAMPLE_RATE as usize / 2);

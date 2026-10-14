@@ -10,7 +10,8 @@ use std::path::Path;
 pub const SLOWED_DOWN: f64 = 4.0;
 
 pub fn rms(samples: &[f32]) -> f32 {
-    (samples.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>() / samples.len() as f64).sqrt() as f32
+    (samples.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>() / samples.len() as f64).sqrt()
+        as f32
 }
 
 pub fn peak(samples: &[f32]) -> f32 {
@@ -31,7 +32,9 @@ pub fn set_rms_db(samples: &mut [f32], level_db: f32) {
 
 pub fn sine(freq_hz: f32, level: f32, sample_rate: f32, len: usize) -> Vec<f32> {
     (0..len)
-        .map(|i| (level as f64 * (i as f64 * TAU * freq_hz as f64 / sample_rate as f64).sin()) as f32)
+        .map(|i| {
+            (level as f64 * (i as f64 * TAU * freq_hz as f64 / sample_rate as f64).sin()) as f32
+        })
         .collect()
 }
 
@@ -65,10 +68,13 @@ pub fn harmonics_of(freq_hz: f32, sample_rate: f32) -> Vec<f64> {
 /// offset is taken out first and counts as neither
 pub fn fit_partials(signal: &[f32], sample_rate: f32, partials: &[f64]) -> (Vec<f64>, f64) {
     let len = signal.len();
-    let window: Vec<f64> = (0..len).map(|i| 0.5 - 0.5 * (TAU * i as f64 / len as f64).cos()).collect();
-    let mean = signal.iter().zip(&window).map(|(&s, w)| s as f64 * w).sum::<f64>() / window.iter().sum::<f64>();
+    let window: Vec<f64> =
+        (0..len).map(|i| 0.5 - 0.5 * (TAU * i as f64 / len as f64).cos()).collect();
+    let mean = signal.iter().zip(&window).map(|(&s, w)| s as f64 * w).sum::<f64>()
+        / window.iter().sum::<f64>();
     let mut residual: Vec<f64> = signal.iter().map(|&s| s as f64 - mean).collect();
-    let energy = |samples: &[f64]| -> f64 { samples.iter().zip(&window).map(|(s, w)| w * s * s).sum() };
+    let energy =
+        |samples: &[f64]| -> f64 { samples.iter().zip(&window).map(|(s, w)| w * s * s).sum() };
     let total = energy(&residual);
 
     let mut fitted = vec![(0.0, 0.0); partials.len()];
@@ -130,7 +136,12 @@ pub fn band_levels_db(signal: &[f32], sample_rate: f32) -> Vec<f32> {
 
 /// Level of what a signal has between two frequencies, in dB relative to the whole signal.
 /// `None` leaves that side open
-pub fn band_level_db(signal: &[f32], sample_rate: f32, from_hz: Option<f32>, to_hz: Option<f32>) -> f32 {
+pub fn band_level_db(
+    signal: &[f32],
+    sample_rate: f32,
+    from_hz: Option<f32>,
+    to_hz: Option<f32>,
+) -> f32 {
     let mut filters = [Biquad::new(); 4];
     if let Some(from_hz) = from_hz {
         filters[0].set(BiquadCoeffs::highpass(from_hz, 0.541, sample_rate));
@@ -142,7 +153,9 @@ pub fn band_level_db(signal: &[f32], sample_rate: f32, from_hz: Option<f32>, to_
     }
     let band: Vec<f32> = signal
         .iter()
-        .map(|&sample| filters.iter_mut().fold(sample as f64, |signal, filter| filter.process(signal)) as f32)
+        .map(|&sample| {
+            filters.iter_mut().fold(sample as f64, |signal, filter| filter.process(signal)) as f32
+        })
         .collect();
     to_db(rms(&band) / rms(signal).max(1e-10))
 }
@@ -156,12 +169,14 @@ pub fn spectrum_level_db(signal: &[f32], sample_rate: f32, from_hz: f32, to_hz: 
     const PIECE_S: f64 = 0.05;
     const STEP_HZ: f64 = 20.0;
     let piece = (PIECE_S * sample_rate as f64) as usize;
-    let window: Vec<f64> = (0..piece).map(|i| 0.5 - 0.5 * (TAU * i as f64 / piece as f64).cos()).collect();
+    let window: Vec<f64> =
+        (0..piece).map(|i| 0.5 - 0.5 * (TAU * i as f64 / piece as f64).cos()).collect();
     let bins = ((to_hz - from_hz) as f64 / STEP_HZ) as usize;
     let (mut band, mut total) = (0.0, 0.0);
     // Pieces half a piece apart, so every part of the signal counts the same
     for start in (0..signal.len().saturating_sub(piece)).step_by(piece / 2) {
-        let windowed: Vec<f64> = signal[start..start + piece].iter().zip(&window).map(|(&s, w)| s as f64 * w).collect();
+        let windowed: Vec<f64> =
+            signal[start..start + piece].iter().zip(&window).map(|(&s, w)| s as f64 * w).collect();
         total += windowed.iter().map(|s| s * s).sum::<f64>();
         for bin in 0..bins {
             let omega = TAU * (from_hz as f64 + (bin as f64 + 0.5) * STEP_HZ) / sample_rate as f64;
@@ -213,16 +228,8 @@ pub struct Pluck {
 }
 
 impl Pluck {
-    pub const OPEN: Pluck = Pluck {
-        decay_s: 4.0,
-        damping: 0.18,
-        pick_position: 0.13,
-    };
-    pub const MUTED: Pluck = Pluck {
-        decay_s: 0.25,
-        damping: 0.5,
-        pick_position: 0.08,
-    };
+    pub const OPEN: Pluck = Pluck { decay_s: 4.0, damping: 0.18, pick_position: 0.13 };
+    pub const MUTED: Pluck = Pluck { decay_s: 0.25, damping: 0.5, pick_position: 0.08 };
 }
 
 /// One plucked string as a pickup hears it: a delay line with losses, excited by a noise
@@ -249,9 +256,8 @@ pub fn pluck(freq_hz: f32, pluck: Pluck, seed: u32, sample_rate: f32, len: usize
         })
         .collect();
     let comb = ((pluck.pick_position * line_len as f32).round() as usize).max(1);
-    let mut line: Vec<f32> = (0..line_len)
-        .map(|i| burst[i] - burst[(i + line_len - comb) % line_len])
-        .collect();
+    let mut line: Vec<f32> =
+        (0..line_len).map(|i| burst[i] - burst[(i + line_len - comb) % line_len]).collect();
 
     let mut pickup = Biquad::new();
     pickup.set(BiquadCoeffs::lowpass(PICKUP_HZ, PICKUP_Q, sample_rate));
@@ -274,7 +280,15 @@ pub fn pluck(freq_hz: f32, pluck: Pluck, seed: u32, sample_rate: f32, len: usize
 
 /// Adds a note to a recording. It is cut off at `len_s` with a short fade, as when the
 /// next note is fretted
-fn add_note(recording: &mut [f32], sample_rate: f32, start_s: f32, len_s: f32, freq_hz: f32, how: Pluck, level: f32) {
+fn add_note(
+    recording: &mut [f32],
+    sample_rate: f32,
+    start_s: f32,
+    len_s: f32,
+    freq_hz: f32,
+    how: Pluck,
+    level: f32,
+) {
     let start = (start_s * sample_rate) as usize;
     let len = ((len_s * sample_rate) as usize).min(recording.len().saturating_sub(start));
     let fade = (0.015 * sample_rate) as usize;
@@ -295,7 +309,15 @@ pub fn power_chords(sample_rate: f32, seconds: f32) -> Vec<f32> {
     let mut start = 0.0;
     while start < seconds {
         for (string, &freq) in POWER_CHORD_HZ.iter().enumerate() {
-            add_note(&mut recording, sample_rate, start + string as f32 * 0.004, 0.49, freq, Pluck::OPEN, 1.0);
+            add_note(
+                &mut recording,
+                sample_rate,
+                start + string as f32 * 0.004,
+                0.49,
+                freq,
+                Pluck::OPEN,
+                1.0,
+            );
         }
         start += 0.5;
     }
@@ -326,8 +348,16 @@ pub fn same_chords(sample_rate: f32, seconds: f32) -> Vec<f32> {
                 // Two milliseconds to rise, the last ten of the half second to fall
                 let attack = (since_strike / 0.002).min(1.0);
                 let release = ((0.5 - since_strike) / 0.01).min(1.0);
-                let shape = attack * attack * (3.0 - 2.0 * attack) * release * release * (3.0 - 2.0 * release);
-                *sample += level * shape * (-decay_per_s * since_strike).exp() * (TAU * partial_hz * since_strike).sin();
+                let shape = attack
+                    * attack
+                    * (3.0 - 2.0 * attack)
+                    * release
+                    * release
+                    * (3.0 - 2.0 * release);
+                *sample += level
+                    * shape
+                    * (-decay_per_s * since_strike).exp()
+                    * (TAU * partial_hz * since_strike).sin();
             }
             harmonic += 1;
         }
@@ -351,7 +381,15 @@ pub fn palm_mutes(sample_rate: f32, seconds: f32) -> Vec<f32> {
         let start = beat as f32 * PALM_MUTE_STEP_S;
         for (string, ratio) in [1.0, 1.4983, 2.0].iter().enumerate() {
             let at = start + string as f32 * 0.003;
-            add_note(&mut recording, sample_rate, at, PALM_MUTE_STEP_S - 0.01, root * ratio, Pluck::MUTED, 1.0);
+            add_note(
+                &mut recording,
+                sample_rate,
+                at,
+                PALM_MUTE_STEP_S - 0.01,
+                root * ratio,
+                Pluck::MUTED,
+                1.0,
+            );
         }
         beat += 1;
     }
@@ -369,7 +407,8 @@ pub fn boosted(signal: &[f32], sample_rate: f32) -> Vec<f32> {
     signal
         .iter()
         .map(|&sample| {
-            let shaped = filters.iter_mut().fold(sample as f64, |signal, filter| filter.process(signal));
+            let shaped =
+                filters.iter_mut().fold(sample as f64, |signal, filter| filter.process(signal));
             (4.0 * shaped).tanh() as f32
         })
         .collect()
@@ -391,14 +430,30 @@ pub fn guitar_di(sample_rate: f32) -> Vec<f32> {
     for beat in 0..12 {
         let how = if beat % 4 == 3 { Pluck::OPEN } else { Pluck::MUTED };
         for (string, &freq) in POWER_CHORD_HZ.iter().enumerate() {
-            add_note(&mut recording, sample_rate, time + string as f32 * 0.003, 0.19, freq, how, 0.8);
+            add_note(
+                &mut recording,
+                sample_rate,
+                time + string as f32 * 0.003,
+                0.19,
+                freq,
+                how,
+                0.8,
+            );
         }
         time += 0.2;
     }
 
     time += 0.2;
     for (string, &freq) in OPEN_CHORD_HZ.iter().enumerate() {
-        add_note(&mut recording, sample_rate, time + string as f32 * 0.018, 3.0, freq, Pluck::OPEN, 0.6);
+        add_note(
+            &mut recording,
+            sample_rate,
+            time + string as f32 * 0.018,
+            3.0,
+            freq,
+            Pluck::OPEN,
+            0.6,
+        );
     }
     time += 3.2;
 
@@ -479,7 +534,8 @@ mod tests {
         for (sample, stray) in signal.iter_mut().zip(sine(1730.0, 0.005, SAMPLE_RATE, 24_000)) {
             *sample += stray;
         }
-        let (_, residual_db) = fit_partials(&signal, SAMPLE_RATE, &harmonics_of(1000.0, SAMPLE_RATE));
+        let (_, residual_db) =
+            fit_partials(&signal, SAMPLE_RATE, &harmonics_of(1000.0, SAMPLE_RATE));
         assert!((residual_db + 40.0).abs() < 1.0, "Residual: {:.1} dB", residual_db);
     }
 
@@ -518,7 +574,11 @@ mod tests {
         assert!(peak(&chords) < 1.0, "Peak: {}", peak(&chords));
 
         let mutes = palm_mutes(SAMPLE_RATE, 2.4);
-        assert!((-24.0..=-17.9).contains(&to_db(rms(&mutes))), "Level: {:.1} dBFS", to_db(rms(&mutes)));
+        assert!(
+            (-24.0..=-17.9).contains(&to_db(rms(&mutes))),
+            "Level: {:.1} dBFS",
+            to_db(rms(&mutes))
+        );
         assert!(peak(&mutes) <= DI_PEAK * 1.001, "Peak: {}", peak(&mutes));
         // Low roots: more below 100 Hz than the open power chords have
         assert!(tight_levels_db(&mutes, SAMPLE_RATE)[0] > tight_levels_db(&chords, SAMPLE_RATE)[0]);
@@ -548,7 +608,8 @@ pub fn largest_step(samples: &[f32]) -> f32 {
 
 /// What a signal has in the octave around a frequency
 pub fn octave_band(signal: &[f32], sample_rate: f32, centre_hz: f32) -> Vec<f32> {
-    let (from_hz, to_hz) = (centre_hz / std::f32::consts::SQRT_2, centre_hz * std::f32::consts::SQRT_2);
+    let (from_hz, to_hz) =
+        (centre_hz / std::f32::consts::SQRT_2, centre_hz * std::f32::consts::SQRT_2);
     let mut filters = [Biquad::new(); 4];
     filters[0].set(BiquadCoeffs::highpass(from_hz, 0.541, sample_rate));
     filters[1].set(BiquadCoeffs::highpass(from_hz, 1.307, sample_rate));
@@ -556,7 +617,9 @@ pub fn octave_band(signal: &[f32], sample_rate: f32, centre_hz: f32) -> Vec<f32>
     filters[3].set(BiquadCoeffs::lowpass(to_hz, 1.307, sample_rate));
     signal
         .iter()
-        .map(|&sample| filters.iter_mut().fold(sample as f64, |signal, filter| filter.process(signal)) as f32)
+        .map(|&sample| {
+            filters.iter_mut().fold(sample as f64, |signal, filter| filter.process(signal)) as f32
+        })
         .collect()
 }
 
@@ -572,7 +635,9 @@ pub fn decay_time_s(response: &[f32], sample_rate: f32, from_db: f32, to_db: f32
     }
     let level_db = |index: usize| 10.0 * (remaining[index] / energy.max(1e-300)).max(1e-30).log10();
     let from = (0..response.len()).find(|&index| level_db(index) <= from_db as f64).unwrap_or(0);
-    let to = (from..response.len()).find(|&index| level_db(index) <= to_db as f64).unwrap_or(response.len() - 1);
+    let to = (from..response.len())
+        .find(|&index| level_db(index) <= to_db as f64)
+        .unwrap_or(response.len() - 1);
 
     // Least squares line through the curve, in dB per sample
     let count = (to - from + 1) as f64;
@@ -591,7 +656,8 @@ pub fn decay_time_s(response: &[f32], sample_rate: f32, from_db: f32, to_db: f32
 pub fn kurtosis(samples: &[f32]) -> f32 {
     let count = samples.len() as f64;
     let mean = samples.iter().map(|s| *s as f64).sum::<f64>() / count;
-    let moment = |power: i32| samples.iter().map(|s| (*s as f64 - mean).powi(power)).sum::<f64>() / count;
+    let moment =
+        |power: i32| samples.iter().map(|s| (*s as f64 - mean).powi(power)).sum::<f64>() / count;
     (moment(4) / (moment(2) * moment(2)).max(1e-300)) as f32
 }
 
@@ -610,7 +676,13 @@ pub fn stiff_partial_hz(freq_hz: f32, inharmonicity: f32, number: usize) -> f64 
 /// (`pluck` is a delay line: its partials are in tune only as far as its filters let them be.)
 /// The partials an octave apart from the pick position are missing, the upper ones are
 /// weaker and die sooner. Peaks at 0.5
-pub fn stiff_string(freq_hz: f32, inharmonicity: f32, how: Pluck, sample_rate: f32, len: usize) -> Vec<f32> {
+pub fn stiff_string(
+    freq_hz: f32,
+    inharmonicity: f32,
+    how: Pluck,
+    sample_rate: f32,
+    len: usize,
+) -> Vec<f32> {
     let mut recording = vec![0.0f64; len];
     let top = STIFF_STRING_TOP_HZ.min(sample_rate as f64 * 0.45);
     let mut number = 1;
@@ -667,7 +739,15 @@ pub fn clean_di(sample_rate: f32) -> Vec<f32> {
     for stroke in 0..8 {
         let level = if stroke % 4 == 3 { 1.0 } else { 0.45 };
         for (string, &freq) in OPEN_CHORD_HZ.iter().enumerate() {
-            add_note(&mut recording, sample_rate, time + string as f32 * 0.012, 0.48, freq, Pluck::OPEN, level);
+            add_note(
+                &mut recording,
+                sample_rate,
+                time + string as f32 * 0.012,
+                0.48,
+                freq,
+                Pluck::OPEN,
+                level,
+            );
         }
         time += 0.5;
     }
@@ -677,7 +757,15 @@ pub fn clean_di(sample_rate: f32) -> Vec<f32> {
     for round in 0..2 {
         for (step, &freq) in OPEN_CHORD_HZ.iter().enumerate() {
             let level = if round == 0 { 0.5 } else { 0.7 };
-            add_note(&mut recording, sample_rate, time + step as f32 * 0.25, 1.2, freq * 2.0, Pluck::OPEN, level);
+            add_note(
+                &mut recording,
+                sample_rate,
+                time + step as f32 * 0.25,
+                1.2,
+                freq * 2.0,
+                Pluck::OPEN,
+                level,
+            );
         }
         time += 1.5;
     }
@@ -856,6 +944,11 @@ mod loudness_tests {
         let crest = |recording: &[f32]| to_db(peak(recording) / rms(recording));
         let (clean, riffs) = (clean_di(48000.0), guitar_di(48000.0));
         assert!(peak(&clean) <= DI_PEAK + 1e-6);
-        assert!(crest(&clean) > crest(&riffs) + 2.0, "{:.1} against {:.1} dB", crest(&clean), crest(&riffs));
+        assert!(
+            crest(&clean) > crest(&riffs) + 2.0,
+            "{:.1} against {:.1} dB",
+            crest(&clean),
+            crest(&riffs)
+        );
     }
 }
