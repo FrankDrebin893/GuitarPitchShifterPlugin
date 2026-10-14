@@ -1,3 +1,5 @@
+pub mod dsp;
+pub mod measure;
 pub mod ui;
 
 /// Vendor string shared by every plugin in the suite. ASCII, because hosts show it in lists and paths

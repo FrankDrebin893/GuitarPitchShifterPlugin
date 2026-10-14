@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn test_sounds_and_decays_to_silence() {
-        let preset = KitPreset::new(Kit::Rock).toms;
+        let preset = KitPreset::new(Kit::Rock).unwrap().toms;
         let mut tom = Tom::new(1);
         assert_eq!(tom.process_sample(), 0.0);
 
@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn test_toms_are_ordered_low_to_high() {
-        let preset = KitPreset::new(Kit::Rock).toms;
+        let preset = KitPreset::new(Kit::Rock).unwrap().toms;
         let mut tom = Tom::new(1);
         let mut previous_freq = 0.0;
         let mut previous_decay = f32::MAX;

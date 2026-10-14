@@ -1,0 +1,274 @@
+desc:Claude Ethereal Pad (shimmer pad synth)
+//tags: instrument synthesizer pad ambient
+//author: Claude
+// Polyphonic ambient pad: three detuned PolyBLEP saws per voice plus a breathy noise layer,
+// slow-opening per-voice filters with gentle motion, a stereo chorus, and a large modulated
+// FDN reverb with an octave-up shimmer in its feedback path.
+
+in_pin:none
+out_pin:left
+out_pin:right
+
+slider1:-6<-40,12,0.1>Volume (dB)
+slider2:1.5<0.01,6,0.01>Attack (s)
+slider3:3.5<0.05,10,0.01>Release (s)
+slider4:1600<150,8000,1>Cutoff (Hz)
+slider5:9<0,30,0.1>Detune (cents)
+slider6:18<0,100,1>Breath (%)
+slider7:60<0,100,1>Chorus (%)
+slider8:45<0,100,1>Dry (%)
+slider9:60<0,100,1>Reverb (%)
+slider10:7<1,20,0.1>Reverb decay (s)
+slider11:30<0,60,1>Shimmer (%)
+slider12:35<0,100,1>Filter motion (%)
+
+@init
+function db2g(d) ( 10^(d/20) );
+function tanh_(x) local(e) ( x = max(-12, min(12, x)); e = exp(2*x); (e-1)/(e+1) );
+function blep(t, dt) (
+  t < dt ? ( t /= dt; t + t - t*t - 1 ) :
+  t > 1 - dt ? ( t = (t - 1)/dt; t*t + t + t + 1 ) : 0;
+);
+function svf_set(f, q) instance(g, k, a1, a2, a3) (
+  g = tan($pi * min(f, srate*0.45) / srate);
+  k = 1/q;
+  a1 = 1/(1 + g*(g + k));
+  a2 = g*a1;
+  a3 = g*a2;
+);
+function svf(v0) instance(ic1eq, ic2eq, a1, a2, a3, k, lp, bp, hp) local(v1, v2, v3) (
+  v3 = v0 - ic2eq;
+  v1 = a1*ic1eq + a2*v3;
+  v2 = ic2eq + a2*ic1eq + a3*v3;
+  ic1eq = 2*v1 - ic1eq;
+  ic2eq = 2*v2 - ic2eq;
+  lp = v2; bp = v1; hp = v0 - k*v1 - v2;
+  hp;
+);
+function ap_init(b, len, gg) instance(buf, size, pos, g) ( buf = b; size = len; pos = 0; g = gg; );
+function ap(x) instance(buf, size, pos, g) local(bo, y) (
+  bo = buf[pos];
+  y = bo - g*x;
+  buf[pos] = x + g*y;
+  pos += 1; pos >= size ? pos = 0;
+  y;
+);
+
+rs = srate/44100;
+NV = 12;
+// per-voice state arrays
+v_note = 1000; v_gate = 1020; v_env = 1040; v_p1 = 1060; v_p2 = 1080; v_p3 = 1100;
+v_f = 1120; v_lfo = 1140; v_vel = 1160;
+fL1 = 1200; fL2 = 1220; fR1 = 1240; fR2 = 1260;
+v_a1 = 1300; v_a2 = 1320; v_a3 = 1340;
+memset(1000, 0, 400);
+i = 0; loop(NV, v_note[i] = -1; i += 1;);
+
+// chorus buffers
+chL = 10000; chR = 15000; chw = 0;
+memset(chL, 0, 10000);
+cph1 = 0; cph2 = 0.37;
+
+// reverb: 4 input diffusers + 8-line modulated FDN
+fdn = 100000; FDNSZ = 32768; FDNMASK = 32767;
+memset(fdn, 0, 8*FDNSZ);
+fl = 400000; fg = 400010; dmp = 400020; yy = 400030;
+memset(400000, 0, 40);
+fl[0] = floor(2171*rs); fl[1] = floor(2539*rs); fl[2] = floor(2927*rs); fl[3] = floor(3331*rs);
+fl[4] = floor(3719*rs); fl[5] = floor(4177*rs); fl[6] = floor(4621*rs); fl[7] = floor(5059*rs);
+fw = 0; flfo = 0;
+md = 7*rs;
+dfb = 410000;
+memset(dfb, 0, 4*8192);
+d1.ap_init(dfb,         floor(142*rs), 0.7);
+d2.ap_init(dfb + 8192,  floor(379*rs), 0.7);
+d3.ap_init(dfb + 16384, floor(107*rs), 0.65);
+d4.ap_init(dfb + 24576, floor(277*rs), 0.65);
+damp_c = 1 - exp(-2*$pi*5200/srate);
+
+// shimmer: octave-up two-tap pitch shifter
+psb = 450000; PSSZ = 16384; PSMASK = 16383;
+memset(psb, 0, PSSZ);
+psw = 0; ps_d = 0;
+PSW = 2*floor(min(0.09*srate, 15000)/2);
+sh_hp.svf_set(450, 0.7);
+sh_lp.svf_set(6500, 0.7);
+shfb = 0;
+out_hpL.svf_set(35, 0.7);
+out_hpR.svf_set(35, 0.7);
+
+lfo_ph = 0;
+evq = 700000; nev = 0; evi = 0; spos = 0;
+
+function note_on(n, vel) local(i, best, bl) (
+  best = -1;
+  i = 0; loop(NV, (v_note[i] == n && (v_gate[i] || v_env[i] > 0.0001)) ? best = i; i += 1;);
+  best < 0 ? (
+    i = 0; loop(NV, (best < 0 && !v_gate[i] && v_env[i] < 0.0001) ? best = i; i += 1;);
+  );
+  best < 0 ? (
+    bl = 10; i = 0;
+    loop(NV, (!v_gate[i] && v_env[i] < bl) ? (bl = v_env[i]; best = i;); i += 1;);
+  );
+  best < 0 ? (
+    bl = 10; i = 0;
+    loop(NV, (v_env[i] < bl) ? (bl = v_env[i]; best = i;); i += 1;);
+  );
+  v_env[best] < 0.0001 ? (
+    v_p1[best] = rand(1); v_p2[best] = rand(1); v_p3[best] = rand(1);
+    fL1[best] = 0; fL2[best] = 0; fR1[best] = 0; fR2[best] = 0;
+    v_lfo[best] = rand(1);
+  );
+  v_note[best] = n; v_gate[best] = 1; v_vel[best] = 0.4 + 0.6*vel/127;
+  v_f[best] = 440*2^((n - 69)/12);
+);
+function note_off(n) local(i) (
+  i = 0; loop(NV, (v_note[i] == n && v_gate[i]) ? v_gate[i] = 0; i += 1;);
+);
+function all_off() local(i) (
+  i = 0; loop(NV, v_gate[i] = 0; i += 1;);
+);
+
+@slider
+g_vol = db2g(slider1);
+att_c = 1 - exp(-1/(max(slider2, 0.01)/3*srate));
+rel_c = exp(-1/(max(slider3, 0.05)/4.6*srate));
+cutoff = slider4;
+det_hi = 2^(slider5/1200);
+det_lo = 1/det_hi;
+breath = slider6/100;
+chorus = slider7/100;
+dry = slider8/100;
+wet = slider9/100;
+rt = slider10;
+shimmer = slider11/100;
+motion = slider12/100;
+i = 0; loop(8, fg[i] = 10^(-3*fl[i]/(rt*srate)); i += 1;);
+
+@block
+nev = 0; evi = 0; spos = 0;
+while (midirecv(ofs, m1, m2, m3)) (
+  st = m1 & 0xF0;
+  (st == 0x90 && m3 > 0) ? (
+    evq[nev*3] = ofs; evq[nev*3+1] = m2; evq[nev*3+2] = m3; nev += 1;
+  ) : (st == 0x80 || (st == 0x90 && m3 == 0)) ? (
+    evq[nev*3] = ofs; evq[nev*3+1] = m2; evq[nev*3+2] = 0; nev += 1;
+  ) : (st == 0xB0 && (m2 == 123 || m2 == 120)) ? (
+    evq[nev*3] = ofs; evq[nev*3+1] = -1; evq[nev*3+2] = 0; nev += 1;
+  );
+  midisend(ofs, m1, m2, m3);
+);
+
+// control-rate filter updates
+lfo_ph += 0.06*samplesblock/srate; lfo_ph -= floor(lfo_ph);
+glfo = sin(2*$pi*lfo_ph);
+i = 0;
+loop(NV,
+  (v_gate[i] || v_env[i] > 0.00001) ? (
+    v_lfo[i] += 0.13*(1 + 0.4*i/NV)*samplesblock/srate; v_lfo[i] -= floor(v_lfo[i]);
+    fc = cutoff * (v_f[i]/261.6)^0.3 * (0.65 + 0.35*v_vel[i]) * (0.45 + 0.55*v_env[i])
+         * (1 + motion*(0.4*glfo + 0.3*sin(2*$pi*v_lfo[i])));
+    fc = max(60, min(fc, srate*0.4));
+    g = tan($pi*fc/srate);
+    v_a1[i] = 1/(1 + g*(g + 1.25)); v_a2[i] = g*v_a1[i]; v_a3[i] = g*v_a2[i];
+  );
+  i += 1;
+);
+
+@sample
+while (evi < nev && evq[evi*3] <= spos) (
+  en = evq[evi*3+1]; ev = evq[evi*3+2];
+  ev > 0 ? note_on(en, ev) : ( en < 0 ? all_off() : note_off(en); );
+  evi += 1;
+);
+spos += 1;
+
+// ---- voices
+dL = 0; dR = 0;
+i = 0;
+loop(NV,
+  env = v_env[i];
+  (v_gate[i] || env > 0.00001) ? (
+    env = v_gate[i] ? env + (1 - env)*att_c : env*rel_c;
+    v_env[i] = env;
+    f = v_f[i]*(1 + 0.0012*sin(2*$pi*v_lfo[i]));
+    dt1 = f*det_lo/srate; dt2 = f/srate; dt3 = f*det_hi/srate;
+    p = v_p1[i] + dt1; p -= floor(p); v_p1[i] = p; s1 = 2*p - 1 - blep(p, dt1);
+    p = v_p2[i] + dt2; p -= floor(p); v_p2[i] = p; s2 = 2*p - 1 - blep(p, dt2);
+    p = v_p3[i] + dt3; p -= floor(p); v_p3[i] = p; s3 = 2*p - 1 - blep(p, dt3);
+    nz = (rand(2) - 1)*breath*1.5;
+    amp = env * v_vel[i];
+    xl = (s1*0.8 + s2*0.5 + s3*0.25 + nz) * amp;
+    xr = (s3*0.8 + s2*0.5 + s1*0.25 + nz) * amp;
+    a1 = v_a1[i]; a2 = v_a2[i]; a3 = v_a3[i];
+    v3 = xl - fL2[i]; v1 = a1*fL1[i] + a2*v3; v2 = fL2[i] + a2*fL1[i] + a3*v3;
+    fL1[i] = 2*v1 - fL1[i]; fL2[i] = 2*v2 - fL2[i]; dL += v2;
+    v3 = xr - fR2[i]; v1 = a1*fR1[i] + a2*v3; v2 = fR2[i] + a2*fR1[i] + a3*v3;
+    fR1[i] = 2*v1 - fR1[i]; fR2[i] = 2*v2 - fR2[i]; dR += v2;
+  );
+  i += 1;
+);
+dL *= 0.2; dR *= 0.2;
+
+// ---- stereo chorus
+chw = (chw + 1) & 4095;
+chL[chw] = dL; chR[chw] = dR;
+cph1 += 0.21/srate; cph1 -= floor(cph1);
+cph2 += 0.29/srate; cph2 -= floor(cph2);
+rd = chw - (0.011 + 0.0035*sin(2*$pi*cph1))*srate; rd < 0 ? rd += 4096;
+i0 = floor(rd); fr = rd - i0; i1 = (i0 + 1) & 4095;
+cwl = chL[i0]*(1 - fr) + chL[i1]*fr;
+rd = chw - (0.014 + 0.0035*sin(2*$pi*cph2))*srate; rd < 0 ? rd += 4096;
+i0 = floor(rd); fr = rd - i0; i1 = (i0 + 1) & 4095;
+cwr = chR[i0]*(1 - fr) + chR[i1]*fr;
+padL = dL*(1 - 0.4*chorus) + cwr*chorus*0.8;
+padR = dR*(1 - 0.4*chorus) + cwl*chorus*0.8;
+
+// ---- reverb input: pad + shimmer feedback, diffused
+rin = (padL + padR)*0.35 + shfb;
+rin = d4.ap(d3.ap(d2.ap(d1.ap(rin))));
+
+// ---- FDN
+fw = (fw + 1) & FDNMASK;
+flfo += 0.12/srate; flfo -= floor(flfo);
+i = 0;
+loop(8,
+  rp = fw - fl[i] - md*(1 + sin(2*$pi*(flfo + i*0.125)));
+  ip = floor(rp); fr = rp - ip;
+  ya = fdn[i*FDNSZ + ((ip + FDNSZ) & FDNMASK)];
+  yb = fdn[i*FDNSZ + ((ip + 1 + FDNSZ) & FDNMASK)];
+  y = ya + (yb - ya)*fr;
+  dmp[i] += (y - dmp[i])*damp_c;
+  yy[i] = dmp[i]*fg[i];
+  i += 1;
+);
+y0 = yy[0]; y1 = yy[1]; y2 = yy[2]; y3 = yy[3]; y4 = yy[4]; y5 = yy[5]; y6 = yy[6]; y7 = yy[7];
+revL = (y0 + y2 + y4 + y6)*0.5;
+revR = (y1 + y3 + y5 + y7)*0.5;
+// Hadamard mix
+a0 = y0 + y1; a1 = y0 - y1; a2 = y2 + y3; a3 = y2 - y3; a4 = y4 + y5; a5 = y4 - y5; a6 = y6 + y7; a7 = y6 - y7;
+b0 = a0 + a2; b1 = a1 + a3; b2 = a0 - a2; b3 = a1 - a3; b4 = a4 + a6; b5 = a5 + a7; b6 = a4 - a6; b7 = a5 - a7;
+fdn[0*FDNSZ + fw] = (b0 + b4)*0.353553 + rin;
+fdn[1*FDNSZ + fw] = (b1 + b5)*0.353553 - rin;
+fdn[2*FDNSZ + fw] = (b2 + b6)*0.353553 + rin;
+fdn[3*FDNSZ + fw] = (b3 + b7)*0.353553 - rin;
+fdn[4*FDNSZ + fw] = (b0 - b4)*0.353553 + rin;
+fdn[5*FDNSZ + fw] = (b1 - b5)*0.353553 - rin;
+fdn[6*FDNSZ + fw] = (b2 - b6)*0.353553 + rin;
+fdn[7*FDNSZ + fw] = (b3 - b7)*0.353553 - rin;
+
+// ---- shimmer (octave up) feeding back into the reverb
+psw = (psw + 1) & PSMASK;
+psb[psw] = (revL + revR)*0.5;
+ps_d -= 1; ps_d < 0 ? ps_d += PSW;
+pd2 = ps_d + PSW*0.5; pd2 >= PSW ? pd2 -= PSW;
+wa = sin($pi*ps_d/PSW); wb = sin($pi*pd2/PSW);
+shs = psb[(psw - ps_d + PSSZ) & PSMASK]*wa*wa + psb[(psw - pd2 + PSSZ) & PSMASK]*wb*wb;
+sh_lp.svf(sh_hp.svf(shs));
+shfb = tanh_(sh_lp.lp * shimmer * 0.6 * 2) * 0.5;
+
+// ---- output
+oL = padL*dry + revL*wet*0.9;
+oR = padR*dry + revR*wet*0.9;
+spl0 = out_hpL.svf(oL) * g_vol;
+spl1 = out_hpR.svf(oR) * g_vol;

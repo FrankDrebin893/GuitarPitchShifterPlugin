@@ -1,6 +1,8 @@
 use std::f32::consts::FRAC_PI_4;
 
 use crate::dsp::{bus_clip, semitones_to_ratio};
+use crate::engines::groove::GrooveKit;
+use crate::engines::metal::MetalKit;
 use crate::kit::{Kit, KitPreset};
 use crate::reverb::Room;
 use crate::voices::cymbal::Cymbal;
@@ -84,9 +86,11 @@ impl Bus {
 }
 
 /// The whole instrument: every voice, the General MIDI note map, the stereo mix and the room.
+/// Rock and Jazz are played by the modal voices here, Metal and Groove by their own engines.
 /// Nothing here allocates after `set_sample_rate`.
 pub struct DrumKit {
-    presets: [KitPreset; 3],
+    // None for the kits that have an engine of their own
+    presets: [Option<KitPreset>; 4],
     kit: Kit,
     tune_semitones: f32,
     tune_ratio: f32,
@@ -100,13 +104,19 @@ pub struct DrumKit {
     tom_pans: [(f32, f32); TOM_COUNT],
     cymbal_pans: [(f32, f32); CYMBAL_COUNT],
     room: Room,
+    // Of the modal kit that was played last: its voices may still ring under another kit
+    room_level: f32,
+    metal: MetalKit,
+    groove: GrooveKit,
 }
 
 impl DrumKit {
     pub fn new() -> Self {
         let presets = Kit::ALL.map(KitPreset::new);
+        let rock = presets[Kit::Rock as usize].as_ref().expect("Rock is a modal kit");
+        let room_level = rock.room_level;
         let mut room = Room::new();
-        room.set_decay(presets[Kit::Rock as usize].room_decay_s);
+        room.set_decay(rock.room_decay_s);
 
         // Every voice gets its own noise seed
         Self {
@@ -126,10 +136,13 @@ impl DrumKit {
             tom_pans: TOM_PANS.map(pan_gains),
             cymbal_pans: CYMBAL_PANS.map(pan_gains),
             room,
+            room_level,
+            metal: MetalKit::new(50),
+            groove: GrooveKit::new(51),
         }
     }
 
-    /// Allocates the room's delay lines. Not for the audio thread.
+    /// Allocates the rooms' delay lines. Not for the audio thread.
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.kick.set_sample_rate(sample_rate);
         self.snare.set_sample_rate(sample_rate);
@@ -140,6 +153,8 @@ impl DrumKit {
             cymbal.set_sample_rate(sample_rate);
         }
         self.room.set_sample_rate(sample_rate);
+        self.metal.set_sample_rate(sample_rate);
+        self.groove.set_sample_rate(sample_rate);
     }
 
     pub fn reset(&mut self) {
@@ -152,13 +167,18 @@ impl DrumKit {
             cymbal.reset();
         }
         self.room.reset();
+        self.metal.reset();
+        self.groove.reset();
     }
 
     /// Applies to the next hits. Voices that are ringing keep the sound they were hit with.
     pub fn set_kit(&mut self, kit: Kit) {
         if kit != self.kit {
             self.kit = kit;
-            self.room.set_decay(self.presets[kit as usize].room_decay_s);
+            if let Some(preset) = &self.presets[kit as usize] {
+                self.room.set_decay(preset.room_decay_s);
+                self.room_level = preset.room_level;
+            }
         }
     }
 
@@ -181,13 +201,17 @@ impl DrumKit {
             return;
         }
 
-        let preset = &self.presets[self.kit as usize];
-        let cymbals = &preset.cymbals;
         let hit = Hit {
             velocity: velocity.min(1.0),
             tune: self.tune_ratio,
             decay: self.decay_scale,
         };
+        let preset = match (self.kit, &self.presets[self.kit as usize]) {
+            (_, Some(preset)) => preset,
+            (Kit::Groove, None) => return self.groove.note_on(note, &hit),
+            (_, None) => return self.metal.note_on(note, &hit),
+        };
+        let cymbals = &preset.cymbals;
 
         match note {
             35 | 36 => self.kick.next_voice().trigger(&preset.kick, &hit),
@@ -231,19 +255,23 @@ impl DrumKit {
         }
 
         let (wet_left, wet_right) = self.room.process(bus.send_left, bus.send_right);
-        let room_gain = mix.room * self.presets[self.kit as usize].room_level;
+        let room_gain = mix.room * self.room_level;
+
+        // An engine that is not ringing costs nothing
+        let (metal_left, metal_right) = self.metal.process(mix);
+        let (groove_left, groove_right) = self.groove.process(mix);
 
         // Single hits pass untouched. Peaks of a busy pattern are rounded off instead of
         // clipping.
         (
-            bus_clip(bus.left + wet_left * room_gain),
-            bus_clip(bus.right + wet_right * room_gain),
+            bus_clip(bus.left + wet_left * room_gain + metal_left + groove_left),
+            bus_clip(bus.right + wet_right * room_gain + metal_right + groove_right),
         )
     }
 }
 
 /// 0 is the lowest tom. Only called with tom notes.
-fn tom_index(note: u8) -> usize {
+pub(crate) fn tom_index(note: u8) -> usize {
     match note {
         41 => 0,
         43 => 1,
@@ -344,8 +372,9 @@ mod tests {
     fn test_every_mapped_note_sounds_in_every_kit() {
         for kit in Kit::ALL {
             for note in ALL_NOTES {
+                // The quietest is Groove's pedal hi-hat, a soft chick
                 let output = render_note(kit, note, 1.0, 0.2);
-                assert!(peak(&output) > 0.05, "{:?} note {} peak: {}", kit, note, peak(&output));
+                assert!(peak(&output) > 0.02, "{:?} note {} peak: {}", kit, note, peak(&output));
             }
         }
     }
@@ -361,6 +390,66 @@ mod tests {
         let output = render_mono(&mut drums, 0.1);
 
         assert!(output.iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn test_groove_has_a_shaker_and_the_other_kits_do_not() {
+        for kit in Kit::ALL {
+            for note in [69, 70, 82] {
+                let sounds = peak(&render_note(kit, note, 1.0, 0.2)) > 0.01;
+                assert_eq!(sounds, kit == Kit::Groove, "{:?} note {}", kit, note);
+            }
+        }
+    }
+
+    #[test]
+    fn test_default_tune_and_damping_leave_the_engines_alone() {
+        // A hit is the same whether the two controls were never touched or set to nothing
+        for kit in [Kit::Metal, Kit::Groove] {
+            let plain = render_note(kit, SNARE, 0.9, 0.3);
+            let mut drums = dry_kit(kit, SAMPLE_RATE);
+            drums.set_tune(0.0);
+            drums.set_damping(0.0);
+            drums.note_on(SNARE, 0.9);
+            assert_eq!(plain, render_mono(&mut drums, 0.3), "{:?}", kit);
+        }
+    }
+
+    #[test]
+    fn test_engine_kits_follow_tune_damping_and_levels() {
+        for kit in [Kit::Metal, Kit::Groove] {
+            let tom = |semitones: f32, damping: f32, level: f32| {
+                let mut drums = dry_kit(kit, SAMPLE_RATE);
+                drums.set_tune(semitones);
+                drums.set_damping(damping);
+                drums.mix.toms = level;
+                drums.note_on(FLOOR_TOM, 1.0);
+                render_mono(&mut drums, 3.0)
+            };
+            let pitch = |output: &[f32]| zero_crossing_freq(seconds(output, 0.3, 0.6), SAMPLE_RATE);
+            let (plain, high, damped, quiet) = (tom(0.0, 0.0, 1.0), tom(6.0, 0.0, 1.0), tom(0.0, 1.0, 1.0), tom(0.0, 0.0, 0.5));
+
+            let ratio = pitch(&high) / pitch(&plain);
+            assert!((ratio / semitones_to_ratio(6.0) - 1.0).abs() < 0.05, "{:?} tune ratio {}", kit, ratio);
+            let decay = |output: &[f32]| decay_time_s(output, SAMPLE_RATE, -40.0);
+            assert!(decay(&damped) < decay(&plain) * 0.5, "{:?}: {} vs {}", kit, decay(&damped), decay(&plain));
+            assert!(peak(&quiet) < peak(&plain) * 0.7, "{:?}", kit);
+        }
+    }
+
+    #[test]
+    fn test_engines_ring_on_under_another_kit_and_then_rest() {
+        let mut drums = dry_kit(Kit::Metal, SAMPLE_RATE);
+        drums.note_on(CRASH, 1.0);
+        let before = render_mono(&mut drums, 0.1);
+
+        drums.set_kit(Kit::Rock);
+        let after = render_mono(&mut drums, 0.1);
+        let ratio = rms(&after) / rms(&before);
+        assert!((0.3..1.0).contains(&ratio), "Level ratio across kit change: {}", ratio);
+
+        render_mono(&mut drums, 12.0);
+        assert!(render_mono(&mut drums, 0.1).iter().all(|&sample| sample == 0.0));
     }
 
     #[test]
@@ -476,8 +565,12 @@ mod tests {
         // Metal snare and toms are tight, jazz ones ring
         assert!(decay(Kit::Metal, SNARE) < decay(Kit::Jazz, SNARE));
         assert!(decay(Kit::Metal, FLOOR_TOM) < decay(Kit::Jazz, FLOOR_TOM));
-        // Metal cymbals cut, jazz cymbals are dark
-        assert!(crash_brightness(Kit::Metal) > crash_brightness(Kit::Jazz) * 1.2);
+        // Jazz cymbals are dark, and Groove's darker still
+        assert!(crash_brightness(Kit::Rock) > crash_brightness(Kit::Jazz) * 1.1);
+        assert!(crash_brightness(Kit::Jazz) > crash_brightness(Kit::Groove) * 2.0);
+        // Groove is round and open where Metal is tight
+        assert!(decay(Kit::Metal, KICK) < decay(Kit::Groove, KICK) * 0.6);
+        assert!(decay(Kit::Metal, FLOOR_TOM) < decay(Kit::Groove, FLOOR_TOM));
     }
 
     #[test]
@@ -637,11 +730,18 @@ mod tests {
     ///   cargo test -p drums --release render_wavs -- --ignored
     ///
     /// Per kit: every piece at three velocities, and a short groove in the style.
+    ///
+    /// Set DRUMS_INPUT_MID to the path of a MIDI file to render that drum part as well,
+    /// through every kit (drums_<kit>_input.wav).
     #[test]
     #[ignore]
     fn render_wavs() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/renders");
         std::fs::create_dir_all(&dir).unwrap();
+        let part = std::env::var("DRUMS_INPUT_MID").ok().map(|path| {
+            let bytes = std::fs::read(&path).expect("Could not open DRUMS_INPUT_MID");
+            midi_pattern(&bytes).unwrap_or_else(|problem| panic!("DRUMS_INPUT_MID: {problem}"))
+        });
 
         for kit in Kit::ALL {
             let name = format!("{:?}", kit).to_lowercase();
@@ -656,12 +756,134 @@ mod tests {
 
             let (groove, bpm) = groove(kit);
             write_wav(&dir.join(format!("drums_{}_groove.wav", name)), &render_pattern(kit, &groove, bpm));
+
+            if let Some((part, bpm)) = &part {
+                write_wav(&dir.join(format!("drums_{}_input.wav", name)), &render_pattern(kit, part, *bpm));
+            }
         }
         println!("Wrote renders to {}", dir.display());
     }
 
     /// A pattern is a list of (beat, note, velocity)
     type Pattern = Vec<(f32, u8, f32)>;
+
+    /// The drum part of a MIDI file as a pattern and its tempo: the note-ons of every track
+    /// and channel. A pattern has one tempo, so a file whose tempo changes is refused; one
+    /// that names no tempo is at 120, as the format says.
+    fn midi_pattern(bytes: &[u8]) -> Result<(Pattern, f32), String> {
+        use midly::{MetaMessage, MidiMessage, Timing, TrackEventKind};
+
+        let file = midly::Smf::parse(bytes).map_err(|error| format!("not a MIDI file ({error})"))?;
+        let ticks_per_beat = match file.header.timing {
+            Timing::Metrical(ticks) => ticks.as_int() as f64,
+            Timing::Timecode(..) => return Err("timed in frames, not in beats".to_string()),
+        };
+
+        let mut pattern = Pattern::new();
+        let mut beat_us: Option<u32> = None;
+        for track in &file.tracks {
+            let mut tick = 0u64;
+            for event in track {
+                tick += event.delta.as_int() as u64;
+                match event.kind {
+                    TrackEventKind::Midi {
+                        message: MidiMessage::NoteOn { key, vel },
+                        ..
+                    } if vel.as_int() > 0 => {
+                        let beat = (tick as f64 / ticks_per_beat) as f32;
+                        pattern.push((beat, key.as_int(), vel.as_int() as f32 / 127.0));
+                    }
+                    TrackEventKind::Meta(MetaMessage::Tempo(tempo)) => {
+                        if beat_us.is_some_and(|first| first != tempo.as_int()) {
+                            return Err("the tempo changes: a part is rendered at one tempo".to_string());
+                        }
+                        beat_us = Some(tempo.as_int());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if pattern.is_empty() {
+            return Err("no notes".to_string());
+        }
+        Ok((pattern, 60e6 / beat_us.unwrap_or(500_000) as f32))
+    }
+
+    /// A MIDI file of one track, 480 ticks to the beat, from (ticks since the event before, event)
+    fn midi_file(events: &[(u32, midly::TrackEventKind<'static>)]) -> Vec<u8> {
+        let header = midly::Header::new(midly::Format::SingleTrack, midly::Timing::Metrical(480.into()));
+        let mut file = midly::Smf::new(header);
+        let mut track: Vec<midly::TrackEvent> = events
+            .iter()
+            .map(|&(delta, kind)| midly::TrackEvent {
+                delta: delta.into(),
+                kind,
+            })
+            .collect();
+        track.push(midly::TrackEvent {
+            delta: 0.into(),
+            kind: midly::TrackEventKind::Meta(midly::MetaMessage::EndOfTrack),
+        });
+        file.tracks.push(track);
+        let mut bytes = Vec::new();
+        file.write_std(&mut bytes).unwrap();
+        bytes
+    }
+
+    fn midi_tempo(bpm: f32) -> midly::TrackEventKind<'static> {
+        midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(((60e6 / bpm) as u32).into()))
+    }
+
+    fn midi_note(on: bool, note: u8, velocity: u8) -> midly::TrackEventKind<'static> {
+        let (key, vel) = (note.into(), velocity.into());
+        let message = if on {
+            midly::MidiMessage::NoteOn { key, vel }
+        } else {
+            midly::MidiMessage::NoteOff { key, vel }
+        };
+        midly::TrackEventKind::Midi {
+            channel: 9.into(),
+            message,
+        }
+    }
+
+    #[test]
+    fn test_midi_part_keeps_beats_notes_velocities_and_tempo() {
+        let bytes = midi_file(&[
+            (0, midi_tempo(100.0)),
+            (0, midi_note(true, 36, 127)),
+            (0, midi_note(true, 42, 64)),
+            (240, midi_note(false, 36, 0)),
+            // A note-on of velocity 0 is a note-off
+            (0, midi_note(true, 42, 0)),
+            (240, midi_note(true, 38, 100)),
+            (720, midi_note(true, 36, 1)),
+        ]);
+        let (pattern, bpm) = midi_pattern(&bytes).unwrap();
+        assert_eq!(bpm, 100.0);
+        assert_eq!(
+            pattern,
+            vec![(0.0, 36, 1.0), (0.0, 42, 64.0 / 127.0), (1.0, 38, 100.0 / 127.0), (2.5, 36, 1.0 / 127.0)]
+        );
+    }
+
+    #[test]
+    fn test_midi_part_without_tempo_is_at_120() {
+        let (_, bpm) = midi_pattern(&midi_file(&[(0, midi_note(true, 36, 100))])).unwrap();
+        assert_eq!(bpm, 120.0);
+    }
+
+    #[test]
+    fn test_midi_part_that_cannot_be_a_pattern_is_refused() {
+        let changing = midi_file(&[(0, midi_tempo(100.0)), (0, midi_note(true, 36, 100)), (480, midi_tempo(140.0))]);
+        assert!(midi_pattern(&changing).unwrap_err().contains("tempo"));
+        // The same tempo written again is no change
+        let repeated = midi_file(&[(0, midi_tempo(100.0)), (0, midi_note(true, 36, 100)), (480, midi_tempo(100.0))]);
+        assert!(midi_pattern(&repeated).is_ok());
+
+        assert!(midi_pattern(&midi_file(&[(0, midi_tempo(100.0))])).is_err());
+        assert!(midi_pattern(b"RIFF").is_err());
+    }
 
     /// Four bars in the style of the kit, and the tempo
     fn groove(kit: Kit) -> (Pattern, f32) {
@@ -730,6 +952,30 @@ mod tests {
                 }
                 pattern.extend([(16.0, 36, 1.0), (16.0, 49, 1.0), (16.0, 57, 1.0)]);
                 (pattern, 180.0)
+            }
+            Kit::Groove => {
+                for bar in 0..4 {
+                    let start = bar as f32 * 4.0;
+                    // Sixteenth hi-hats, loud on the beat and soft between, a shaker on the offbeats
+                    for sixteenth in 0..16 {
+                        let velocity = [0.75, 0.3, 0.5, 0.3][sixteenth % 4];
+                        let open = bar % 2 == 1 && sixteenth == 14;
+                        pattern.push((start + sixteenth as f32 * 0.25, if open { 46 } else { 42 }, velocity));
+                    }
+                    for beat in 0..4 {
+                        pattern.push((start + beat as f32 + 0.5, 70, 0.6));
+                    }
+                    // A laid back kick, the snare on two and four with ghost notes around it
+                    pattern.extend([(start, 36, 0.9), (start + 1.75, 36, 0.6), (start + 2.5, 36, 0.8)]);
+                    pattern.extend([(start + 1.0, 38, 0.85), (start + 3.0, 38, 0.9)]);
+                    pattern.extend([(start + 1.5, 38, 0.2), (start + 2.25, 38, 0.25), (start + 3.75, 38, 0.2)]);
+                    if bar == 2 {
+                        pattern.push((start + 3.5, 37, 0.7));
+                    }
+                }
+                pattern.extend([(15.5, 47, 0.6), (15.75, 43, 0.65)]);
+                pattern.extend([(16.0, 36, 0.9), (16.0, 49, 0.8), (17.0, 53, 0.6), (18.0, 51, 0.6)]);
+                (pattern, 88.0)
             }
         }
     }

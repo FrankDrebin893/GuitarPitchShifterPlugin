@@ -65,6 +65,12 @@ pub enum Ornament {
     Rings,
     /// Lightning bolts, mirrored
     Bolts,
+    /// The four strings of a bass, thick to thin
+    Strings,
+    /// Three slow waves
+    Waves,
+    /// A large and a small four-pointed glint, mirrored
+    Glints,
 }
 
 /// What makes one plugin's pedal differ from the next
@@ -370,7 +376,65 @@ fn name_band(painter: &Painter, enclosure: Rect, center_y: f32, angle_deg: f32, 
             bolt(painter, left, 1.0);
             bolt(painter, right, -1.0);
         }
+        Ornament::Strings => {
+            strings(painter, left);
+            strings(painter, right);
+        }
+        Ornament::Waves => {
+            waves(painter, left);
+            waves(painter, right);
+        }
+        Ornament::Glints => {
+            glints(painter, left, 1.0);
+            glints(painter, right, -1.0);
+        }
     }
+}
+
+/// Four strings, the thickest at the top
+fn strings(painter: &Painter, center: Pos2) {
+    for (row, width) in [(-10.5, 4.0), (-3.5, 3.2), (3.5, 2.4), (10.5, 1.6)] {
+        let at = center + vec2(0.0, row);
+        painter.line_segment([at - vec2(13.0, 0.0), at + vec2(13.0, 0.0)], Stroke::new(width, INK));
+    }
+}
+
+/// Three waves of one and a half turns each
+fn waves(painter: &Painter, center: Pos2) {
+    for row in [-9.0, 0.0, 9.0] {
+        let points = (0..=24)
+            .map(|step| {
+                let along = step as f32 / 24.0;
+                center + vec2((along - 0.5) * 28.0, row - (along * 3.0 * std::f32::consts::PI).sin() * 3.2)
+            })
+            .collect();
+        painter.add(Shape::line(points, Stroke::new(2.8, INK)));
+    }
+}
+
+/// A four-pointed star with hollow sides
+fn glint(painter: &Painter, center: Pos2, radius: f32) {
+    let waist = radius * 0.22;
+    // Four kites around the centre: each is convex, the star as a whole is not
+    for quarter in 0..4 {
+        let turn = |x: f32, y: f32| match quarter {
+            0 => center + vec2(x, y),
+            1 => center + vec2(-y, x),
+            2 => center + vec2(-x, -y),
+            _ => center + vec2(y, -x),
+        };
+        painter.add(Shape::convex_polygon(
+            vec![turn(0.0, 0.0), turn(waist, -waist), turn(radius, 0.0), turn(waist, waist)],
+            INK,
+            Stroke::NONE,
+        ));
+    }
+}
+
+/// `lean` is 1 with the small glint to the upper right, -1 mirrored
+fn glints(painter: &Painter, center: Pos2, lean: f32) {
+    glint(painter, center + vec2(-3.0 * lean, 3.0), 13.0);
+    glint(painter, center + vec2(9.0 * lean, -10.0), 6.0);
 }
 
 /// Three stacked chevrons. `direction` is -1 for up, 1 for down

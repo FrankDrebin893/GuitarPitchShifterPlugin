@@ -1,0 +1,2 @@
+# Shell scripts keep their line ends: bash does not run them otherwise
+*.sh text eol=lf

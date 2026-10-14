@@ -52,6 +52,7 @@ impl Noise {
 }
 
 pub struct SvfOutput {
+    pub low: f32,
     pub band: f32,
     pub high: f32,
 }
@@ -99,6 +100,7 @@ impl Svf {
         self.ic2 = 2.0 * v2 - self.ic2;
 
         SvfOutput {
+            low: v2,
             band: v1,
             high: input - self.k * v1 - v2,
         }

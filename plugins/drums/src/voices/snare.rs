@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn test_sounds_and_decays_to_silence() {
-        let preset = KitPreset::new(Kit::Rock).snare;
+        let preset = KitPreset::new(Kit::Rock).unwrap().snare;
         let mut snare = Snare::new(1);
         assert_eq!(snare.process_sample(), 0.0);
 
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_harder_hits_are_brighter() {
-        let preset = KitPreset::new(Kit::Rock).snare;
+        let preset = KitPreset::new(Kit::Rock).unwrap().snare;
         let mut snare = Snare::new(1);
 
         snare.trigger(&preset, &hit(0.3));
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn test_side_stick_is_short() {
-        let preset = KitPreset::new(Kit::Rock).snare;
+        let preset = KitPreset::new(Kit::Rock).unwrap().snare;
         let mut snare = Snare::new(1);
 
         snare.trigger(&preset, &hit(1.0));
