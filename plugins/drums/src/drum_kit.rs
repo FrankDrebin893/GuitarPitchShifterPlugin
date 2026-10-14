@@ -293,7 +293,7 @@ mod tests {
     use super::*;
     use crate::dsp::BUS_CLIP_KNEE;
     use crate::test_util::{
-        band_rms, brightness, decay_time_s, peak, rms, spectrum_fill, zero_crossing_freq,
+        band_rms, brightness, decay_time_s, peak, rms, spectrum_fill, spectrum_fill_by, zero_crossing_freq,
     };
 
     const SAMPLE_RATE: f32 = 44100.0;
@@ -664,13 +664,14 @@ mod tests {
         // rms and brightness are of the first 200 ms, crack is the level of the first 50 ms,
         // >4k the level above 4 kHz in the first 200 ms. For cymbals: low tail is the share
         // of the energy under 1 kHz from half a second on, fill how evenly 4 to 12 kHz is
-        // filled (1 is noise, 0 a few sines)
+        // filled (1 is noise, 0 a few sines), fine the same in 15 Hz steps from 5 to 7 kHz, which
+        // tells noise from a bank of resonators
         for velocity in [0.6, 1.0] {
             for kit in Kit::ALL {
                 println!("\n{:?}, velocity {}", kit, velocity);
                 println!(
-                    "{:<16}{:>8}{:>8}{:>8}{:>8}{:>11}{:>12}{:>10}{:>7}",
-                    "piece", "peak", "rms", "crack", ">4k", "decay (s)", "brightness", "low tail", "fill"
+                    "{:<16}{:>8}{:>8}{:>8}{:>8}{:>11}{:>12}{:>10}{:>7}{:>7}",
+                    "piece", "peak", "rms", "crack", ">4k", "decay (s)", "brightness", "low tail", "fill", "fine"
                 );
                 for (index, (name, note)) in PIECES.into_iter().enumerate() {
                     let output = render_note(kit, note, velocity, 12.0);
@@ -689,7 +690,8 @@ mod tests {
                         let tail = seconds(&output, 0.5, 1.5);
                         let low = band_rms(tail, SAMPLE_RATE, 20.0, 1000.0) / rms(tail).max(1e-9);
                         let fill = spectrum_fill(seconds(&output, 0.1, 0.3), SAMPLE_RATE, 4000.0, 12000.0);
-                        print!("{:>10.3}{:>7.2}", low * low, fill);
+                        let fine = spectrum_fill_by(seconds(&output, 0.1, 0.4), SAMPLE_RATE, 5000.0, 7000.0, 15.0);
+                        print!("{:>10.3}{:>7.2}{:>7.2}", low * low, fill, fine);
                     }
                     println!();
                 }

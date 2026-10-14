@@ -243,12 +243,16 @@ How the modal voices (Rock, Jazz) work:
    snare wires and the stick. The snare's head and wires go through one saturation (`SnarePreset.drive`)
    in front of the hit's level, so a soft hit is as dense as a hard one. The side stick is the snare
    voice with short, high modes and no wires
-3. Cymbals: a bank of up to 256 two-pole resonators at fixed inharmonic frequencies, spread evenly
-   from `low_hz` to `high_hz`, plus a band-limited noise wash for the air on top. It takes a mode
-   every 100 Hz or closer for the top to be a sizzle: fewer are heard as separate tones that swirl.
-   Modes under `body_hz` are turned down, or the tail is a low hum. A hit adds a sine of random phase
-   to each resonator, so repeated hits build up instead of restarting. One `Cymbal` serves closed,
-   pedal and open hi-hat: the closed presets have a short decay, which is what chokes the open sound
+3. Cymbals: a bank of up to 256 two-pole resonators at inharmonic frequencies, spread evenly
+   from `low_hz` to `high_hz`, plus a wash of noise through six bands that decay separately
+   (higher ones faster). The modes are the body and pitch and stop at a few kHz: a mode rings
+   for a second at a bandwidth of a hertz, so it never fuses with its neighbours however
+   close, and a comb of them up high is heard as a bell that beats (chorus). The sizzle above
+   them is the wash. Modes under `body_hz` are turned down, or the tail is a low hum. A hit
+   adds a sine of random phase to each resonator and places each mode anew in its slot, so
+   repeated hits build up instead of restarting and never ring the same tones. One `Cymbal`
+   serves closed, pedal and open hi-hat: the closed presets have a short decay, which is
+   what chokes the open sound
 4. Velocity changes the sound, not only the level: pitch bend depth, overtone level, noise brightness
 5. Every hit varies slightly in pitch and overtone levels (each voice has its own noise generator)
 6. Drums have two voices each (`VoicePair`): a new hit takes the idle one and the previous fades in 3 ms
