@@ -1,0 +1,114 @@
+name: Sound
+
+# Runs the sound reports on the pull request and on where it branched from main, and says
+# on the pull request what changed. Renders of the plugins it touches come as an artifact.
+on:
+  pull_request:
+    paths:
+      - 'plugins/**'
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+
+concurrency:
+  group: sound-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  sound:
+    name: Sound before and after
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Linux packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libgl-dev libjack-dev libx11-xcb-dev libxcb1-dev libxcb-dri2-0-dev libxcb-icccm4-dev libxcursor-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Where it branched, and which plugins it touches
+        id: scope
+        run: |
+          base=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          changed=$(git diff --name-only "$base" HEAD)
+          if echo "$changed" | grep -qE '^(crates/|Cargo\.)'; then
+            plugins="amp drums bass pad bells pitch_shifter"
+          else
+            plugins=$(echo "$changed" | sed -n 's#^plugins/\([^/]*\)/.*#\1#p' | sort -u | tr '\n' ' ')
+          fi
+          echo "plugins=$plugins" >> "$GITHUB_OUTPUT"
+          git worktree add ../base "$base"
+
+      - name: Reports and renders after
+        run: scripts/sound-reports.sh "$RUNNER_TEMP/after" --renders ${{ steps.scope.outputs.plugins }}
+
+      - name: Reports and renders before
+        working-directory: ../base
+        # The build reuses what the run after compiled; renders still land in ../base/target
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: bash "$GITHUB_WORKSPACE/scripts/sound-reports.sh" "$RUNNER_TEMP/before" --renders ${{ steps.scope.outputs.plugins }}
+
+      - name: Compare
+        run: |
+          {
+            echo "<!-- sound-report -->"
+            echo "### Sound"
+            if diff -r "$RUNNER_TEMP/before" "$RUNNER_TEMP/after" > /dev/null; then
+              echo "Every report is the same as on \`main\` at ${{ steps.scope.outputs.base }}: the sound did not change."
+            else
+              echo "Reports that changed against \`main\` at ${{ steps.scope.outputs.base }}. Timings are left out."
+              for after in "$RUNNER_TEMP"/after/*.txt; do
+                name=$(basename "$after" .txt)
+                if ! diff -q "$RUNNER_TEMP/before/$name.txt" "$after" > /dev/null; then
+                  echo
+                  echo "<details><summary><code>$name</code></summary>"
+                  echo
+                  echo '```diff'
+                  diff -u "$RUNNER_TEMP/before/$name.txt" "$after" | tail -n +3 | head -c 20000
+                  echo '```'
+                  echo "</details>"
+                fi
+              done
+            fi
+            echo
+            echo "Renders of ${{ steps.scope.outputs.plugins }} before and after: the \`renders\` artifact of this run."
+          } > "$RUNNER_TEMP/comment.md"
+          mkdir -p "$RUNNER_TEMP/renders"
+          cp -r target/renders "$RUNNER_TEMP/renders/after" 2>/dev/null || true
+          cp -r ../base/target/renders "$RUNNER_TEMP/renders/before" 2>/dev/null || true
+          cat "$RUNNER_TEMP/comment.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: renders
+          path: ${{ runner.temp }}/renders
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Comment on the pull request
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          id=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
+            --jq '[.[] | select(.body | startswith("<!-- sound-report -->"))] | last | .id // empty')
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$id" -F body=@"$RUNNER_TEMP/comment.md" > /dev/null
+          else
+            gh pr comment "$PR" --body-file "$RUNNER_TEMP/comment.md"
+          fi
