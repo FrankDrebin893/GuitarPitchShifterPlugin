@@ -1,4 +1,6 @@
-use super::{advance, coef, db, hat_time, sine, BusDrive, CombRoom, MetalCluster, Rest, ENV_FLOOR};
+use super::{
+    advance, choked, coef, db, hat_time, sine, BusDrive, CombRoom, MetalCluster, Rest, ENV_FLOOR,
+};
 use crate::drum_kit::{tom_index, Mix};
 use crate::dsp::{Noise, Svf};
 use crate::voices::tom::TOM_COUNT;
@@ -303,6 +305,23 @@ impl MetalKit {
     pub fn choke_hat(&mut self, decay: f32) {
         if self.hat_env > ENV_FLOOR {
             self.hat_decay = self.hat_decay.min(coef(HAT_CLOSED_S * decay, self.sample_rate));
+        }
+    }
+
+    /// A hand on a cymbal that rings: its envelopes fall at once. `decay` is Damping's
+    pub fn choke_cymbal(&mut self, note: u8, decay: f32) {
+        let rate = self.sample_rate;
+        match note {
+            51 | 53 | 59 => {
+                self.ride.decay = choked(self.ride.decay, decay, rate);
+                self.ride.ping_decay = choked(self.ride.ping_decay, decay, rate);
+                self.ride.bell_decay = choked(self.ride.bell_decay, decay, rate);
+            }
+            49 => self.crashes[0].decay = choked(self.crashes[0].decay, decay, rate),
+            57 => self.crashes[1].decay = choked(self.crashes[1].decay, decay, rate),
+            55 => self.splash.decay = choked(self.splash.decay, decay, rate),
+            52 => self.china.decay = choked(self.china.decay, decay, rate),
+            _ => {}
         }
     }
 

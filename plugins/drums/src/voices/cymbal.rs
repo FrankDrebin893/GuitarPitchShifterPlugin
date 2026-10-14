@@ -60,6 +60,16 @@ pub struct CymbalPreset {
 }
 
 impl CymbalPreset {
+    /// The same cymbal with every decay no longer than `ms`: a hand on it
+    pub fn damped(&self, ms: f32) -> Self {
+        Self {
+            decay_low_ms: self.decay_low_ms.min(ms),
+            decay_high_ms: self.decay_high_ms.min(ms),
+            wash_decay_ms: self.wash_decay_ms.min(ms),
+            ..*self
+        }
+    }
+
     /// A cymbal between `self` (at 0.0) and `other` (at 1.0), which must have the same modes
     /// and range, as the three sounds of a hi-hat do: times on a log scale, levels straight.
     /// The ends are `self` and `other` exactly

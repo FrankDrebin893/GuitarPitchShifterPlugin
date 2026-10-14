@@ -24,11 +24,14 @@ const STYLE: PedalStyle = PedalStyle {
 
 // One footswitch per kit, with its horizontal position
 const KIT_SWITCHES: [(Kit, &str, f32); 4] = [
-    (Kit::Rock, "Rock", 125.0),
-    (Kit::Jazz, "Jazz", 250.0),
-    (Kit::Metal, "Metal", 375.0),
-    (Kit::Groove, "Groove", 500.0),
+    (Kit::Rock, "Rock", 115.0),
+    (Kit::Jazz, "Jazz", 215.0),
+    (Kit::Metal, "Metal", 315.0),
+    (Kit::Groove, "Groove", 415.0),
 ];
+
+// The Choke switch, apart from the kit switches and clear of the logo badge bottom right
+const CHOKE_SWITCH_X: f32 = 535.0;
 
 pub fn default_state() -> Arc<EguiState> {
     EguiState::from_size(WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -144,6 +147,15 @@ pub fn create(
                     }
                     silk_label(ui.painter(), origin + vec2(x, 558.0), label, 17.0);
                 }
+
+                // Choke: a note-off on a cymbal damps it
+                led(ui.painter(), origin + vec2(CHOKE_SWITCH_X, 452.0), params.choke.value());
+                if footswitch(ui, origin + vec2(CHOKE_SWITCH_X, 506.0), "Choke").clicked() {
+                    setter.begin_set_parameter(&params.choke);
+                    setter.set_parameter(&params.choke, !params.choke.value());
+                    setter.end_set_parameter(&params.choke);
+                }
+                silk_label(ui.painter(), origin + vec2(CHOKE_SWITCH_X, 558.0), "Choke", 17.0);
             });
         },
     )

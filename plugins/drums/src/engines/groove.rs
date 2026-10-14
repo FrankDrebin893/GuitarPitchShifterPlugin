@@ -1,4 +1,6 @@
-use super::{advance, coef, db, hat_time, sine, BusDrive, CombRoom, MetalCluster, Rest, ENV_FLOOR};
+use super::{
+    advance, choked, coef, db, hat_time, sine, BusDrive, CombRoom, MetalCluster, Rest, ENV_FLOOR,
+};
 use crate::drum_kit::{tom_index, Mix};
 use crate::dsp::{Noise, Svf};
 use crate::voices::tom::TOM_COUNT;
@@ -305,6 +307,21 @@ impl GrooveKit {
         if self.hat.env > ENV_FLOOR {
             let closed = coef(hat_closed_s(self.hat.level) * decay, self.sample_rate);
             self.hat.decay = self.hat.decay.min(closed);
+        }
+    }
+
+    /// A hand on a cymbal that rings: its envelopes fall at once. `decay` is Damping's.
+    /// Every crash note is the one crash, and the splash is that crash cut short
+    pub fn choke_cymbal(&mut self, note: u8, decay: f32) {
+        let rate = self.sample_rate;
+        match note {
+            51 | 53 | 59 => {
+                self.ride.decay = choked(self.ride.decay, decay, rate);
+                self.ride.ping_decay = choked(self.ride.ping_decay, decay, rate);
+                self.ride.bell_decay = choked(self.ride.bell_decay, decay, rate);
+            }
+            49 | 52 | 55 | 57 => self.crash.decay = choked(self.crash.decay, decay, rate),
+            _ => {}
         }
     }
 
