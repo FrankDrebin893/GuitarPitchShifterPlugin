@@ -50,7 +50,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libgl-dev libjack-dev libx11-xcb-dev libxcb1-dev libxcb-dri2-0-dev libxcb-icccm4-dev libxcursor-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned, so a new Rust release with new lints does not fail every pull request.
+      # Moving it on is a change of its own, with the lints it brings fixed
+      - uses: dtolnay/rust-toolchain@1.93.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2

@@ -696,7 +696,7 @@ out; the HØJT name and logo are kept out of it (`NOTICE.md`).
 ## Testing
 
 **Always run `cargo test --workspace` before committing changes.** CI also runs
-`cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings`; run them too.
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings` on Rust 1.93.0 (pinned in `ci.yml`); run them too.
 Lints that clash with DSP code are allowed in the root `Cargo.toml`, each with its reason.
 
 Pitch shifter tests are in `plugins/pitch_shifter/src/pitch_shifter.rs` and cover:
