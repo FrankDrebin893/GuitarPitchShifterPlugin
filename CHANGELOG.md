@@ -30,6 +30,12 @@ Three new instruments, each a pedal of its own:
 - The snare has its crack: louder and brighter wires, a fuller stick attack, and as loud in the
   kit as the kick and the toms
 
+### Guitar Amp
+
+- The tuner no longer shows mains hum as a note. A note is shown from a pluck on, and let go
+  when what rang does not fade like a string; a string that already rings when the tuner is
+  switched on is read from its next pluck
+
 ### Guitar Amp, Shimmer Pad, Glass Bells
 
 - VST3 hosts that stop processing a silent plugin no longer cut the delay and reverb tails:

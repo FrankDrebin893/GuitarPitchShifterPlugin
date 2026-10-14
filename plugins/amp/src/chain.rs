@@ -3816,6 +3816,13 @@ mod tests {
         note
     }
 
+    /// The low E after a moment of silence: the tuner shows a note from its pluck on
+    fn plucked_low_e(silence_s: f32, seconds: f32) -> Vec<f32> {
+        let mut signal = vec![0.0; (silence_s * SAMPLE_RATE) as usize];
+        signal.extend(quiet_low_e(seconds));
+        signal
+    }
+
     fn cents_off(hz: f32, expected_hz: f32) -> f32 {
         1200.0 * (hz / expected_hz).log2()
     }
@@ -3883,7 +3890,7 @@ mod tests {
 
     #[test]
     fn test_tuner_hears_the_input_whatever_the_amp_does() {
-        let note = quiet_low_e(0.5);
+        let note = plucked_low_e(0.1, 0.5);
         let expected = tuner_note_hz(40);
         let far_down = AmpSettings {
             in_gain_db: -24.0,
@@ -3932,7 +3939,7 @@ mod tests {
         let mut chain = new_chain(SAMPLE_RATE);
         let reading = chain.tuner_reading();
         let settings = tuning(AmpSettings::default());
-        run_blocks(&mut chain, &settings, &quiet_low_e(0.5), BLOCK);
+        run_blocks(&mut chain, &settings, &plucked_low_e(0.1, 0.5), BLOCK);
         assert!(reading.hz().is_some());
         chain.reset();
         assert_eq!(reading.hz(), None);
@@ -3946,7 +3953,8 @@ mod tests {
     fn test_tuning_does_not_depend_on_block_size() {
         // The switch is read with the dials, and the tuner counts its work in samples: the
         // same output and the same readings however the host cuts the stream
-        let input = quiet_low_e(0.6);
+        // The string is plucked once the tuner has been on for a moment
+        let input = plucked_low_e(0.2, 0.4);
         let playing = with_default_effects(with_amp(Amp::Klar, 0.5));
         let (on, off) = (4800, 24_000);
         let run = |block: usize| {

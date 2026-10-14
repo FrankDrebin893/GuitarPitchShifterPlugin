@@ -107,6 +107,25 @@ const SHOWN: usize = 3;
 const NOTE_CHANGE_CENTS: f32 = 70.0;
 const MISSES_TO_CLEAR: u32 = 3;
 
+// A note is only shown this soon after a pluck: the level of a frame rose this much above
+// the quietest of the frames before it. Hum and hiss are as steady as a held note and never
+// rise like that. A string plucked while another rings rises less, so changing the note
+// shown, or plucking the same string again, takes a smaller rise. The frames before the
+// first pluck after `start` must all have been heard, so a string that rings when the tuner
+// is switched on waits for the next pluck. A frame is a whole number of half periods of
+// 60 Hz and close to it for 50 Hz, so the level of hum hardly moves from one to the next
+const FRAME_MS: f32 = 25.0;
+const PLUCK_FRAMES: usize = 2;
+const PLUCK_RISE_DB: f32 = 12.0;
+const STRUCK_RISE_DB: f32 = 6.0;
+const PLUCK_HOLD_MS: f32 = 500.0;
+// A plucked string fades. Hum that starts at once rises like a pluck but stays: a note that
+// has not fallen this far from `FADE_FROM_MS` to `FADE_MS` after it was last struck is let
+// go. Not from the pluck itself: the filters ring a little when hum sets in
+const FADE_DB: f32 = 3.0;
+const FADE_FROM_MS: f32 = 200.0;
+const FADE_MS: f32 = 1000.0;
+
 /// What the tuner hears now, for the editor to read. One atomic: nothing to lock, nothing
 /// that can be read half written
 pub struct TunerReading {
@@ -375,6 +394,25 @@ pub struct Tuner {
     kept: usize,
     pending: Option<f32>,
     misses: u32,
+
+    // The level of the frame being heard and of the ones before it, as mean square, and
+    // where in the ring the last pluck was heard, and the last rise of either size
+    frame_len: usize,
+    frame_fill: usize,
+    frame_energy: f32,
+    frames: [f32; PLUCK_FRAMES],
+    frames_heard: usize,
+    pluck_rise: f32,
+    struck_rise: f32,
+    pluck_hold: usize,
+    plucked: Option<usize>,
+    struck: Option<usize>,
+    // The level `fade_from` after the string was struck, once it is known
+    fade_reference: Option<f32>,
+    fade: f32,
+    fade_from: usize,
+    fade_after: usize,
+    fade_checked: bool,
 }
 
 impl Tuner {
@@ -414,6 +452,21 @@ impl Tuner {
             kept: 0,
             pending: None,
             misses: 0,
+            frame_len: 1,
+            frame_fill: 0,
+            frame_energy: 0.0,
+            frames: [0.0; PLUCK_FRAMES],
+            frames_heard: 0,
+            pluck_rise: 10.0f32.powf(PLUCK_RISE_DB / 10.0),
+            struck_rise: 10.0f32.powf(STRUCK_RISE_DB / 10.0),
+            pluck_hold: 1,
+            plucked: None,
+            struck: None,
+            fade_reference: None,
+            fade: 10.0f32.powf(-FADE_DB / 10.0),
+            fade_from: 1,
+            fade_after: 1,
+            fade_checked: false,
         };
         tuner.set_sample_rate(44100.0);
         tuner
@@ -438,6 +491,10 @@ impl Tuner {
         self.span = self.max_lag + self.max_lag / 4;
         self.hop = ((HOP_MS * 0.001 * rate).round() as usize).max(1);
         self.level_min = 10.0f32.powf(LEVEL_MIN_DB / 20.0);
+        self.frame_len = ((FRAME_MS * 0.001 * rate).round() as usize).max(1);
+        self.pluck_hold = (PLUCK_HOLD_MS * 0.001 * rate).round() as usize;
+        self.fade_from = (FADE_FROM_MS * 0.001 * rate).round() as usize;
+        self.fade_after = (FADE_MS * 0.001 * rate).round() as usize;
         self.start();
     }
 
@@ -455,6 +512,11 @@ impl Tuner {
         self.kept = 0;
         self.pending = None;
         self.misses = 0;
+        self.frame_fill = 0;
+        self.frame_energy = 0.0;
+        self.frames_heard = 0;
+        self.plucked = None;
+        self.struck = None;
         self.reading.set(None);
     }
 
@@ -475,10 +537,69 @@ impl Tuner {
                 continue;
             }
             self.phase = 0;
-            self.ring[self.written & RING_MASK] = self.highpass.process(filtered) as f32;
+            let thinned = self.highpass.process(filtered) as f32;
+            self.ring[self.written & RING_MASK] = thinned;
             self.written = self.written.wrapping_add(1);
+            self.listen_for_pluck(thinned);
             self.work();
         }
+    }
+
+    /// Adds a sample of the ring to the frame, and at the end of the frame compares its
+    /// level with the frames before it
+    fn listen_for_pluck(&mut self, sample: f32) {
+        self.frame_energy += sample * sample;
+        self.frame_fill += 1;
+        if self.frame_fill < self.frame_len {
+            return;
+        }
+        let level = self.frame_energy / self.frame_len as f32;
+        if self.frames_heard >= PLUCK_FRAMES {
+            let quietest = self.frames.iter().fold(f32::MAX, |least, &each| least.min(each));
+            // Rising out of silence, the note has to reach the level of a note as well
+            let before = quietest.max(self.level_min * self.level_min);
+            if level >= self.struck_rise * before {
+                self.struck = Some(self.written);
+                self.fade_reference = None;
+                self.fade_checked = false;
+            }
+            if level >= self.pluck_rise * before {
+                self.plucked = Some(self.written);
+            }
+        }
+        self.frames.rotate_left(1);
+        self.frames[PLUCK_FRAMES - 1] = level;
+        // Counts on only as far as it has to, so it never wraps
+        self.frames_heard = (self.frames_heard + 1).min(PLUCK_FRAMES);
+        if let Some(at) = self.struck.filter(|_| !self.fade_checked) {
+            // Over all the frames kept, as hum may still swing a little from one to the next
+            let level = self.frames.iter().sum::<f32>() / PLUCK_FRAMES as f32;
+            let since = self.written.wrapping_sub(at);
+            if since >= self.fade_from && self.fade_reference.is_none() {
+                self.fade_reference = Some(level);
+            }
+            if since >= self.fade_after {
+                self.fade_checked = true;
+                if self.fade_reference.is_some_and(|reference| level > self.fade * reference) {
+                    self.let_go();
+                }
+            }
+        }
+        self.frame_fill = 0;
+        self.frame_energy = 0.0;
+    }
+
+    /// What rose like a pluck did not fade like one: hum, not a string
+    fn let_go(&mut self) {
+        self.plucked = None;
+        self.struck = None;
+        self.kept = 0;
+        self.pending = None;
+        self.reading.set(None);
+    }
+
+    fn lately(&self, at: Option<usize>) -> bool {
+        at.is_some_and(|at| self.written.wrapping_sub(at) <= self.pluck_hold)
     }
 
     fn at(&self, position: usize) -> f32 {
@@ -796,11 +917,18 @@ impl Tuner {
 
     /// A reading: shown as the median of the last few of its note
     fn accept(&mut self, hz: f32) {
+        let other_note = self.kept > 0
+            && cents_between(hz as f64, self.median() as f64).abs() > NOTE_CHANGE_CENTS as f64;
+        // Without a pluck it is hum, or what is left when a note has faded under it
+        let unplucked = (self.kept == 0 && !self.lately(self.plucked))
+            || (other_note && !self.lately(self.struck));
+        if unplucked {
+            self.miss();
+            return;
+        }
         self.stage = Stage::Waiting;
         self.misses = 0;
-        if self.kept > 0
-            && cents_between(hz as f64, self.median() as f64).abs() > NOTE_CHANGE_CENTS as f64
-        {
+        if other_note {
             // One stray reading, or the first of the next note: the reading after it tells
             match self.pending.take() {
                 Some(pending)
@@ -912,6 +1040,22 @@ pub(crate) mod tests {
         tone
     }
 
+    /// Mains hum as a guitar picks it up: the mains frequency and its second and third
+    /// harmonics, at `level_db` dBFS RMS in all
+    fn hum(hum_hz: f32, level_db: f32, sample_rate: f32, seconds: f32) -> Vec<f32> {
+        let len = (seconds * sample_rate) as usize;
+        let mut hum = vec![0.0f32; len];
+        for (number, level) in [(1.0, 1.0), (2.0, 0.5), (3.0, 0.3)] {
+            for (sample, partial) in
+                hum.iter_mut().zip(sine(hum_hz * number, level, sample_rate, len))
+            {
+                *sample += partial;
+            }
+        }
+        set_rms_db(&mut hum, level_db);
+        hum
+    }
+
     /// How stiff a string of this pitch is, about: the wound low ones most
     fn stiffness(freq_hz: f32) -> f32 {
         if freq_hz < 130.0 {
@@ -939,9 +1083,16 @@ pub(crate) mod tests {
         tuner
     }
 
-    /// What the tuner shows after each block of `block` samples
+    /// A moment of silence, as when the tuner is switched on and the string plucked after
+    /// it. Without it a note from the first sample would be one that already rang
+    fn lead_in(tuner: &mut Tuner, sample_rate: f32) {
+        tuner.process(&vec![0.0; (0.1 * sample_rate) as usize]);
+    }
+
+    /// What the tuner shows after each block of `block` samples, after a lead-in
     fn readings_in_blocks(signal: &[f32], sample_rate: f32, block: usize) -> Vec<Option<f32>> {
         let mut tuner = new_tuner(sample_rate);
+        lead_in(&mut tuner, sample_rate);
         let shown = tuner.reading();
         signal
             .chunks(block)
@@ -1018,6 +1169,7 @@ pub(crate) mod tests {
         let mut tuner = new_tuner(48000.0);
         let shown = tuner.reading();
         assert_eq!(shown.hz(), None);
+        lead_in(&mut tuner, 48000.0);
         tuner.process(&sine(220.0, 0.2, 48000.0, 24_000));
         assert!(shown.hz().is_some());
         tuner.stop();
@@ -1241,6 +1393,150 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn test_hum_alone_gives_no_reading() {
+        // Mains hum is as steady as a held note, and 50 and 60 Hz are within the tuner's
+        // range. Hum that is there when the tuner is switched on is never shown. Hum that
+        // starts out of silence rises like a pluck, and is let go when it does not fade
+        for sample_rate in RATES {
+            for hum_hz in [50.0, 60.0] {
+                for level_db in [-60.0, -45.0, -30.0] {
+                    let hum = hum(hum_hz, level_db, sample_rate, 3.0);
+                    let mut tuner = new_tuner(sample_rate);
+                    let shown = tuner.reading();
+                    let heard = hum
+                        .chunks(BLOCK)
+                        .filter(|block| {
+                            tuner.process(block);
+                            shown.hz().is_some()
+                        })
+                        .count();
+                    assert_eq!(heard, 0, "{hum_hz} Hz at {level_db} dBFS, {sample_rate} Hz");
+
+                    let all = readings(&hum, sample_rate);
+                    let last = all.iter().rposition(|reading| reading.is_some());
+                    let until_s =
+                        last.map_or(0.0, |last| ((last + 1) * BLOCK) as f32 / sample_rate);
+                    assert!(
+                        until_s <= 1.1,
+                        "{hum_hz} Hz at {level_db} dBFS out of silence, {sample_rate} Hz:                          shown until {until_s} s"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_a_pluck_over_hum_is_read_as_soon_as_without() {
+        let sample_rate = 48000.0;
+        for hum_hz in [50.0, 60.0] {
+            let mut signal = hum(hum_hz, -57.0, sample_rate, 1.5);
+            let pluck_at = (0.5 * sample_rate) as usize;
+            for (sample, string) in
+                signal[pluck_at..].iter_mut().zip(string(note_hz(40), sample_rate, 1.0))
+            {
+                *sample += string;
+            }
+            // Switched on with the hum already there
+            let mut tuner = new_tuner(sample_rate);
+            let shown = tuner.reading();
+            let first = signal.chunks(BLOCK).position(|block| {
+                tuner.process(block);
+                shown.hz().is_some()
+            });
+            let after_s = first.map(|first| ((first + 1) * BLOCK) as f32 / sample_rate - 0.5);
+            assert!(
+                after_s.is_some_and(|after| (0.0..0.15).contains(&after)),
+                "Low E over {hum_hz} Hz hum: {after_s:?} s after the pluck"
+            );
+            assert!(shown.hz().is_some_and(|hz| cents(hz, note_hz(40)).abs() < 3.0));
+        }
+    }
+
+    #[test]
+    fn test_a_note_that_fades_under_hum_is_let_go() {
+        // Once the string is quieter than the hum, what is read is the hum
+        let sample_rate = 48000.0;
+        for hum_hz in [50.0, 60.0] {
+            let mut signal = hum(hum_hz, -45.0, sample_rate, 5.0);
+            for (sample, string) in signal.iter_mut().zip(string(note_hz(45), sample_rate, 5.0)) {
+                *sample += string;
+            }
+            let all = readings(&signal, sample_rate);
+            assert!(all.iter().flatten().count() > 0, "A2 over {hum_hz} Hz hum was never read");
+            for hz in all.iter().flatten() {
+                assert!(cents(*hz, note_hz(45)).abs() < 70.0, "Showed {hz} Hz over A2");
+            }
+            assert_eq!(*all.last().unwrap(), None, "Still shown over {hum_hz} Hz hum");
+        }
+    }
+
+    #[test]
+    fn test_a_string_that_rings_when_switched_on_waits_for_the_next_pluck() {
+        let sample_rate = 48000.0;
+        let ringing = string(note_hz(40), sample_rate, 1.0);
+        let half = ringing.len() / 2;
+        let mut tuner = new_tuner(sample_rate);
+        let shown = tuner.reading();
+        tuner.process(&ringing[..half]);
+        tuner.start();
+        tuner.process(&ringing[half..]);
+        assert_eq!(shown.hz(), None);
+
+        tuner.process(&string(note_hz(40), sample_rate, 0.5));
+        assert!(shown.hz().is_some_and(|hz| cents(hz, note_hz(40)).abs() < 3.0));
+    }
+
+    /// A string plucked again and again while it rings, `every_s` apart, as when tuning
+    fn plucked_again(number: i32, every_s: f32, times: usize, sample_rate: f32) -> Vec<f32> {
+        let every = (every_s * sample_rate) as usize;
+        let note = string(note_hz(number), sample_rate, every_s * times as f32 + 1.0);
+        let mut signal = vec![0.0f32; every * times + note.len()];
+        for time in 0..times {
+            for (sample, string) in signal[time * every..].iter_mut().zip(&note) {
+                *sample += string;
+            }
+        }
+        signal
+    }
+
+    #[test]
+    fn test_a_string_plucked_again_while_it_rings_stays_shown() {
+        // Every 0.4 s, every 0.8 s: the level rises a few dB at each pluck, not 12
+        let sample_rate = 48000.0;
+        for every_s in [0.4, 0.8] {
+            let signal = plucked_again(40, every_s, 6, sample_rate);
+            let all = readings(&signal, sample_rate);
+            let first = all.iter().position(Option::is_some).unwrap();
+            let end = (every_s * 6.0 * sample_rate) as usize / BLOCK;
+            let blank = all[first..end].iter().filter(|reading| reading.is_none()).count();
+            assert_eq!(blank, 0, "Plucked every {every_s} s: blank for {blank} blocks");
+        }
+    }
+
+    #[test]
+    fn test_the_next_string_is_read_as_the_last_one_rings_out() {
+        let sample_rate = 48000.0;
+        // The last string has fallen by about 30 dB. Closer than that the detector hears
+        // the two as a chord, with or without the rule of the pluck
+        let next_at = (2.0 * sample_rate) as usize;
+        let mut signal = string(note_hz(40), sample_rate, 3.0);
+        for (sample, string) in
+            signal[next_at..].iter_mut().zip(string(note_hz(45), sample_rate, 1.0))
+        {
+            *sample += string;
+        }
+        let all = readings(&signal, sample_rate);
+        let changed = all
+            .iter()
+            .position(|reading| reading.is_some_and(|hz| cents(hz, note_hz(45)).abs() < 3.0))
+            .map(|changed| (changed * BLOCK) as f32 / sample_rate - 2.0);
+        assert!(
+            changed.is_some_and(|after| (0.0..0.2).contains(&after)),
+            "The next string was read after {changed:?} s"
+        );
+    }
+
+    #[test]
     fn test_reading_follows_the_next_string() {
         let sample_rate = 48000.0;
         let mut signal = string(note_hz(40), sample_rate, 0.6);
@@ -1286,6 +1582,7 @@ pub(crate) mod tests {
         let sample_rate = 48000.0;
         let mut tuner = new_tuner(sample_rate);
         let shown = tuner.reading();
+        lead_in(&mut tuner, sample_rate);
         tuner.process(&string(note_hz(40), sample_rate, 0.5));
         assert!(shown.hz().is_some());
         tuner.start();
@@ -1293,6 +1590,7 @@ pub(crate) mod tests {
 
         // And hears the next one as a tuner that was never used
         let next = string(note_hz(57), sample_rate, 0.5);
+        lead_in(&mut tuner, sample_rate);
         tuner.process(&next);
         assert_eq!(shown.hz().map(f32::to_bits), settled(&next, sample_rate).map(f32::to_bits));
     }
@@ -1487,6 +1785,52 @@ pub(crate) mod tests {
                 ms(&string(freq, 48000.0, 0.5)),
                 delay_line(freq, 48000.0, 0.5).map_or("-".to_owned(), |note| ms(&note))
             );
+        }
+
+        println!("\nMains hum alone at 48 kHz, for 3 s: what is shown at the end, and in how many blocks");
+        println!("{:<9} {:>16} {:>16} {:>16}", "hum", "-60 dBFS", "-45 dBFS", "-30 dBFS");
+        for hum_hz in [50.0, 60.0] {
+            print!("{:<9}", format!("{hum_hz} Hz"));
+            for level_db in [-60.0, -45.0, -30.0] {
+                let all = readings(&hum(hum_hz, level_db, 48000.0, 3.0), 48000.0);
+                let shown = all.iter().flatten().count();
+                let last = all.last().unwrap().map_or("none".to_owned(), |hz| {
+                    let note = Note::nearest(hz);
+                    format!("{}{} {:+.0}", note.name, note.octave, note.cents)
+                });
+                print!(" {:>16}", format!("{last} ({shown})"));
+            }
+            println!();
+        }
+
+        println!(
+            "\nLow strings under mains hum at 48 kHz: the worst reading from 0.25 to 1 s in cents"
+        );
+        print!("{:<5}", "note");
+        for hum_hz in [50.0, 60.0] {
+            for level_db in [-57.0, -45.0, -36.0] {
+                print!(" {:>10}", format!("{hum_hz:.0}@{level_db:.0}"));
+            }
+        }
+        println!();
+        for number in [31, 33, 35, 36, 38, 40, 45] {
+            let freq = note_hz(number);
+            print!("{:<5}", name_of(number));
+            for hum_hz in [50.0, 60.0] {
+                for level_db in [-57.0, -45.0, -36.0] {
+                    let mut note = string(freq, 48000.0, 1.0);
+                    for (sample, hum) in note.iter_mut().zip(hum(hum_hz, level_db, 48000.0, 1.0)) {
+                        *sample += hum;
+                    }
+                    let (worst, heard, blocks) = worst_from(&note, 48000.0, freq, 0.25);
+                    if heard == blocks {
+                        print!(" {worst:>+10.2}");
+                    } else {
+                        print!(" {:>10}", format!("lost {}", blocks - heard));
+                    }
+                }
+            }
+            println!();
         }
 
         println!("\nTime per 64-sample block of the tuner alone, in microseconds (share of the block's own time)");
