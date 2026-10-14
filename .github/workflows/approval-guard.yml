@@ -1,0 +1,25 @@
+name: Approval guard
+
+# Only Rasmus approves work. Anyone else who sets state:approved has it taken off again.
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  issues: write
+
+jobs:
+  guard:
+    if: github.event.label.name == 'state:approved' && github.actor != 'FrankDrebin893'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Take the approval off
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          gh issue edit "$ISSUE" --repo "$REPO" --remove-label state:approved
+          gh issue comment "$ISSUE" --repo "$REPO" \
+            --body "Only @FrankDrebin893 approves work, so \`state:approved\` set by @$ACTOR was taken off."

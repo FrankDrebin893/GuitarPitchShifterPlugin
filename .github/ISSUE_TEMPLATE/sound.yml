@@ -1,0 +1,36 @@
+name: How something sounds
+description: A sound that is off, or a sound you would like
+labels: ["state:idea", "kind:sound"]
+body:
+  - type: dropdown
+    id: plugin
+    attributes:
+      label: Which plugin
+      options:
+        - Guitar Amp
+        - Drum Synth
+        - Pitch Shifter
+        - Bass Synth
+        - Shimmer Pad
+        - Glass Bells
+    validations:
+      required: true
+  - type: textarea
+    id: settings
+    attributes:
+      label: Settings
+      description: The preset, kit or voice, and the controls you moved.
+    validations:
+      required: true
+  - type: textarea
+    id: heard
+    attributes:
+      label: What you hear, and what you would like to hear
+      description: Comparisons to other sounds or records help.
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Recording or project (optional)
+      description: Drop a WAV (zipped) or a MIDI file here.
