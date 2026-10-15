@@ -13,6 +13,10 @@ reports='
 amp fingerprint_report
 amp loudness_report
 amp preset_report
+amp preset_gate_report
+amp effects_report
+amp comp_report
+amp mods_report
 drums kit_report
 bass bass_report
 pad pad_report
@@ -27,7 +31,8 @@ while read -r plugin report; do
     # carry source line numbers, which move with any edit
     if cargo test -q -p "$plugin" --release --locked "$report" -- --ignored --nocapture > "$file.raw" 2>/dev/null; then
         # Timings differ from run to run and machine to machine: leave them out
-        grep -vE 'of a core|ns per|us per|µs|finished in|^running [0-9]|^$' "$file.raw" > "$file"
+        # (the cost tables of effects_report and the ns columns of comp_report)
+        grep -vE 'of a core|ns per|us per|µs|finished in|^running [0-9]|^$| [0-9.]+ ns( |$)' "$file.raw"             | sed '/^Cost per block/,$d' > "$file"
     else
         echo "(this report failed or does not exist here)" > "$file"
     fi
