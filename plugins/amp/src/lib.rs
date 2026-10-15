@@ -57,7 +57,7 @@ pub enum Task {
 }
 
 // Frozen: the ids below are what DAW projects store. Add parameters, never rename an id.
-// The full table of ids, including the ones not added yet, is in docs/amp-progress.md
+// The full table of ids is in `ids.txt`, held by the `ids` test
 #[derive(Params)]
 pub struct GuitarAmpParams {
     #[persist = "editor-state-rig3"]
