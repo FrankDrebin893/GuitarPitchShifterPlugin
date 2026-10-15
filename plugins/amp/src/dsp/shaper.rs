@@ -40,7 +40,7 @@ fn asym_integral(x: f64, positive: f64, negative: f64) -> f64 {
     AsymLimits::new(positive, negative).integral(x)
 }
 
-/// Natural logarithm of a positive, normal number, within 1e-10 of `f64::ln`: the exponent is
+/// Natural logarithm of a positive, normal, finite number, within 1e-9 of `f64::ln`: the exponent is
 /// read from the bits, and the rest is the series of the inverse hyperbolic tangent of
 /// `(m - 1) / (m + 1)`, which is small once `m` is within a factor of root two of one.
 /// It stands where the clippers took `ln` of something at least one, so it is cheaper than
@@ -490,19 +490,19 @@ impl PowerClipper {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::test_util::{fit_partials, harmonics_of, sine};
+
     #[test]
     fn fast_ln_matches_ln() {
         let mut worst: f64 = 0.0;
-        for i in 0..=99_000 {
-            let x = 1.0 + i as f64 * 0.001;
+        for i in 0..=99_900 {
+            let x = 1.0 + i as f64 * 0.01;
             worst = worst.max((fast_ln(x) - x.ln()).abs());
         }
-        assert!(worst < 1e-7, "worst error {worst}");
+        assert!(worst < 1e-9, "worst error {worst}");
         assert_eq!(fast_ln(1.0), 0.0);
     }
-
-    use super::*;
-    use crate::test_util::{fit_partials, harmonics_of, sine};
 
     #[test]
     fn test_asym_clip_is_bounded_monotonic_and_asymmetric() {
