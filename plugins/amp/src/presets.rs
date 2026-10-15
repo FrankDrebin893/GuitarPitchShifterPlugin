@@ -66,10 +66,11 @@ const USUAL_ORDER: &[&str] =
 // does not, so with a quieter guitar the clean ones come out quieter than the rest, and
 // with a hotter one louder. The first one is every parameter at its default.
 //
-// The gates are set by `preset_gate_report`. A threshold of -54 dB is the highest that
-// leaves palm mutes alone when they are played quietly (peaks at -30 dBFS): from -52 dB up
-// the gate starts to close on the tail of every mute. How fast a gate shuts in a rest is
-// its release, not its threshold: 8 dB of threshold are 9 ms
+// The gates are set by `preset_gate_report`. A threshold of -57 dB is the highest that
+// leaves palm mutes alone when they are played quietly (peaks at -30 dBFS): from -55 dB up
+// the gate starts to close on the tail of every mute. The gate closes 3 dB under its
+// threshold, so that is -60 dB, which was -54 dB with the 6 dB it had before. How fast a
+// gate shuts in a rest is its release, not its threshold: 8 dB of threshold are 9 ms
 pub static PRESETS: [Preset; 17] = [
     Preset {
         name: "Init",
@@ -210,7 +211,7 @@ pub static PRESETS: [Preset; 17] = [
         name: "Granit",
         amp: Amp::Torden,
         dials: [7.5, 6.5, 3.0, 6.5, 6.5, 5.5],
-        gate: (ON, -54.0, 60.0),
+        gate: (ON, -57.0, 60.0),
         drive: (ON, [1.5, 5.5, 7.0]),
         cab: (ON, [5.0, 6.0]),
         delay: (OFF, 350.0, 30.0, 20.0),
@@ -225,7 +226,7 @@ pub static PRESETS: [Preset; 17] = [
         name: "Dyb",
         amp: Amp::Torden,
         dials: [6.0, 4.0, 5.5, 6.0, 6.5, 5.0],
-        gate: (ON, -54.0, 40.0),
+        gate: (ON, -57.0, 40.0),
         drive: (ON, [0.5, 6.5, 8.5]),
         cab: (ON, [5.5, 2.5]),
         delay: (OFF, 350.0, 30.0, 20.0),
@@ -240,7 +241,7 @@ pub static PRESETS: [Preset; 17] = [
         name: "Lyn",
         amp: Amp::Torden,
         dials: [7.0, 5.0, 6.5, 5.5, 5.5, 5.0],
-        gate: (ON, -54.0, 180.0),
+        gate: (ON, -57.0, 180.0),
         drive: (ON, [2.5, 5.0, 7.0]),
         cab: (ON, [4.5, 5.0]),
         delay: (ON, 420.0, 30.0, 20.0),
@@ -301,7 +302,7 @@ pub static PRESETS: [Preset; 17] = [
         name: "Sus",
         amp: Amp::Torden,
         dials: [6.5, 5.0, 5.5, 5.5, 5.5, 5.0],
-        gate: (ON, -54.0, 120.0),
+        gate: (ON, -57.0, 120.0),
         drive: (ON, [1.5, 5.5, 7.0]),
         cab: (ON, [5.0, 5.0]),
         delay: (ON, 380.0, 25.0, 18.0),
@@ -476,6 +477,7 @@ mod tests {
     use crate::chain::{AmpChain, AmpSettings};
     use crate::comp::CompSettings;
     use crate::delay::DelaySettings;
+    use crate::dsp::db_to_gain;
     use crate::dsp::shaper::OUTPUT_CLIP_KNEE;
     use crate::gate::tests::{decaying_note, gain_trace, hiss, transitions as gate_changes};
     use crate::gate::Gate;
@@ -863,9 +865,13 @@ mod tests {
         println!("fallen when the gate starts to close on it, in dB, and after how many seconds (`shut`: never");
         println!("opened). Palm mutes with a rest after each bar, peaking at -12 and at -30 dBFS: `gaps` is how");
         println!("often the gate started to close between two mutes of a bar (0 is right), `rest` the time from");
-        println!("the last mute of a bar to silence in ms. `hiss`: the gate on noise at -70 and -76 dBFS RMS");
+        println!("the last mute of a bar to silence in ms. `hiss`: the gate on noise at -70 and -76 dBFS RMS.");
+        println!("`after note`: a note at -12 dBFS, then hiss with its peaks 1 and 4 dB under the preset's");
         println!(
-            "{:<8} {:>6} {:>5} {:>13} {:>13} {:>13} {:>13} {:>10} {:>10} {:>13}",
+            "threshold (which never opens the gate alone): `shut` if the gate has closed 1 s later"
+        );
+        println!(
+            "{:<8} {:>6} {:>5} {:>13} {:>13} {:>13} {:>13} {:>10} {:>10} {:>13} {:>13}",
             "preset",
             "thresh",
             "rel",
@@ -875,7 +881,8 @@ mod tests {
             "chord -30",
             "mutes -12",
             "mutes -30",
-            "hiss -70/-76"
+            "hiss -70/-76",
+            "after note"
         );
         for preset in &PRESETS {
             print!("{:<8} {:>6.0} {:>5.0}", preset.name, preset.gate.1, preset.gate.2);
@@ -923,7 +930,23 @@ mod tests {
                     "open"
                 }
             });
-            println!(" {:>13}", on_hiss.join(" / "));
+            print!(" {:>13}", on_hiss.join(" / "));
+
+            let after_note = [1.0, 4.0].map(|below_db| {
+                let mut input = at_peak_db(decaying_note(SAMPLE_RATE, 0.5), -12.0);
+                let mut noise = hiss(-70.0, 96_000);
+                let scale = db_to_gain(preset.gate.1 - below_db) / peak(&noise);
+                noise.iter_mut().for_each(|sample| *sample *= scale);
+                input.extend(noise);
+                let trace = gate_trace(preset, &input);
+                let from = (1.5 * SAMPLE_RATE) as usize;
+                if trace[from..].iter().all(|&gain| gain == 0.0) {
+                    "shut"
+                } else {
+                    "open"
+                }
+            });
+            println!(" {:>13}", after_note.join(" / "));
         }
     }
 
