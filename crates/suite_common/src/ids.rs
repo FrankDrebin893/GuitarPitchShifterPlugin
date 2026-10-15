@@ -1,5 +1,5 @@
 //! What saved projects know a plugin by. Each plugin's `ids` test compares this with its
-//! `ids.txt`, so a renamed or removed id fails the tests (see Versioning in CLAUDE.md).
+//! `ids.txt`, so a renamed or removed id fails the tests (see Versioning in AGENTS.md).
 
 use nih_plug::prelude::*;
 use std::fmt::Write;
@@ -40,7 +40,7 @@ pub fn check<P: ClapPlugin + Vst3Plugin>(manifest_dir: &str, bundler_toml: &str,
     assert!(
         removed.is_empty(),
         "ids that saved projects use are gone or changed: {removed:?}. They must stay as they are \
-         (Versioning in CLAUDE.md)"
+         (Versioning in AGENTS.md)"
     );
     assert_eq!(
         saved, now,

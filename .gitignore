@@ -4,3 +4,4 @@ nul
 .claude/*
 !.claude/commands/
 /dist
+.impeccable/

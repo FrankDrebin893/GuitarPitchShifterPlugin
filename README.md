@@ -62,7 +62,7 @@ cargo run -p amp --features standalone -- --backend dummy
 ```
 
 The plugins are written in Rust on [NIH-plug](https://github.com/robbert-vdh/nih-plug).
-[CLAUDE.md](CLAUDE.md) describes how each one works, its parameters and the tools for working
+[AGENTS.md](AGENTS.md) (and [CLAUDE.md](CLAUDE.md)) describes how each one works, its parameters and the tools for working
 on its sound.
 
 ## Licence

@@ -13,7 +13,7 @@ This folder is not part of the page: only `site/` is published.
 |-----|------|---|
 | Guitar Amp | `guitar-<what>.wav` | Mono, straight from the guitar, no effects. 48 kHz (the presets are rendered at that rate only). Recorded at about -24 dBFS RMS, the level the amps and presets are matched for |
 | Pitch Shifter | `guitar-<what>.wav` | Mono, straight from the guitar. Any rate |
-| Drum Synth | `drums-<what>.mid` | Notes of the General MIDI drum map (the table in `CLAUDE.md`). One tempo: a part whose tempo changes is refused. Note lengths do not matter |
+| Drum Synth | `drums-<what>.mid` | Notes of the General MIDI drum map (the table in `AGENTS.md`). One tempo: a part whose tempo changes is refused. Note lengths do not matter |
 
 ## Using one
 
