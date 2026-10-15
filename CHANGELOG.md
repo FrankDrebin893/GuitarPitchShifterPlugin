@@ -43,6 +43,8 @@ Three new instruments, each a pedal of its own:
 - The tuner no longer shows mains hum as a note. A note is shown from a pluck on, and let go
   when what rang does not fade like a string; a string that already rings when the tuner is
   switched on is read from its next pluck
+- The clippers of the high-gain amp and the overdrive use less CPU. The sound is the same to the
+  ear; only the last bits of the output move
 
 ### Guitar Amp, Shimmer Pad, Glass Bells
 
