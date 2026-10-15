@@ -232,3 +232,63 @@ cargo test -p amp --release render_presets -- --ignored
 cargo test -p amp --release render_comp -- --ignored
 cargo test -p amp --release render_mods -- --ignored
 ```
+
+## Look: the rig
+
+The style guide of the root `CLAUDE.md` applies; these are the rules for a window of several pedals, which only the amp has.
+
+- **Rigs:** a plugin made of several components (the Guitar Amp) is the one exception to one
+  pedal per plugin. Its window is a `rig`: one `head` across the top, which carries the name band,
+  model number and logo, and from left to right in signal order a row of `mini_pedal`s below it.
+  The head has the plugin's paint; each mini pedal has a paint of its own. On a head and on mini pedals the switches are
+  `small_footswitch` and the LEDs `rig_led` (an unlit `led` disappears on dark paint), beside or
+  above the switch. A mini pedal holds two knobs of radius 24 side by side or three of radius 17
+  in a triangle. Everything else in this guide applies
+- **Pedal art:** every mini pedal has its own `PAINT_*` and its own `Motif`, all on one theme
+  per rig (the Guitar Amp: northern weather and nature). Two coats and a print: a large motif
+  in darker tones of the pedal's paint (`theme::shade`) that may run under the controls, with
+  no fine detail under a caption, and a few `SILK` lines (2 px) and dots only in the clear
+  paint beside the controls. The art keeps 5 px of plain paint to the edge of the face. No
+  letters, numbers or cream triangles in it, and nothing that moves. A new paint goes in
+  `PEDAL_PAINTS`, where tests hold it to cream print reading on it and to being clearly apart
+  from the others; a new motif is drawn in `art.rs` for the layout of its pedal
+- **Slim pedals:** a pedal of a rig with two knobs can be a `slim_pedal`, 110 px wide: the
+  LED where a trio's upper left knob is, the two radius-17 knobs upper right and lower left
+  (`SLIM_LED`, `SLIM_KNOBS`), the switch where every pedal has it. Its title is size 21, so
+  seven letters fit. In a row with wide pedals the LEDs and switches line up
+- **A board that can be rearranged:** a pedal is moved by dragging it by its title
+  (`title_grip`); while it is held it is drawn `lifted` and last, the others glide to make
+  room, and it lands in the nearest place it may have. No arrows, menus or lists. A pedal
+  that cannot be moved has no grip
+- **The amp's place in the row** is the one thing drawn on the bench: `amp_marker`, two patch
+  cables (`CABLE`) from the pedals on either side up to the head with a cream tag reading
+  `AMP`, in a 40 px gap. Objects on the bench, not print: silk triangles still mean signal
+  direction at the jacks only
+- **An order is never a parameter.** Keep it in a `#[persist]` field, as ids, like a preset
+  or a file choice
+- **Signal lamps:** a light that follows the sound and not a switch (gate open, output clipping)
+  is a `signal_lamp`, with a `silk_label` of size 13 centred 18 px under it, placed beside the
+  control it belongs to. An LED above or beside a switch only ever says that the switch is on.
+  Lamps are read from atomics the audio thread writes once per block; the editor asks for a
+  repaint only when one changes, 20 times a second at most
+- **Pick one of many (presets):** a `stepper` with a `silk_label` caption above it, top centre of
+  the head on the jack-caption line, at least 12 px clear of the knob ticks. No dropdowns, lists
+  or pop-ups. Step arrows are engraved in chrome buttons; silk triangles on the paint mean signal
+  direction at the jacks only. Names have at most 14 characters and are our own words. A trailing
+  `*` on the tape means a control was moved since loading
+- **A preset choice is never a parameter.** The editor sets the real parameters through the
+  `ParamSetter` and keeps only the index in a `#[persist]` field
+- **Pick a file (cabinets):** files are never picked in a dialog. They live in one folder and are
+  stepped through in name order with a `stepper` under a `silk_label` caption, the built-in choice
+  first (`OWN`). On a mini pedal the stepper takes the place of the third knob of a trio: two
+  radius-17 knobs with the LED between them, caption at y+174, tape 100 px wide at y+198. The
+  tape shows at most 10 characters: no extension, capitals, long names as the first 5 and last 4
+  with `~` between. `BAD FILE` for a file that cannot be used, `?` in front of the name of one
+  that is not there
+- **A file choice is never a parameter.** Keep the file name (not the path) in a `#[persist]` field
+- **Tuner:** a `small_footswitch` with `rig_led` and a `silk_label` on the head, beside the On
+  switch and further from the amp switches than they are from each other. While it is on, a
+  `tuner_display` under its own caption takes the place of the preset `stepper`: note name in
+  `mono` capitals at the left, 17 lamps, flat to the left and sharp to the right, the larger
+  middle lamp lit alone within 2 cents. Lamps are `LED_ON` and `LED_OFF` on `TAPE`; no needles,
+  numbers or other colours. The editor repaints continuously only while the tuner is on
