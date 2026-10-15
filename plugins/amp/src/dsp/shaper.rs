@@ -40,6 +40,30 @@ fn asym_integral(x: f64, positive: f64, negative: f64) -> f64 {
     AsymLimits::new(positive, negative).integral(x)
 }
 
+/// Natural logarithm of a positive, normal number, within 1e-10 of `f64::ln`: the exponent is
+/// read from the bits, and the rest is the series of the inverse hyperbolic tangent of
+/// `(m - 1) / (m + 1)`, which is small once `m` is within a factor of root two of one.
+/// It stands where the clippers took `ln` of something at least one, so it is cheaper than
+/// the library's, which also has to cope with zero, negatives and the like
+#[inline(always)]
+fn fast_ln(x: f64) -> f64 {
+    const BIAS: i64 = 1023;
+    const MANTISSA: u64 = (1 << 52) - 1;
+    let bits = x.to_bits();
+    let mut exponent = ((bits >> 52) as i64) - BIAS;
+    let mut mantissa = f64::from_bits((bits & MANTISSA) | ((BIAS as u64) << 52));
+    if mantissa > std::f64::consts::SQRT_2 {
+        mantissa *= 0.5;
+        exponent += 1;
+    }
+    let s = (mantissa - 1.0) / (mantissa + 1.0);
+    let s2 = s * s;
+    let series = 1.0
+        + s2 * (1.0 / 3.0
+            + s2 * (1.0 / 5.0 + s2 * (1.0 / 7.0 + s2 * (1.0 / 9.0 + s2 * (1.0 / 11.0)))));
+    exponent as f64 * std::f64::consts::LN_2 + 2.0 * s * series
+}
+
 #[cfg(test)]
 fn asym_second_integral(x: f64, positive: f64, negative: f64) -> f64 {
     AsymLimits::new(positive, negative).second_integral(x)
@@ -84,7 +108,7 @@ impl AsymLimits {
         let ratio = x * self.inverse[side];
         let root = (1.0 + ratio * ratio).sqrt();
         // The inverse hyperbolic sine of `ratio`, with the root that is already there
-        let arsinh = (ratio.abs() + root).ln().copysign(ratio);
+        let arsinh = fast_ln(ratio.abs() + root).copysign(ratio);
         self.square[side] * (0.5 * (x * root + limit * arsinh) - x)
     }
 
@@ -116,8 +140,8 @@ impl AsymLimits {
         let roots = (Pair::both(1.0) + ratios * ratios).sqrt();
         let logarithms = ratios.abs() + roots;
         let arsinhs = Pair::new(
-            logarithms.first().ln().copysign(ratios.first()),
-            logarithms.second().ln().copysign(ratios.second()),
+            fast_ln(logarithms.first()).copysign(ratios.first()),
+            fast_ln(logarithms.second()).copysign(ratios.second()),
         );
         squares * (Pair::both(0.5) * (inputs * roots + limits * arsinhs) - inputs)
     }
@@ -466,6 +490,17 @@ impl PowerClipper {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fast_ln_matches_ln() {
+        let mut worst: f64 = 0.0;
+        for i in 0..=99_000 {
+            let x = 1.0 + i as f64 * 0.001;
+            worst = worst.max((fast_ln(x) - x.ln()).abs());
+        }
+        assert!(worst < 1e-7, "worst error {worst}");
+        assert_eq!(fast_ln(1.0), 0.0);
+    }
+
     use super::*;
     use crate::test_util::{fit_partials, harmonics_of, sine};
 
