@@ -3,7 +3,7 @@ description: Prepare a release of the suite; stops before the tag
 argument-hint: <version, e.g. 0.4.0>
 ---
 
-Prepare release $ARGUMENTS by "Releasing" in CLAUDE.md. Work on `main`, up to date, with a
+Prepare release $ARGUMENTS by "Releasing" in AGENTS.md. Work on `main`, up to date, with a
 clean tree; if it is not, stop and say so.
 
 1. **What is in it.** The last tag: `git describe --tags --abbrev=0`. The pull requests merged

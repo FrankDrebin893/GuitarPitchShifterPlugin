@@ -1,7 +1,7 @@
 # Guitar Amp: why it is the way it is
 
 The reasons behind choices that the code alone does not explain. What it does is in
-`CLAUDE.md` next to this file; what is open is the `plugin:amp` issues. Dates are 2026.
+`AGENTS.md` (or `CLAUDE.md`) next to this file; what is open is the `plugin:amp` issues. Dates are 2026.
 
 ## Targets (set with Rasmus)
 

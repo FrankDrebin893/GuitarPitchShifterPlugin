@@ -1,0 +1,6 @@
+# Cursor Rules
+
+This repository maintains canonical agent instructions in `AGENTS.md` at the project root.
+When working in a plugin subfolder, also consult `plugins/<name>/AGENTS.md`.
+
+Always follow the code conventions, testing requirements, and styling rules defined in `AGENTS.md`.

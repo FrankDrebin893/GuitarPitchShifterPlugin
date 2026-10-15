@@ -3,7 +3,7 @@ description: Build the next approved backlog issue and open a pull request
 argument-hint: [issue number]
 ---
 
-Build one approved issue of FrankDrebin893/hojt-audio, following "How work flows" in CLAUDE.md.
+Build one approved issue of FrankDrebin893/hojt-audio, following "How work flows" in AGENTS.md.
 
 1. **Pick.** If an issue number was given ($ARGUMENTS), take that one. Otherwise take the
    `state:approved` issue that stands highest on the board "HØJT backlog": the approved ones are
@@ -21,7 +21,7 @@ Build one approved issue of FrankDrebin893/hojt-audio, following "How work flows
    the text asks for beyond that
 3. **Start.** `scripts/move-issue.sh <n> building`.
    Branch from an up-to-date `main`: `<kind>/<n>-<short-slug>` (kind from the `kind:*` label)
-4. **Build** to the spec and the conventions in CLAUDE.md. A decision the spec did not cover:
+4. **Build** to the spec and the conventions in AGENTS.md. A decision the spec did not cover:
    ask on the issue and in chat, do not guess. If it turns out larger than the spec said, stop
    and say so
 5. **Gates**, all before the pull request:
