@@ -50,6 +50,8 @@ Three new instruments, each a pedal of its own:
 - The clippers of the high-gain amp and the overdrive use less CPU. The sound is the same to the
   ear; only the last bits of the output move
 - Your own cabinets can be 8-bit or 64-bit float WAV files, which showed BAD FILE before
+- The amp is picked with a stepper (a name on label tape with a button at each end) under the
+  dials, instead of three switches. Each amp still keeps its own dials
 - Torden's palm mutes are tighter: about 6 dB less below 100 Hz against the mids than Brøl, up
   from about 4, and a low E keeps a little more of its fundamental than before
 - Torden's Gain dial does more above 5: it is no longer squeezed flat by the middle of the dial,
