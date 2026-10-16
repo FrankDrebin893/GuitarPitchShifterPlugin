@@ -49,6 +49,7 @@ Three new instruments, each a pedal of its own:
   top one at full scale. The window is only redrawn while the lamps move
 - The clippers of the high-gain amp and the overdrive use less CPU. The sound is the same to the
   ear; only the last bits of the output move
+- Your own cabinets can be 8-bit or 64-bit float WAV files, which showed BAD FILE before
 
 ### Guitar Amp, Shimmer Pad, Glass Bells
 
