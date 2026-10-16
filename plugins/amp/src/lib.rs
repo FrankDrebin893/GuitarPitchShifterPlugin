@@ -47,6 +47,9 @@ pub struct GuitarAmpPlugin {
     chain: AmpChain,
     // Reads the player's own cabinet from its file and leaves it for the chain to take
     cab_loader: Arc<CabLoader>,
+    /// A cabinet read is owed: `initialize` only asks, the first block hands it to the host's
+    /// background thread, so a slow disk never holds up activation
+    cab_load_due: bool,
 }
 
 /// What is done away from the audio thread
@@ -228,7 +231,12 @@ impl Default for GuitarAmpPlugin {
     fn default() -> Self {
         let chain = AmpChain::new();
         let cab_loader = Arc::new(CabLoader::new(chain.cab_stage(), chain.sample_rate()));
-        Self { params: Arc::new(GuitarAmpParams::default()), chain, cab_loader }
+        Self {
+            params: Arc::new(GuitarAmpParams::default()),
+            chain,
+            cab_loader,
+            cab_load_due: false,
+        }
     }
 }
 
@@ -541,14 +549,16 @@ impl Plugin for GuitarAmpPlugin {
         &mut self,
         _audio_io_layout: &AudioIOLayout,
         buffer_config: &BufferConfig,
-        context: &mut impl InitContext<Self>,
+        _context: &mut impl InitContext<Self>,
     ) -> bool {
         self.chain.set_sample_rate(buffer_config.sample_rate);
         // The player's own cabinet is made for one sample rate, and a project that was
-        // just loaded may name another file: read it again. Done before this returns, so
-        // the first block already plays through it. With no file chosen no disk is read
+        // just loaded may name another file: read it again. The read is not waited for:
+        // the first block asks the host to do it in the background, and the amp plays
+        // through its own cabinet until the file has been read. With no file chosen no
+        // disk is read
         self.cab_loader.set_sample_rate(buffer_config.sample_rate);
-        context.execute(Task::LoadCabinet);
+        self.cab_load_due = true;
         true
     }
 
@@ -567,8 +577,11 @@ impl Plugin for GuitarAmpPlugin {
         &mut self,
         buffer: &mut Buffer,
         _aux: &mut AuxiliaryBuffers,
-        _context: &mut impl ProcessContext<Self>,
+        context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        if std::mem::take(&mut self.cab_load_due) {
+            context.execute_background(Task::LoadCabinet);
+        }
         let settings = self.params.settings();
 
         match buffer.as_slice() {
@@ -619,6 +632,36 @@ nih_export_vst3!(GuitarAmpPlugin);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An init context that counts the tasks run on the calling thread
+    struct CountingContext(std::cell::Cell<u32>);
+
+    impl InitContext<GuitarAmpPlugin> for CountingContext {
+        fn plugin_api(&self) -> PluginApi {
+            PluginApi::Standalone
+        }
+        fn execute(&self, _task: Task) {
+            self.0.set(self.0.get() + 1);
+        }
+        fn set_latency_samples(&self, _samples: u32) {}
+        fn set_current_voice_capacity(&self, _capacity: u32) {}
+    }
+
+    #[test]
+    fn test_activation_does_not_read_the_cabinet_file() {
+        let mut amp = GuitarAmpPlugin::default();
+        let mut context = CountingContext(std::cell::Cell::new(0));
+        let config = BufferConfig {
+            sample_rate: 44_100.0,
+            min_buffer_size: None,
+            max_buffer_size: 512,
+            process_mode: ProcessMode::Realtime,
+        };
+        assert!(amp.initialize(&GuitarAmpPlugin::AUDIO_IO_LAYOUTS[0], &config, &mut context));
+        // Nothing was read before `initialize` returned: the first block asks for it
+        assert_eq!(context.0.get(), 0);
+        assert!(amp.cab_load_due);
+    }
 
     #[test]
     fn test_parameters_start_at_the_settings_the_chain_starts_with() {

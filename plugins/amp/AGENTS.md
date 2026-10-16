@@ -87,7 +87,7 @@ How it behaves:
   Latency stays the same
 - The cabinet choice is a persisted file name, not a parameter and not part of a preset. It
   stays when another amp is picked. A missing or unusable file plays the amp's own cabinet
-- Files are read on a background task (and in `initialize`), never on the audio thread; the taps
+- Files are read on a background task (`initialize` only asks for one, which the first block hands to the host's background thread), never on the audio thread; the taps
   reach it through `CabStage` without allocating, freeing or waiting
 - The folder is created the first time the stepper is used, not by loading the plugin
 - A 40 ms cabinet adds about 0.1 % of a core against the amp's own at any rate. Its late part is
