@@ -159,7 +159,8 @@ pub fn slim_pedal(ui: &Ui, rect: Rect, style: &MiniStyle) -> Rect {
 
 fn titled_box(painter: &Painter, rect: Rect, style: &MiniStyle, title_size: f32) -> Rect {
     let top = painted_box(painter, rect, style.paint, MINI_CORNER_RADIUS);
-    // The art goes under the screws, the title and the controls
+    // The print, then the art, go under the screws, the title and the controls
+    super::artwork::paint_art(painter, top, MINI_CORNER_RADIUS, super::artwork::MINI);
     art::motif(painter, top, style.paint, style.motif);
     screws(painter, top, MINI_SCREW_INSET, MINI_SCREW_SCALE);
     spaced_text(

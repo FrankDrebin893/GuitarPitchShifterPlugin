@@ -18,6 +18,8 @@ pub const BASS: &[u8] = include_bytes!("../../assets/art/bass.png");
 pub const PAD: &[u8] = include_bytes!("../../assets/art/pad.png");
 /// The artwork of the Glass Bells
 pub const BELLS: &[u8] = include_bytes!("../../assets/art/bells.png");
+/// The print of every mini pedal, in neutral inks so that it suits any paint
+pub const MINI: &[u8] = include_bytes!("../../assets/art/mini.png");
 /// The artwork of the Guitar Amp's head
 pub const AMP: &[u8] = include_bytes!("../../assets/art/amp.png");
 
@@ -139,7 +141,7 @@ mod tests {
 
     #[test]
     fn test_art_decodes_and_is_mostly_clear_in_the_middle() {
-        for art in [PITCH_SHIFTER, AMP, DRUMS, BASS, PAD, BELLS] {
+        for art in [PITCH_SHIFTER, AMP, DRUMS, BASS, PAD, BELLS, MINI] {
             let picture = decode(art).expect("the PNG decodes");
             assert!(picture.width >= 400 && picture.height >= 300);
             let alpha_at = |x: usize, y: usize| picture.rgba[(y * picture.width + x) * 4 + 3];

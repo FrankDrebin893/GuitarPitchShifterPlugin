@@ -264,7 +264,24 @@ def amp(w=1920, h=708):
     return compose(layers, w, h)
 
 
-ART = {"pitch_shifter": pitch_shifter, "amp": amp, "drums": drums, "bass": bass, "pad": pad, "bells": bells}
+def mini(w=440, h=1000):
+    """One print for every mini pedal, in neutral inks (cream and shadow) so any paint takes it:
+    halftone rays from the foot of the pedal, and a hatched band along each side"""
+    x, y = grid(w, h)
+    theta = np.arctan2(x - w * 0.5, h * 1.25 - y)
+    rays = smooth(0.4, 0.95, 0.5 + 0.5 * np.cos(theta * 22))
+    dist = np.sqrt((x - w * 0.5) ** 2 + (h * 1.25 - y) ** 2)
+    a = halftone(rays * smooth(h * 1.5, h * 0.6, dist) * edges(w, h, 0.25), 9, 45)
+    side = smooth(0.16, 0.0, np.minimum(x, w - x) / w) * smooth(0.0, 0.2, y / h)
+    b = hatch(side, 5, 35, 1.8)
+    layers = [
+        ink(a, CREAM, 0.30, w, h, 61),
+        ink(np.roll(b, (2, 3), axis=(0, 1)), np.array([10, 8, 8], np.float32), 0.30, w, h, 63),
+    ]
+    return compose(layers, w, h)
+
+
+ART = {"mini": mini, "pitch_shifter": pitch_shifter, "amp": amp, "drums": drums, "bass": bass, "pad": pad, "bells": bells}
 
 
 def main():
