@@ -70,11 +70,11 @@ const METER_HEIGHT: f32 = 104.0;
 const METER_CAPTION: Vec2 = vec2(0.0, 64.0);
 
 // Small switches below the band. Left of each, its LED above its caption. The amp selector
-// sits under the dials, the bypass under the output knob, and the tuner beside the bypass,
+// is a stepper under the dials, so any number of amps fit; the bypass under the output knob, and the tuner beside the bypass,
 // further from the amps than they are from each other: it is not a fourth amp
 const SWITCH_Y: f32 = 320.0;
-const AMP_SWITCHES: [(Amp, &str, f32); 3] =
-    [(Amp::Klar, "Klar", 255.0), (Amp::Brol, "Brøl", 385.0), (Amp::Torden, "Torden", 515.0)];
+const AMP_STEPPER_X: f32 = 385.0;
+const AMP_STEPPER_WIDTH: f32 = 150.0;
 const BYPASS_X: f32 = 790.0;
 const TUNER_X: f32 = 680.0;
 const CAPTION_OFFSET: f32 = -58.0;
@@ -273,6 +273,16 @@ pub fn default_state() -> Arc<EguiState> {
     EguiState::from_size(WINDOW_WIDTH, WINDOW_HEIGHT)
 }
 
+/// The amp a step of the selector arrives at, round the list
+pub(crate) fn neighbour_amp(amp: Amp, step: Step) -> Amp {
+    let count = Amp::ALL.len();
+    let index = match step {
+        Step::Next => (amp.index() + 1) % count,
+        Step::Previous => (amp.index() + count - 1) % count,
+    };
+    Amp::ALL[index]
+}
+
 pub fn create(
     params: Arc<GuitarAmpParams>,
     editor_state: Arc<EguiState>,
@@ -402,22 +412,23 @@ pub fn create(
                     LAMP_CAPTION_SIZE,
                 );
 
-                for (amp, label, x) in AMP_SWITCHES {
-                    rig_led(
-                        ui.painter(),
-                        origin + vec2(x + CAPTION_OFFSET, LED_Y),
-                        params.amp.value() == amp,
-                    );
-                    silk_label(
-                        ui.painter(),
-                        origin + vec2(x + CAPTION_OFFSET, CAPTION_Y),
-                        label,
-                        CAPTION_SIZE,
-                    );
-                    if small_footswitch(ui, origin + vec2(x, SWITCH_Y), label).clicked() {
-                        // The amp that is left keeps its dials, and the one picked gets its own back
-                        dial_memory::switch_amp(&params, setter, amp);
-                    }
+                // The amp selector: the amp that is left keeps its dials, and the one picked
+                // gets its own back
+                let amp_shown = params.amp.value();
+                silk_label(
+                    ui.painter(),
+                    origin + vec2(AMP_STEPPER_X, CAPTION_Y),
+                    "Amp",
+                    CAPTION_SIZE,
+                );
+                if let Some(step) = stepper(
+                    ui,
+                    origin + vec2(AMP_STEPPER_X, SWITCH_Y),
+                    AMP_STEPPER_WIDTH,
+                    amp_shown.model().name,
+                    "amp",
+                ) {
+                    dial_memory::switch_amp(&params, setter, neighbour_amp(amp_shown, step));
                 }
 
                 // Tuner switch, lit while tuning: the amp is silent then
@@ -460,4 +471,30 @@ pub fn create(
             });
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_amp_stepper_goes_round_the_list_both_ways() {
+        let mut amp = Amp::ALL[0];
+        let mut seen = vec![amp];
+        for _ in 0..Amp::ALL.len() {
+            amp = neighbour_amp(amp, Step::Next);
+            seen.push(amp);
+        }
+        // Every amp once, and back where it started
+        assert_eq!(seen.first(), seen.last());
+        for one in Amp::ALL {
+            assert_eq!(
+                seen.iter().filter(|&&seen| seen == one).count(),
+                if one == seen[0] { 2 } else { 1 }
+            );
+        }
+        for one in Amp::ALL {
+            assert_eq!(neighbour_amp(neighbour_amp(one, Step::Next), Step::Previous), one);
+        }
+    }
 }
