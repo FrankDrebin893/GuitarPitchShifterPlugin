@@ -19,6 +19,7 @@ pub use frame::{
 };
 pub use theme::install;
 pub use widgets::{
-    cents_meter, footswitch, led, param_knob, param_switch, rig_led, signal_lamp, silk_frame,
-    silk_label, small_footswitch, stepper, tuner_display, value_knob, value_switch, Step,
+    cents_meter, footswitch, led, level_meter, lit_level_lamps, param_knob, param_switch, rig_led,
+    signal_lamp, silk_frame, silk_label, small_footswitch, stepper, tuner_display, value_knob,
+    value_switch, Step, LEVEL_MIN_DB,
 };

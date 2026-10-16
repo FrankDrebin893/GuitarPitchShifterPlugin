@@ -880,6 +880,9 @@ impl AmpChain {
             }
         }
 
+        // For the input meter: the level the guitar arrives at, before the input gain
+        let input_peak = signal[..len].iter().fold(0.0f32, |peak, sample| peak.max(sample.abs()));
+
         // The gate listens to the input as it arrives and acts on it after the input gain
         let heard = signal;
         for sample in &mut signal[..len] {
@@ -966,6 +969,7 @@ impl AmpChain {
         }
 
         // The effects do not limit themselves, so the safety clip comes last
+        let mut output_peak = 0.0f32;
         for index in 0..len {
             let level = self.out_level.next();
             if self.wet != wet_target {
@@ -974,6 +978,7 @@ impl AmpChain {
             }
 
             let driven = wide_left[index] * level;
+            output_peak = output_peak.max(driven.abs());
             self.clipped |= driven.abs() > OUTPUT_CLIP_KNEE;
             let mut output = output_clip(driven);
             if muting {
@@ -989,6 +994,7 @@ impl AmpChain {
             }
             if let Some(right) = right.as_deref_mut() {
                 let driven = wide_right[index] * level;
+                output_peak = output_peak.max(driven.abs());
                 self.clipped |= driven.abs() > OUTPUT_CLIP_KNEE;
                 let mut output = output_clip(driven);
                 if muting {
@@ -1004,6 +1010,9 @@ impl AmpChain {
                 }
             }
         }
+
+        // For the meters, one more store per chunk: the sound does not depend on it
+        self.lamps.note_peaks(input_peak, output_peak);
 
         // Start from silence when the amp comes back, not from where it was left, and
         // without the repeats and the tail of what was played before
@@ -2818,6 +2827,33 @@ mod tests {
         assert_eq!(lamps.gate_gain(), 1.0);
         chain.reset();
         assert_eq!(lamps.gate_gain(), 0.0);
+    }
+
+    #[test]
+    fn test_meters_read_the_input_and_the_output_levels() {
+        let db = |level: f32| 20.0 * level.log10();
+        for input_level in [0.5f32, 0.1, 0.01] {
+            let settings = AmpSettings { out_level: 0.2, ..with_amp(Amp::Klar, 0.3) };
+            let mut chain = new_chain(SAMPLE_RATE);
+            let lamps = chain.lamp_reading();
+            let mut signal = sine(1000.0, input_level, SAMPLE_RATE, 9600);
+            chain.process(&settings, &mut signal, None);
+            let (input, output) = lamps.take_peaks();
+            assert!((db(input) - db(input_level)).abs() < 0.5, "{} {}", db(input), db(input_level));
+            // The output is read in front of the safety clip, which does nothing this low
+            let heard = signal.iter().fold(0.0f32, |peak, sample| peak.max(sample.abs()));
+            assert!((db(output) - db(heard)).abs() < 0.5, "{} {}", db(output), db(heard));
+            assert_eq!(lamps.take_peaks(), (0.0, 0.0));
+        }
+
+        // Nothing is read while bypassed
+        let mut chain = new_chain(SAMPLE_RATE);
+        let lamps = chain.lamp_reading();
+        let bypassed = AmpSettings { bypass: true, ..with_amp(Amp::Klar, 0.3) };
+        for _ in 0..40 {
+            chain.process(&bypassed, &mut sine(1000.0, 0.5, SAMPLE_RATE, BLOCK), None);
+        }
+        assert_eq!(lamps.take_peaks(), (0.0, 0.0));
     }
 
     #[test]

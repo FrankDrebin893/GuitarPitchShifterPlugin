@@ -4,9 +4,9 @@ use nih_plug_egui::{create_egui_editor, EguiState};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, PoisonError};
 use suite_common::ui::{
-    self, param_knob, param_switch, rig_led, signal_lamp, silk_label, small_footswitch, stepper,
-    theme, tuner_display, MiniStyle, Motif, Ornament, PedalStyle, Step, BENCH_MARGIN, SLIM_KNOBS,
-    SLIM_KNOB_RADIUS, SLIM_LED, SLIM_SWITCH,
+    self, level_meter, param_knob, param_switch, rig_led, signal_lamp, silk_label,
+    small_footswitch, stepper, theme, tuner_display, MiniStyle, Motif, Ornament, PedalStyle, Step,
+    BENCH_MARGIN, SLIM_KNOBS, SLIM_KNOB_RADIUS, SLIM_LED, SLIM_SWITCH,
 };
 
 use crate::cab_stage::{CabLoader, CabStatus};
@@ -59,6 +59,14 @@ const OUTPUT_X: f32 = 790.0;
 const CLIP_LAMP: Vec2 = vec2(872.0, 104.0);
 const LAMP_CAPTION: Vec2 = vec2(0.0, 18.0);
 const LAMP_CAPTION_SIZE: f32 = 13.0;
+
+// The level meters, one in each wing of the head beside the dials: the input's under the
+// jack it comes in at, the output's next to the output knob and the clip lamp. A column of
+// lamps on label tape, with its caption under it
+const INPUT_METER: Vec2 = vec2(60.0, 126.0);
+const OUTPUT_METER: Vec2 = vec2(915.0, 126.0);
+const METER_HEIGHT: f32 = 104.0;
+const METER_CAPTION: Vec2 = vec2(0.0, 64.0);
 
 // Small switches below the band. Left of each, its LED above its caption. The amp selector
 // sits under the dials, the bypass under the output knob, and the tuner beside the bypass,
@@ -297,6 +305,7 @@ pub fn create(
                     ui.ctx().request_repaint();
                 }
                 let (gate_open, clipping) = lamps.shown();
+                let [input_db, output_db] = lamps.levels();
 
                 let head = Rect::from_min_size(
                     window + vec2(BENCH_MARGIN, BENCH_MARGIN),
@@ -373,6 +382,17 @@ pub fn create(
                     "Output",
                     None,
                 );
+                for (place, level, caption) in
+                    [(INPUT_METER, input_db, "Input"), (OUTPUT_METER, output_db, "Output")]
+                {
+                    level_meter(ui.painter(), origin + place, METER_HEIGHT, level);
+                    silk_label(
+                        ui.painter(),
+                        origin + place + METER_CAPTION,
+                        caption,
+                        LAMP_CAPTION_SIZE,
+                    );
+                }
                 signal_lamp(ui.painter(), origin + CLIP_LAMP, clipping);
                 silk_label(
                     ui.painter(),
