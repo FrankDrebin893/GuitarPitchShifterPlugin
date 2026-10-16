@@ -52,6 +52,8 @@ Three new instruments, each a pedal of its own:
 - With a cabinet of your own, Mic and Resonance no longer follow the amp you picked: they work
   on the same frequencies for every amp (Mic a shelf up high, Resonance a bell at 110 Hz), and
   at their centre they leave your file as it is
+- Torden's palm mutes are tighter: about 6 dB less below 100 Hz against the mids than Brøl, up
+  from about 4, and a low E keeps a little more of its fundamental than before
 - Torden's Gain dial does more above 5: it is no longer squeezed flat by the middle of the dial,
   so 5 stays tighter and more dynamic and 5 to 10 grows into thicker, singing sustain. The
   dial is a little hotter at the top

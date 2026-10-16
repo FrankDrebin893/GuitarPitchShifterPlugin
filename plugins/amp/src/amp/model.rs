@@ -442,7 +442,7 @@ static TORDEN: AmpModel = AmpModel {
         },
     ],
     fizz_hz: Some(7500.0),
-    lowcut_hz: Some(120.0),
+    lowcut_hz: Some(100.0),
     level_db: [2.0, 1.2, 0.8, 0.0, 0.0],
     makeup_db: [0.0; 5],
     tone: ToneModel {
@@ -468,7 +468,7 @@ static TORDEN: AmpModel = AmpModel {
         driven_sag: 0.0,
         driven_sag_from: 0.0,
         resonance_hz: 125.0,
-        resonance_db: 7.0,
+        resonance_db: 3.0,
         presence_hz: 3800.0,
         presence_db: 10.0,
     },
