@@ -9,6 +9,7 @@ use suite_common::ui::{
     BENCH_MARGIN, SLIM_KNOBS, SLIM_KNOB_RADIUS, SLIM_LED, SLIM_SWITCH,
 };
 
+use crate::cab::MicType;
 use crate::cab_stage::{CabLoader, CabStatus, NO_FILES_SHOWN};
 use crate::dial_memory;
 use crate::lamps::{LampReading, LampView};
@@ -75,6 +76,9 @@ const METER_CAPTION: Vec2 = vec2(0.0, 64.0);
 const SWITCH_Y: f32 = 320.0;
 const AMP_STEPPER_X: f32 = 385.0;
 const AMP_STEPPER_WIDTH: f32 = 150.0;
+// The microphone of the cabinet, beside the amp selector: three letters on its tape
+const MIC_STEPPER_X: f32 = 560.0;
+const MIC_STEPPER_WIDTH: f32 = 54.0;
 const BYPASS_X: f32 = 790.0;
 const TUNER_X: f32 = 680.0;
 const CAPTION_OFFSET: f32 = -58.0;
@@ -303,6 +307,16 @@ pub(crate) fn neighbour_amp(amp: Amp, step: Step) -> Amp {
     Amp::ALL[index]
 }
 
+/// The microphone a step of its selector arrives at, round the list
+pub(crate) fn neighbour_mic(mic: MicType, step: Step) -> MicType {
+    let count = MicType::ALL.len();
+    let index = MicType::ALL.iter().position(|&each| each == mic).unwrap_or(0);
+    MicType::ALL[match step {
+        Step::Next => (index + 1) % count,
+        Step::Previous => (index + count - 1) % count,
+    }]
+}
+
 pub fn create(
     params: Arc<GuitarAmpParams>,
     editor_state: Arc<EguiState>,
@@ -451,6 +465,26 @@ pub fn create(
                     dial_memory::switch_amp(&params, setter, neighbour_amp(amp_shown, step));
                 }
 
+                // The microphone the cabinet is heard with, as the selector of the amp
+                let mic_shown = params.cab_mic_type.value();
+                silk_label(
+                    ui.painter(),
+                    origin + vec2(MIC_STEPPER_X, CAPTION_Y),
+                    "Mic",
+                    CAPTION_SIZE,
+                );
+                if let Some(step) = stepper(
+                    ui,
+                    origin + vec2(MIC_STEPPER_X, SWITCH_Y),
+                    MIC_STEPPER_WIDTH,
+                    mic_shown.short_name(),
+                    "mic",
+                ) {
+                    setter.begin_set_parameter(&params.cab_mic_type);
+                    setter.set_parameter(&params.cab_mic_type, neighbour_mic(mic_shown, step));
+                    setter.end_set_parameter(&params.cab_mic_type);
+                }
+
                 // Tuner switch, lit while tuning: the amp is silent then
                 rig_led(ui.painter(), origin + vec2(TUNER_X + CAPTION_OFFSET, LED_Y), tuning);
                 silk_label(
@@ -496,6 +530,18 @@ pub fn create(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_mic_stepper_goes_round_the_list_both_ways() {
+        let mut mic = MicType::ALL[0];
+        for expected in [MicType::Ribbon, MicType::Condenser, MicType::Dynamic] {
+            mic = neighbour_mic(mic, Step::Next);
+            assert_eq!(mic, expected);
+        }
+        for one in MicType::ALL {
+            assert_eq!(neighbour_mic(neighbour_mic(one, Step::Previous), Step::Next), one);
+        }
+    }
 
     #[test]
     fn test_amp_stepper_goes_round_the_list_both_ways() {

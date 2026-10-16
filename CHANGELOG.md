@@ -53,6 +53,10 @@ Three new instruments, each a pedal of its own:
   gives out is rounded off under full scale, and left alone below 70 % of it. The delay's
   last 28 dB of tail (everything under -72 dBFS) is cut, so a 1000 ms delay at full feedback
   falls idle after about 37 seconds instead of 62, and a 350 ms one after 14 instead of 22
+- The cabinet can be heard through three microphones, picked with a Mic stepper beside the amp
+  selector: Dynamic (the cabinet as it was, and the default), Ribbon (warm, dark, a relaxed
+  top) and Condenser (air on top, the lower mids scooped). The Mic dial still moves the
+  microphone on the cone
 - Own cabinets: a file that cannot be used shows as `!NAME` instead of BAD FILE, stepping where
   the cabinets folder has no files says NO FILES for a moment, and hovering the Speaker
   caption shows where the folder is (a double-click on it opens the folder)
