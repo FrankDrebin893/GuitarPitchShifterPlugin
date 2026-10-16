@@ -54,6 +54,9 @@ Three new instruments, each a pedal of its own:
   front of the detector, so a note no longer drops out at -45 dBFS hum. A string a note away
   from the hum (G1 against 50 Hz, B1 against 60 Hz) is read up to about 5 cents off while
   the hum is there. Without hum nothing changes
+- With a cabinet of your own, Mic and Resonance no longer follow the amp you picked: they work
+  on the same frequencies for every amp (Mic a shelf up high, Resonance a bell at 110 Hz), and
+  at their centre they leave your file as it is
 - Switching amp, or moving a pedal, dips the sound for about 9 ms instead of 10: the fade is
   4.5 ms down and 4.5 ms up. It still does not click
 - Your own cabinets can be 8-bit or 64-bit float WAV files, which showed BAD FILE before

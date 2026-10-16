@@ -1,4 +1,4 @@
-use crate::amp::model::Amp;
+use crate::amp::model::{Amp, NEUTRAL_CAB};
 use crate::amp::poweramp::PowerAmp;
 use crate::amp::preamp::Preamp;
 use crate::amp::tonestack::{ToneCurve, ToneStack};
@@ -523,6 +523,7 @@ impl AmpChain {
             return;
         }
         let unheard = !self.primed || self.wet == 0.0;
+        let was_user_cab = self.user_cab;
         let Self { cab_stage, cabinet, cab_irs, user_cab, cabinet_busy, amp, sample_rate, .. } =
             self;
         cab_stage.take(|taps, spectra, made_for| {
@@ -543,6 +544,10 @@ impl AmpChain {
                 *cabinet_busy = cabinet.swap_len();
             }
         });
+        // The dials work on other frequencies with a file than without: set them again
+        if self.user_cab != was_user_cab {
+            self.cab_applied = [f32::NAN; 2];
+        }
     }
 
     pub fn sample_rate(&self) -> f32 {
@@ -800,7 +805,10 @@ impl AmpChain {
         let cab = [self.dials.cab_mic, self.dials.cab_res];
         if cab != self.cab_applied {
             let steps = if snap { 0 } else { CHUNK as u32 };
-            self.cab_voicing.set(&model.cab, cab[0], cab[1], self.sample_rate, steps);
+            // A file has its own mic position and resonance: the dials work on fixed
+            // frequencies there, not on the amp's cabinet
+            let voiced = if self.user_cab { &NEUTRAL_CAB } else { &model.cab };
+            self.cab_voicing.set(voiced, cab[0], cab[1], self.sample_rate, steps);
             self.cab_applied = cab;
         }
     }
@@ -4354,9 +4362,11 @@ mod tests {
     #[test]
     fn test_cabinet_dials_work_on_the_players_cabinet() {
         // Through a cabinet of one sample what is heard of the dials is the dials alone:
-        // they sit behind the amp, so they change its sound by what their filters do
+        // they sit behind the amp, so they change its sound by what their filters do. A file
+        // has its own mic position and resonance, so they work on the same frequencies
+        // whichever amp is picked
+        let mut seen = Vec::new();
         for amp in Amp::ALL {
-            let cab = &amp.model().cab;
             let level = |mic: f32, res: f32, freq_hz: f32| {
                 let settings = AmpSettings {
                     cab_mic: mic,
@@ -4369,18 +4379,25 @@ mod tests {
                     run_blocks(&mut chain_with_cab(&[1.0], SAMPLE_RATE), &settings, &input, BLOCK);
                 to_db(level_at(&output[12_000..], SAMPLE_RATE, freq_hz))
             };
-            let bright = level(1.0, 0.5, 5000.0) - level(0.5, 0.5, 5000.0);
-            let dark = level(0.0, 0.5, 4000.0) - level(0.5, 0.5, 4000.0);
-            let thump = level(0.5, 1.0, cab.resonance_hz) - level(0.5, 0.5, cab.resonance_hz);
-            assert!(bright > 4.0, "{:?}: Mic 10 adds {:.1} dB at 5 kHz", amp, bright);
-            assert!(dark < -4.0, "{:?}: Mic 0 adds {:.1} dB at 4 kHz", amp, dark);
+            let resonance_hz = NEUTRAL_CAB.resonance_hz;
+            let bright = level(1.0, 0.5, 8000.0) - level(0.5, 0.5, 8000.0);
+            let dark = level(0.0, 0.5, 8000.0) - level(0.5, 0.5, 8000.0);
+            let thump = level(0.5, 1.0, resonance_hz) - level(0.5, 0.5, resonance_hz);
+            assert!(bright > 5.0, "{:?}: Mic 10 adds {:.1} dB at 8 kHz", amp, bright);
+            assert!(dark < -5.0, "{:?}: Mic 0 adds {:.1} dB at 8 kHz", amp, dark);
             assert!(
                 (thump - 6.0).abs() < 0.5,
                 "{:?}: Resonance 10 adds {:.1} dB at {} Hz",
                 amp,
                 thump,
-                cab.resonance_hz
+                resonance_hz
             );
+            seen.push([bright, dark, thump]);
+        }
+        for values in &seen[1..] {
+            for (a, b) in values.iter().zip(&seen[0]) {
+                assert!((a - b).abs() < 0.3, "The amps differ: {:?}", seen);
+            }
         }
     }
 
