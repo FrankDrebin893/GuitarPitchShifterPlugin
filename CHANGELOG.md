@@ -51,6 +51,8 @@ Three new instruments, each a pedal of its own:
   ear; only the last bits of the output move
 - A project with a large cabinet file on a slow disk no longer holds up the amp opening: the
   file is read in the background, and the amp plays through its own cabinet until it has arrived
+- The amp is picked with a stepper (a name on label tape with a button at each end) under the
+  dials, instead of three switches. Each amp still keeps its own dials
 - Torden's palm mutes are tighter: about 6 dB less below 100 Hz against the mids than Brøl, up
   from about 4, and a low E keeps a little more of its fundamental than before
 - Torden's Gain dial does more above 5: it is no longer squeezed flat by the middle of the dial,

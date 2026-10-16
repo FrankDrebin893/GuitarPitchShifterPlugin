@@ -287,7 +287,7 @@ The style guide of the root `AGENTS.md` applies; these are the rules for a windo
   that is not there
 - **A file choice is never a parameter.** Keep the file name (not the path) in a `#[persist]` field
 - **Tuner:** a `small_footswitch` with `rig_led` and a `silk_label` on the head, beside the On
-  switch and further from the amp switches than they are from each other. While it is on, a
+  switch and further from the amp stepper than the On switch is. While it is on, a
   `tuner_display` under its own caption takes the place of the preset `stepper`: note name in
   `mono` capitals at the left, 17 lamps, flat to the left and sharp to the right, the larger
   middle lamp lit alone within 2 cents. Lamps are `LED_ON` and `LED_OFF` on `TAPE`; no needles,
