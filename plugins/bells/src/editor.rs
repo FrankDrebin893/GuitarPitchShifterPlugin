@@ -19,6 +19,7 @@ const STYLE: PedalStyle = PedalStyle {
     ornament: Ornament::Glints,
     jacks: ["Stereo Out", "MIDI In"],
     band_y: 394.0,
+    art: Some(ui::artwork::BELLS),
 };
 
 pub fn default_state() -> Arc<EguiState> {

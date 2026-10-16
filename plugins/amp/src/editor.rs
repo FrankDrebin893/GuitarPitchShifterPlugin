@@ -35,6 +35,7 @@ pub(crate) const STYLE: PedalStyle = PedalStyle {
     ornament: Ornament::Bolts,
     jacks: ["Stereo Out", "In"],
     band_y: 236.0,
+    art: Some(ui::artwork::AMP),
 };
 
 // The preset display, top centre between the jack captions: its caption, and under it the

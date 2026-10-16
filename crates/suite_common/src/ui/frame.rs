@@ -5,6 +5,8 @@ use nih_plug_egui::egui::{
 };
 
 use super::art::{self, Motif};
+use super::hardware;
+use super::raster;
 use super::theme::*;
 use super::widgets::badge;
 
@@ -86,6 +88,8 @@ pub struct PedalStyle {
     /// Vertical centre of the name band: from the top of the window for `pedal`,
     /// from the top of its rectangle for `head`
     pub band_y: f32,
+    /// Picture printed on the top face under everything else: one of `artwork`'s, or `None`
+    pub art: Option<&'static [u8]>,
 }
 
 /// What makes one mini pedal of a rig differ from the next
@@ -106,6 +110,7 @@ pub fn pedal(ctx: &Context, style: &PedalStyle, add_controls: impl FnOnce(&mut U
         let window = ui.max_rect();
         let painter = ui.painter();
         let top = enclosure(painter, window.shrink(BENCH_MARGIN), style.paint);
+        art_under_print(painter, top, style);
         print(painter, top, window.top() + style.band_y, BAND_ANGLE_DEG, style);
         add_controls(ui, origin);
     });
@@ -121,11 +126,20 @@ pub fn rig(ctx: &Context, add_contents: impl FnOnce(&mut Ui, Pos2)) {
     });
 }
 
+fn art_under_print(painter: &Painter, top: Rect, style: &PedalStyle) {
+    if let Some(art) = style.art {
+        // The screws are on top of it: they are drawn with the box, so draw the art first
+        super::artwork::paint_art(painter, top, CORNER_RADIUS, art);
+        screws(painter, top, SCREW_INSET, 1.0);
+    }
+}
+
 /// Amp head: a wide enclosure filling `rect`, with everything a pedal has printed on it.
 /// The name band is tilted less than on a pedal. Returns the top face.
 pub fn head(ui: &Ui, rect: Rect, style: &PedalStyle) -> Rect {
     let painter = ui.painter();
     let top = enclosure(painter, rect, style.paint);
+    art_under_print(painter, top, style);
     print(painter, top, rect.top() + style.band_y, HEAD_BAND_ANGLE_DEG, style);
     top
 }
@@ -254,17 +268,8 @@ fn shell(
 
 /// The box without its screws. Returns the top face
 fn painted_box(painter: &Painter, rect: Rect, paint: Color32, radius: f32) -> Rect {
-    // The darker rectangle shows below the paint as the lower edge of the box
-    painter.rect_filled(rect, radius, paint.gamma_multiply(0.72));
-    let top = Rect::from_min_max(rect.min, rect.max - vec2(0.0, EDGE_HEIGHT));
-    painter.rect_filled(top, radius, paint);
-    painter.rect_stroke(
-        top.shrink(1.0),
-        radius - 1.0,
-        Stroke::new(1.5, Color32::from_white_alpha(45)),
-        StrokeKind::Inside,
-    );
-    top
+    raster::paint_box(painter, rect, radius, EDGE_HEIGHT, paint);
+    Rect::from_min_max(rect.min, rect.max - vec2(0.0, EDGE_HEIGHT))
 }
 
 /// A screw in each corner of the top face `top`
@@ -347,11 +352,7 @@ fn jack_label(painter: &Painter, pos: Pos2, text: &str, anchor: Align2) {
 
 /// Slotted screw head. `scale` is 1 on a pedal
 fn screw(painter: &Painter, center: Pos2, slot_angle: f32, scale: f32) {
-    painter.circle_filled(center + vec2(0.0, 1.0), 6.5 * scale, SHADOW);
-    painter.circle_filled(center, 6.0 * scale, CHROME);
-    painter.circle_stroke(center, 6.0 * scale, Stroke::new(1.0, Color32::from_black_alpha(110)));
-    let slot = Vec2::angled(slot_angle) * 4.0 * scale;
-    painter.line_segment([center - slot, center + slot], Stroke::new(1.5, INK));
+    raster::paint_screw(painter, center, slot_angle, scale);
 }
 
 /// Tilted cream band across the enclosure, with the plugin name in heavy letters
@@ -376,11 +377,13 @@ fn name_band(
     let half = BAND_HEIGHT / 2.0;
     let [top_left, top_right] = edge(-half);
     let [bottom_left, bottom_right] = edge(half);
+    let corners = [top_left, top_right, bottom_right, bottom_left];
     painter.add(Shape::convex_polygon(
-        vec![top_left, top_right, bottom_right, bottom_left],
-        SILK,
+        corners.iter().map(|corner| *corner + vec2(0.0, 2.0)).collect(),
+        SHADOW,
         Stroke::NONE,
     ));
+    hardware::paint_paper(painter, corners, vec2(enclosure.width(), BAND_HEIGHT));
     // Ink line along each edge, then a thin cream line outside it
     for side in [-1.0, 1.0] {
         painter.line_segment(edge(side * (half - 1.5)), Stroke::new(3.0, INK));

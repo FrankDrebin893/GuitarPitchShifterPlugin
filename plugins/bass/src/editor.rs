@@ -20,6 +20,7 @@ const STYLE: PedalStyle = PedalStyle {
     ornament: Ornament::Strings,
     jacks: ["Out", "MIDI In"],
     band_y: 394.0,
+    art: Some(ui::artwork::BASS),
 };
 
 // One footswitch per voice, with its horizontal position
