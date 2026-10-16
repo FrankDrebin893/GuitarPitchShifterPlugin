@@ -2,7 +2,7 @@ use crate::amp::model::Amp;
 use crate::amp::poweramp::PowerAmp;
 use crate::amp::preamp::Preamp;
 use crate::amp::tonestack::{ToneCurve, ToneStack};
-use crate::cab::{design_ir, CabIr, CabVoicing, Cabinet};
+use crate::cab::{design_ir, CabIr, CabVoicing, Cabinet, MicType};
 use crate::cab_stage::CabStage;
 use crate::comp::{Comp, CompSettings};
 use crate::delay::{Delay, DelaySettings};
@@ -104,6 +104,8 @@ pub struct AmpSettings {
     /// The cabinet's dials, 0.0 to 1.0. Both leave the cabinet as designed at 0.5
     pub cab_mic: f32,
     pub cab_res: f32,
+    /// Which microphone hears the cabinet
+    pub mic_type: MicType,
 
     /// The two effects behind the cabinet. They smooth their own settings
     pub delay: DelaySettings,
@@ -148,6 +150,7 @@ impl Default for AmpSettings {
             cab_on: true,
             cab_mic: 0.5,
             cab_res: 0.5,
+            mic_type: MicType::Dynamic,
             delay: DelaySettings::default(),
             reverb: ReverbSettings::default(),
             out_level: 1.0,
@@ -293,6 +296,9 @@ pub struct AmpChain {
     presence_applied: f32,
     // Mic and Resonance, likewise
     cab_applied: [f32; 2],
+    // The microphone, which is not a dial: it is taken as it is set
+    mic_type: MicType,
+    mic_type_applied: Option<MicType>,
     // False until the first block after a reset: the dials then start at the settings
     primed: bool,
     // Samples left until the dials are read again. Counted across blocks, so the output
@@ -371,6 +377,8 @@ impl AmpChain {
             tone_applied: [f32::NAN; 3],
             presence_applied: f32::NAN,
             cab_applied: [f32::NAN; 2],
+            mic_type: MicType::Dynamic,
+            mic_type_applied: None,
             primed: false,
             until_tick: 0,
             wet: 1.0,
@@ -562,6 +570,7 @@ impl AmpChain {
         self.tone_applied = [f32::NAN; 3];
         self.presence_applied = f32::NAN;
         self.cab_applied = [f32::NAN; 2];
+        self.mic_type_applied = None;
     }
 
     pub fn reset(&mut self) {
@@ -647,6 +656,7 @@ impl AmpChain {
         mut right: Option<&mut [f32]>,
     ) {
         self.wanted_amp = settings.amp;
+        self.mic_type = settings.mic_type;
         let wet_target = if settings.bypass { 0.0 } else { 1.0 };
         if !self.primed {
             self.wet = wet_target;
@@ -796,6 +806,11 @@ impl AmpChain {
         if self.dials.presence != self.presence_applied {
             self.power.set_presence(&model.power, self.dials.presence, oversampled_rate, steps);
             self.presence_applied = self.dials.presence;
+        }
+        if self.mic_type_applied != Some(self.mic_type) {
+            let steps = if snap { 0 } else { CHUNK as u32 };
+            self.cab_voicing.set_mic_type(self.mic_type, self.sample_rate, steps);
+            self.mic_type_applied = Some(self.mic_type);
         }
         let cab = [self.dials.cab_mic, self.dials.cab_res];
         if cab != self.cab_applied {

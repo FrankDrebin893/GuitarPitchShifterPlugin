@@ -167,6 +167,7 @@ How it behaves:
 | Depth (`chorus_depth`, `phaser_depth`, `flanger_depth`, `trem_depth`) | 0-100 % | 50 % | Width of the sweep; for chorus and flanger also the level of the voice |
 | Cabinet (`cab_on`) | on / off | on | Off passes the amp at about the same level, for a cabinet elsewhere |
 | Cab Mic (`cab_mic`) | 0.0-10.0 | 5.0 | Darker to brighter microphone position |
+| Cab Mic Type (`cab_mic_type`) | Dynamic, Ribbon, Condenser | Dynamic | Which microphone hears the cabinet (`MicType` in `cab.rs`): Dynamic leaves it as designed |
 | Cab Resonance (`cab_res`) | 0.0-10.0 | 5.0 | Less or more low thump |
 | Delay (`delay_on`) | on / off | off | Stereo delay behind the cabinet |
 | Delay Time (`delay_time`) | 20-1000 ms | 350 ms | Time between repeats |

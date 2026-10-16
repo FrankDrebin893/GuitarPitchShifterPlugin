@@ -49,6 +49,10 @@ Three new instruments, each a pedal of its own:
   top one at full scale. The window is only redrawn while the lamps move
 - The clippers of the high-gain amp and the overdrive use less CPU. The sound is the same to the
   ear; only the last bits of the output move
+- The cabinet can be heard through three microphones, picked with a Mic stepper beside the amp
+  selector: Dynamic (the cabinet as it was, and the default), Ribbon (warm, dark, a relaxed
+  top) and Condenser (air on top, the lower mids scooped). The Mic dial still moves the
+  microphone on the cone
 - The amp is picked with a stepper (a name on label tape with a button at each end) under the
   dials, instead of three switches. Each amp still keeps its own dials
 - Torden's palm mutes are tighter: about 6 dB less below 100 Hz against the mids than Brøl, up

@@ -24,6 +24,7 @@ mod test_util;
 mod tuner;
 mod user_cab;
 pub use amp::model::Amp;
+use cab::MicType;
 use cab_stage::CabLoader;
 use chain::{AmpChain, AmpSettings, GATE_RELEASE_MS, GATE_THRESHOLD_DB, IN_GAIN_DB};
 use comp::CompSettings;
@@ -192,6 +193,9 @@ pub struct GuitarAmpParams {
     #[id = "cab_res"]
     pub cab_res: FloatParam,
 
+    #[id = "cab_mic_type"]
+    pub cab_mic_type: EnumParam<MicType>,
+
     // Delay
     #[id = "delay_on"]
     pub delay_on: BoolParam,
@@ -334,6 +338,7 @@ impl Default for GuitarAmpParams {
             cab_on: BoolParam::new("Cabinet", defaults.cab_on),
             cab_mic: dial_param("Cab Mic", defaults.cab_mic),
             cab_res: dial_param("Cab Resonance", defaults.cab_res),
+            cab_mic_type: EnumParam::new("Cab Mic Type", defaults.mic_type),
 
             delay_on: BoolParam::new("Delay", defaults.delay.on),
             delay_time: FloatParam::new(
@@ -435,6 +440,7 @@ impl GuitarAmpParams {
             cab_on: self.cab_on.value(),
             cab_mic: self.cab_mic.value(),
             cab_res: self.cab_res.value(),
+            mic_type: self.cab_mic_type.value(),
             delay: DelaySettings {
                 on: self.delay_on.value(),
                 time_ms: self.delay_time.value(),
@@ -671,6 +677,8 @@ mod tests {
             [0.5; 6]
         );
         assert_eq!((settings.cab_mic, settings.cab_res), (0.5, 0.5));
+        // The microphone that was the only one before there were three
+        assert_eq!(settings.mic_type, MicType::Dynamic);
         assert_eq!(
             (settings.delay.time_ms, settings.delay.feedback, settings.delay.mix),
             (350.0, 0.35, 0.25)
