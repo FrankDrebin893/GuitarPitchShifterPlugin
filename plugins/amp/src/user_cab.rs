@@ -219,7 +219,11 @@ pub fn read_wav(path: &Path) -> Result<Recording, LoadError> {
         ErrorKind::NotFound => LoadError::Missing,
         _ => LoadError::Bad,
     })?;
-    let mut reader = hound::WavReader::new(BufReader::new(file)).map_err(|_| LoadError::Bad)?;
+    let mut reader = match hound::WavReader::new(BufReader::new(file)) {
+        Ok(reader) => reader,
+        // hound has no 64-bit float: that one format is read here
+        Err(_) => return read_wav_f64(path),
+    };
     let spec = reader.spec();
     let channels = spec.channels as usize;
     if !(1..=2).contains(&channels) || !(RATE_HZ[0]..=RATE_HZ[1]).contains(&spec.sample_rate) {
@@ -232,7 +236,7 @@ pub fn read_wav(path: &Path) -> Result<Recording, LoadError> {
         (hound::SampleFormat::Float, 32) => {
             reader.samples::<f32>().take(wanted).map_while(Result::ok).step_by(channels).collect()
         }
-        (hound::SampleFormat::Int, bits @ (16 | 24 | 32)) => {
+        (hound::SampleFormat::Int, bits @ (8 | 16 | 24 | 32)) => {
             let scale = 1.0 / (1_i64 << (bits - 1)) as f64;
             reader
                 .samples::<i32>()
@@ -245,6 +249,76 @@ pub fn read_wav(path: &Path) -> Result<Recording, LoadError> {
         _ => return Err(LoadError::Bad),
     };
     Ok(Recording { samples, sample_rate: spec.sample_rate })
+}
+
+/// Reads the start of the left channel of a WAV file of 64-bit floats, which `hound` does
+/// not know. Anything else in the file is `Bad`
+fn read_wav_f64(path: &Path) -> Result<Recording, LoadError> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = BufReader::new(File::open(path).map_err(|_| LoadError::Bad)?);
+    let mut head = [0u8; 12];
+    file.read_exact(&mut head).map_err(|_| LoadError::Bad)?;
+    if &head[..4] != b"RIFF" || &head[8..] != b"WAVE" {
+        return Err(LoadError::Bad);
+    }
+    // (channels, sample rate) once a 64-bit float `fmt ` chunk has been seen
+    let mut format = None;
+    loop {
+        let mut chunk = [0u8; 8];
+        file.read_exact(&mut chunk).map_err(|_| LoadError::Bad)?;
+        let size = u32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]) as u64;
+        let padded = size + (size & 1);
+        match &chunk[..4] {
+            b"fmt " => {
+                let mut fmt = vec![0u8; size.min(64) as usize];
+                file.read_exact(&mut fmt).map_err(|_| LoadError::Bad)?;
+                if fmt.len() < 16 {
+                    return Err(LoadError::Bad);
+                }
+                let tag = u16::from_le_bytes([fmt[0], fmt[1]]);
+                // Extensible files name the format in the first two bytes of the sub-format
+                let tag = if tag == 0xFFFE && fmt.len() >= 26 {
+                    u16::from_le_bytes([fmt[24], fmt[25]])
+                } else {
+                    tag
+                };
+                let channels = u16::from_le_bytes([fmt[2], fmt[3]]) as usize;
+                let rate = u32::from_le_bytes([fmt[4], fmt[5], fmt[6], fmt[7]]);
+                let bits = u16::from_le_bytes([fmt[14], fmt[15]]);
+                if tag != 3 || bits != 64 {
+                    return Err(LoadError::Bad);
+                }
+                format = Some((channels, rate));
+                file.seek(SeekFrom::Current((padded - fmt.len() as u64) as i64))
+                    .map_err(|_| LoadError::Bad)?;
+            }
+            b"data" => {
+                let (channels, rate) = format.ok_or(LoadError::Bad)?;
+                if !(1..=2).contains(&channels) || !(RATE_HZ[0]..=RATE_HZ[1]).contains(&rate) {
+                    return Err(LoadError::Bad);
+                }
+                // A file that ends before its header says it does gives what it has
+                let wanted = ((READ_S * rate as f64) as usize * channels).min(size as usize / 8);
+                let mut bytes = vec![0u8; wanted * 8];
+                let mut got = 0;
+                while got < bytes.len() {
+                    match file.read(&mut bytes[got..]) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => got += n,
+                    }
+                }
+                let samples = bytes[..got / 8 * 8]
+                    .chunks_exact(8)
+                    .step_by(channels)
+                    .map(|b| f64::from_le_bytes(b.try_into().unwrap()) as f32)
+                    .collect();
+                return Ok(Recording { samples, sample_rate: rate });
+            }
+            _ => {
+                file.seek(SeekFrom::Current(padded as i64)).map_err(|_| LoadError::Bad)?;
+            }
+        }
+    }
 }
 
 fn peak(samples: &[f32]) -> f32 {
@@ -362,6 +436,31 @@ pub mod tests {
         float: bool,
         sample_rate: u32,
     ) {
+        if bits == 64 {
+            // hound cannot write this one
+            let mut data = Vec::new();
+            for &sample in left {
+                for channel in 0..channels {
+                    let sample = if channel == 0 { sample } else { -0.5 * sample };
+                    data.extend_from_slice(&(sample as f64).to_le_bytes());
+                }
+            }
+            let mut file = b"RIFF".to_vec();
+            file.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+            file.extend_from_slice(b"WAVEfmt ");
+            file.extend_from_slice(&16u32.to_le_bytes());
+            file.extend_from_slice(&3u16.to_le_bytes());
+            file.extend_from_slice(&channels.to_le_bytes());
+            file.extend_from_slice(&sample_rate.to_le_bytes());
+            file.extend_from_slice(&(sample_rate * channels as u32 * 8).to_le_bytes());
+            file.extend_from_slice(&(channels * 8).to_le_bytes());
+            file.extend_from_slice(&64u16.to_le_bytes());
+            file.extend_from_slice(b"data");
+            file.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            file.extend_from_slice(&data);
+            std::fs::write(path, file).unwrap();
+            return;
+        }
         let spec = hound::WavSpec {
             channels,
             sample_rate,
@@ -474,7 +573,9 @@ pub mod tests {
         let dir = test_dir("formats");
         let response = whole_response(Amp::Brol, 48000.0, 0.02, 0.8);
         let reference = trim_and_level(&response, 48000.0).unwrap();
-        for (bits, float) in [(16, false), (24, false), (32, false), (32, true)] {
+        for (bits, float) in
+            [(8, false), (16, false), (24, false), (32, false), (32, true), (64, true)]
+        {
             for channels in [1, 2] {
                 let path = dir.join(format!("{bits}_{float}_{channels}.wav"));
                 write_ir_wav(&path, &response, channels, bits, float, 48000);
@@ -494,13 +595,16 @@ pub mod tests {
                     .zip(&response)
                     .map(|(a, b)| (a - b).abs())
                     .fold(0.0, f32::max);
-                assert!(off < 2.0 / 32768.0, "{} bit, {} channels: off by {}", bits, channels, off);
+                let step = 2.0 / (1_i64 << (bits.min(24) - 1)) as f32;
+                assert!(off < step, "{} bit, {} channels: off by {}", bits, channels, off);
 
                 let taps = load(&path, 48000.0).unwrap();
                 let (difference, freq_hz) =
                     largest_difference_db((&taps, 48000.0), (&reference, 48000.0), BAND_HZ[1], 60);
+                // 8 bits leave quantization noise 48 dB down, which tells in the quiet tail
+                let allowed = if bits == 8 { 2.0 } else { 0.2 };
                 assert!(
-                    difference.abs() < 0.2,
+                    difference.abs() < allowed,
                     "{} bit, {} channels: {:.2} dB at {:.0} Hz",
                     bits,
                     channels,
@@ -523,9 +627,8 @@ pub mod tests {
         assert_eq!(load(&text, 48000.0).err(), Some(LoadError::Bad));
 
         let response = whole_response(Amp::Brol, 48000.0, 0.01, 0.8);
-        // 8 bit, three channels, a rate nothing records at, silence, no samples at all
-        let cases: [(&str, &[f32], u16, u16, u32); 5] = [
-            ("eight", &response, 1, 8, 48000),
+        // Three channels, a rate nothing records at, silence, no samples at all
+        let cases: [(&str, &[f32], u16, u16, u32); 4] = [
             ("three", &response, 3, 16, 48000),
             ("slow", &response, 1, 16, 4000),
             ("silent", &[0.0; 480], 1, 16, 48000),
