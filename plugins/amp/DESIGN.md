@@ -45,7 +45,7 @@ The reasons behind choices that the code alone does not explain. What it does is
   note at the reference level (now -61)
 - Brøl below Gain 5 is made up in front of its power stage so Gain 0 is clean on pick attacks
   and the safety clip is not what holds the peaks
-- Switching amp fades out over 3.5 ms in front of the cabinet, switches at the silent sample,
+- Switching amp fades out over 4.5 ms in front of the cabinet, switches at the silent sample,
   fades in; the cabinet crossfades over 10 ms. Two amps never run side by side (double the
   oversampled cost). The six dials are shared parameters; each amp's own positions are kept by
   the editor (`amp-dials`, atomics because nih-plug restores state on the audio thread)
@@ -86,7 +86,7 @@ The reasons behind choices that the code alone does not explain. What it does is
   our nih-plug fork: a host that suspends silent plugins never suspends these (about 2 % of a
   core on silence)
 - A mono host layout gets the left effect channel only: the sum combs by up to 6.7 dB
-- The order is saved as ids, never a parameter. A new order fades out in 3.5 ms, swaps at the
+- The order is saved as ids, never a parameter. A new order fades out in 4.5 ms, swaps at the
   silent sample, fades in; a pedal that changes sides starts from rest
 
 ## Tuner

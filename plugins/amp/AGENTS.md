@@ -62,7 +62,7 @@ How it behaves:
 - Amps differ only by constants in `amp/model.rs`. Tune there, never with `match amp` in the DSP
 - Dials are read every 32 samples counted across host blocks, so the output does not depend on
   the host's block size
-- Switching amp fades the amp out over 3.5 ms, reconfigures it at silence and fades it back in
+- Switching amp fades the amp out over 4.5 ms, reconfigures it at silence and fades it back in
 - Bypass crossfades to the untouched input in 10 ms and drops the effects' tails
 - With every pedal off and the cabinet dials at 5.0 the chain is bit-identical to the amp alone
 - Latency is 0.1 to 0.3 ms and nothing is reported to the host
@@ -134,7 +134,7 @@ How it behaves:
   Either way without latency
 - The order is saved with the project (`chain-order`, a list of pedal ids with `amp` between
   the sides), not a parameter and not automatable. The chain reads it with the dials: the
-  output fades to silence in 3.5 ms, the pedals change places, it fades back. A pedal that
+  output fades to silence in 4.5 ms, the pedals change places, it fades back. A pedal that
   changes sides starts from rest. A list that is damaged or from another build is put right,
   never refused
 - The compressor's Level at 5 is as loud as the pedal off (within 0.3 LU at the reference
