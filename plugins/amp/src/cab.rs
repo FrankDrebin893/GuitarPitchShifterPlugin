@@ -3,6 +3,7 @@ use crate::dsp::db_to_gain;
 use crate::dsp::filters::{Biquad, BiquadCoeffs, GlidingBiquad};
 use crate::dsp::partitioned::{self, Tail};
 use crate::dsp::resample::resample;
+use nih_plug::prelude::Enum;
 use std::sync::Mutex;
 
 /// The longest impulse response a cabinet designed here can have: 20 ms at 192 kHz
@@ -67,6 +68,68 @@ const MIC_TRIM_DB: f32 = 0.4;
 // Resonance dial: a bell at the speaker's resonance, this many dB at either end
 const THUMP_DB: f32 = 6.0;
 const THUMP_Q: f32 = 1.4;
+
+/// Which microphone hears the cabinet. The Mic dial moves it; this sets what it hears with
+// Frozen: the variant ids are what DAW projects store
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MicType {
+    /// The cabinet as designed: close, punchy, forward in the mids
+    #[id = "dynamic"]
+    #[name = "Dynamic"]
+    Dynamic,
+    /// Smooth and dark: warm low mids, a relaxed top
+    #[id = "ribbon"]
+    #[name = "Ribbon"]
+    Ribbon,
+    /// Open and detailed: air on top, the lower mids scooped
+    #[id = "condenser"]
+    #[name = "Condenser"]
+    Condenser,
+}
+
+impl MicType {
+    pub const ALL: [MicType; 3] = [MicType::Dynamic, MicType::Ribbon, MicType::Condenser];
+
+    /// Three letters for the display
+    pub fn short_name(self) -> &'static str {
+        match self {
+            MicType::Dynamic => "DYN",
+            MicType::Ribbon => "RIB",
+            MicType::Condenser => "CON",
+        }
+    }
+
+    /// The filters that give the microphone its voice, behind the cabinet and its dials.
+    /// The dynamic is the cabinet as it is: they do nothing
+    fn filters(self, sample_rate: f32) -> [BiquadCoeffs; MIC_FILTERS] {
+        let none = BiquadCoeffs::IDENTITY;
+        match self {
+            MicType::Dynamic => [none; MIC_FILTERS],
+            MicType::Ribbon => [
+                BiquadCoeffs::high_shelf(3200.0, 0.7, -6.0, sample_rate),
+                BiquadCoeffs::peak(220.0, 0.8, 2.5, sample_rate),
+                BiquadCoeffs::peak(6500.0, 1.0, -2.0, sample_rate),
+            ],
+            MicType::Condenser => [
+                BiquadCoeffs::high_shelf(6000.0, 0.7, 4.5, sample_rate),
+                BiquadCoeffs::peak(450.0, 0.8, -3.0, sample_rate),
+                BiquadCoeffs::peak(3600.0, 1.0, 1.5, sample_rate),
+            ],
+        }
+    }
+
+    /// What the microphone does to the level at one frequency, in dB
+    #[cfg(test)]
+    pub fn response_db(self, freq_hz: f32, sample_rate: f32) -> f32 {
+        self.filters(sample_rate)
+            .iter()
+            .map(|filter| filter.magnitude_db(freq_hz, sample_rate))
+            .sum()
+    }
+}
+
+// Filters that make up a microphone's voice
+const MIC_FILTERS: usize = 3;
 
 /// The most samples an impulse response has at a sample rate
 pub fn ir_len(sample_rate: f32) -> usize {
@@ -620,6 +683,8 @@ pub struct CabVoicing {
     mic_high: GlidingBiquad,
     mic_low: GlidingBiquad,
     thump: GlidingBiquad,
+    voice: [GlidingBiquad; MIC_FILTERS],
+    mic_type: MicType,
     // The dial is at its centre, or on its last steps there
     mic_centred: bool,
     thump_centred: bool,
@@ -631,6 +696,8 @@ impl CabVoicing {
             mic_high: GlidingBiquad::new(),
             mic_low: GlidingBiquad::new(),
             thump: GlidingBiquad::new(),
+            voice: [GlidingBiquad::new(); MIC_FILTERS],
+            mic_type: MicType::Dynamic,
             mic_centred: true,
             thump_centred: true,
         }
@@ -649,6 +716,9 @@ impl CabVoicing {
         self.mic_high.reset();
         self.mic_low.reset();
         self.thump.reset();
+        for filter in &mut self.voice {
+            filter.reset();
+        }
     }
 
     /// `mic` and `resonance` are dial positions, 0.0 to 1.0. Below 0.5 the microphone moves
@@ -682,6 +752,25 @@ impl CabVoicing {
         self.thump_centred = thump_centred;
     }
 
+    /// Picks the microphone. The filters move there over the next `steps` samples; a
+    /// dynamic leaves the signal as it is once they have arrived
+    pub fn set_mic_type(&mut self, mic_type: MicType, sample_rate: f32, steps: u32) {
+        if self.mic_type == MicType::Dynamic && mic_type != MicType::Dynamic {
+            // Coming from the plain cabinet the filters start from rest
+            for filter in &mut self.voice {
+                filter.reset();
+            }
+        }
+        for (filter, coeffs) in self.voice.iter_mut().zip(mic_type.filters(sample_rate)) {
+            filter.set(coeffs, steps);
+        }
+        self.mic_type = mic_type;
+    }
+
+    fn voice_runs(&self) -> bool {
+        self.mic_type != MicType::Dynamic || self.voice.iter().any(GlidingBiquad::is_gliding)
+    }
+
     fn mic_coeffs(model: &CabModel, mic: f32, sample_rate: f32) -> ([BiquadCoeffs; 2], bool) {
         let mic = mic.clamp(0.0, 1.0);
         let position = (mic - 0.5) * 2.0;
@@ -713,6 +802,13 @@ impl CabVoicing {
             }
             if self.thump_runs() {
                 *sample = self.thump.process(*sample as f64) as f32;
+            }
+            if self.voice_runs() {
+                let mut heard = *sample as f64;
+                for filter in &mut self.voice {
+                    heard = filter.process(heard);
+                }
+                *sample = heard as f32;
             }
         }
     }
@@ -1599,6 +1695,47 @@ pub mod tests {
         voicing.process(&mut output[3600..]);
         assert!(largest_step(&output[1200..]) < 1.3 * largest_step(&output[1200..2400]));
         assert!(output[3700..] != tone[3700..]);
+    }
+
+    #[test]
+    fn test_microphones_have_their_own_voices() {
+        let at = |mic: MicType, freq_hz: f32| mic.response_db(freq_hz, 48000.0);
+        // The dynamic is the cabinet as it is
+        for freq in [80.0, 450.0, 3000.0, 8000.0] {
+            assert_eq!(at(MicType::Dynamic, freq), 0.0);
+        }
+        // The ribbon is warm and dark
+        assert!(at(MicType::Ribbon, 220.0) > 1.5, "{}", at(MicType::Ribbon, 220.0));
+        assert!(at(MicType::Ribbon, 6000.0) < -5.0, "{}", at(MicType::Ribbon, 6000.0));
+        assert!(at(MicType::Ribbon, 80.0).abs() < 1.5);
+        // The condenser is open on top and scooped below the mids
+        assert!(at(MicType::Condenser, 9000.0) > 3.5, "{}", at(MicType::Condenser, 9000.0));
+        assert!(at(MicType::Condenser, 450.0) < -2.0, "{}", at(MicType::Condenser, 450.0));
+        assert!(at(MicType::Condenser, 80.0).abs() < 1.0);
+        // Apart where it counts: the three are at least 6 dB from each other at 6 kHz
+        let top = MicType::ALL.map(|mic| at(mic, 6000.0));
+        assert!(top[2] - top[1] > 6.0 && top[2] - top[0] > 2.0, "{:?}", top);
+    }
+
+    #[test]
+    fn test_the_voice_filters_do_what_their_response_says_and_leave_a_dynamic_alone() {
+        let level = |mic: MicType, freq_hz: f32| {
+            let mut voicing = CabVoicing::new();
+            voicing.set_mic_type(mic, 48000.0, 0);
+            let input = sine(freq_hz, 0.1, 48000.0, 24_000);
+            let mut output = input.clone();
+            voicing.process(&mut output);
+            if mic == MicType::Dynamic {
+                assert!(output == input);
+            }
+            to_db(rms(&output[12_000..]) / rms(&input[12_000..]))
+        };
+        for mic in MicType::ALL {
+            for freq in [220.0, 450.0, 6000.0] {
+                let expected = mic.response_db(freq, 48000.0);
+                assert!((level(mic, freq) - expected).abs() < 0.2, "{mic:?} at {freq} Hz");
+            }
+        }
     }
 
     #[test]

@@ -6,6 +6,7 @@ param amp
 param bass
 param bypass
 param cab_mic
+param cab_mic_type
 param cab_on
 param cab_res
 param chorus_depth
