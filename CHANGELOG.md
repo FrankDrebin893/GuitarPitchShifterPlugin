@@ -49,6 +49,8 @@ Three new instruments, each a pedal of its own:
   top one at full scale. The window is only redrawn while the lamps move
 - The clippers of the high-gain amp and the overdrive use less CPU. The sound is the same to the
   ear; only the last bits of the output move
+- A project with a large cabinet file on a slow disk no longer holds up the amp opening: the
+  file is read in the background, and the amp plays through its own cabinet until it has arrived
 - With a cabinet of your own, Mic and Resonance no longer follow the amp you picked: they work
   on the same frequencies for every amp (Mic a shelf up high, Resonance a bell at 110 Hz), and
   at their centre they leave your file as it is
