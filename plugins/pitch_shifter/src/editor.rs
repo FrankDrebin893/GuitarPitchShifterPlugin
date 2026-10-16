@@ -17,6 +17,7 @@ const STYLE: PedalStyle = PedalStyle {
     ornament: Ornament::Arrows,
     jacks: ["Out", "In"],
     band_y: 367.0,
+    art: Some(ui::artwork::PITCH_SHIFTER),
 };
 
 pub fn default_state() -> Arc<EguiState> {

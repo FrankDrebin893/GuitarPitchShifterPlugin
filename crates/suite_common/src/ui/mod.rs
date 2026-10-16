@@ -7,7 +7,10 @@
 //!   `rig` is the bare bench for a `head` with `mini_pedal`s and `slim_pedal`s below it
 
 pub mod art;
+pub mod artwork;
 pub mod frame;
+pub mod hardware;
+pub mod raster;
 pub mod theme;
 pub mod widgets;
 

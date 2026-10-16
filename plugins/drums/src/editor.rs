@@ -20,6 +20,7 @@ const STYLE: PedalStyle = PedalStyle {
     ornament: Ornament::Rings,
     jacks: ["Stereo Out", "MIDI In"],
     band_y: 394.0,
+    art: Some(ui::artwork::DRUMS),
 };
 
 // One footswitch per kit, with its horizontal position

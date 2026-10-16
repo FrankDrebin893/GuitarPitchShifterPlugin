@@ -14,6 +14,9 @@ A suite of VST3/CLAP plugins built with Rust and the nih-plug framework. The bra
   `dsp` (filter, noise and the `Hall` reverb of the newer instruments), `measure` (what their tests measure with)
 - `prototypes/jsfx/` - The REAPER scripts that Metal, Groove, bass, pad and bells were written as
   first: the reference for those ports, not built or shipped. Its `README.md` says where a port differs
+- `crates/suite_common/assets/art/` - Bespoke artwork: one RGBA PNG per pedal, printed on its top face under the controls
+  (`ui/artwork.rs`, `PedalStyle.art`). Made by `scripts/make-art.py` (a two-ink screen print: halftone, misregistration,
+  paper dropout) or replaced by a painted or generated PNG at the same path. Keep the middle clear for the controls
 - `crates/suite_common/assets/fonts/` - Embedded fonts (SIL OFL) with their licence files
 - `xtask/` - nih-plug bundler
 - `bundler.toml` - Bundle name per plugin package
@@ -110,8 +113,9 @@ xcopy /E /I /Y "target\bundled\HojtGlassBells.vst3" "C:\Program Files\Common Fil
 
 ## Look
 
-Every plugin is drawn as a painted stompbox. All of it is vector, drawn with egui's painter in
-`crates/suite_common/src/ui/`; there are no image files.
+Every plugin is drawn as a painted stompbox. Shapes, print and art are vector, drawn with egui's painter in
+`crates/suite_common/src/ui/`. Lit surfaces (enclosure, knobs, screws) are rendered per pixel by a small
+software renderer, `raster.rs`, and cached as textures; there are no image files.
 
 - `theme.rs` - Colours, the three embedded fonts (`install`), text helpers. One paint colour per plugin,
   one per mini pedal of a rig (`PEDAL_PAINTS`), and `shade` for darker tones of a paint
@@ -125,6 +129,11 @@ Every plugin is drawn as a painted stompbox. All of it is vector, drawn with egu
   A plugin describes itself with a `PedalStyle`. For a window with several enclosures: `rig`
   (the bare bench), `head` (wide enclosure with everything a pedal has printed on it) and
   `mini_pedal` (small enclosure with only a title), each mini pedal described by a `MiniStyle`
+- `raster.rs` - Per-pixel lit surfaces (signed distance field + one fixed light): `box_image`, `knob_image`,
+  `screw_image`, and `paint_*` that cache them as textures. To look at them without a window:
+  `RASTER_PREVIEW=out.raw cargo test -p suite_common --release preview -- --ignored`
+- `artwork.rs` - Loads the PNGs of `assets/art/`, covers the top face with one, cuts it to the corners
+- `hardware.rs` - Lit footswitch, indicator light, label tape, the paper of the name band
 - `art.rs` - `Motif`: what is painted on a mini pedal under its controls
 
 Controls are placed at fixed positions relative to the window's top left corner. Knobs: drag up and
@@ -160,7 +169,7 @@ controls, portrait) or `plugins/drums/src/editor.rs` (many controls, landscape) 
 - **Jack captions** say what really goes in and out (`In`, `MIDI In`, `Stereo Out`)
 - **Window size:** fixed, sized to the controls. Portrait about 400 wide for up to four controls,
   landscape about 660 wide for more
-- **Clean factory paint:** no wear, textures, gradients or images
+- **Clean factory paint:** no wear or dirt. Surfaces are lit, not flat: powder-coat flake, bevels, brushed and knurled metal come from `ui/raster.rs`, never from image files
 - **New shared pieces go in `suite_common::ui`,** not in a plugin's editor, so every plugin gets them
 
 - **Rigs** (a window of several pedals, as the Guitar Amp has): the rules for the head, mini pedals, pedal art, slim pedals, a rearrangeable board, signal lamps, presets, file choices and the tuner are in `plugins/amp/AGENTS.md`, "Look: the rig". Read them before drawing a second rig

@@ -80,24 +80,7 @@ pub fn knob(
         }
     }
 
-    painter.circle_filled(center + vec2(1.5, 4.0), radius + 1.0, SHADOW);
-
-    // Skirt: a ring of round flutes around a disc
-    let flutes = (radius * 0.8).round().max(8.0) as usize;
-    let flute_radius = std::f32::consts::PI * radius / flutes as f32 * 0.62;
-    painter.circle_filled(center, radius - flute_radius * 0.5, KNOB_SKIRT);
-    for flute in 0..flutes {
-        let angle = std::f32::consts::TAU * flute as f32 / flutes as f32;
-        painter.circle_filled(
-            polar(center, radius - flute_radius, angle),
-            flute_radius,
-            KNOB_SKIRT,
-        );
-    }
-
-    painter.circle_filled(center, radius * 0.7, KNOB_CAP);
-    painter.circle_stroke(center, radius * 0.7, Stroke::new(1.2, KNOB_CAP_EDGE));
-    painter.circle_filled(center, radius * 0.52, KNOB_CAP_TOP);
+    super::raster::paint_knob(painter, center, radius);
 
     let angle = KNOB_START_ANGLE + KNOB_SWEEP * normalized.clamp(0.0, 1.0);
     painter.line_segment(
@@ -217,8 +200,7 @@ pub fn label_tape(painter: &Painter, top_center: Pos2, text: &str, size: f32) {
         Pos2::new(top_center.x - galley.size().x / 2.0 - padding.x, top_center.y),
         galley.size() + padding * 2.0,
     );
-    painter.rect_filled(rect.translate(vec2(0.0, 2.0)), 2.0, SHADOW);
-    painter.rect_filled(rect, 2.0, TAPE);
+    super::hardware::paint_tape(painter, rect);
     painter.galley(rect.min + padding, galley, TAPE_TEXT);
 }
 
@@ -497,26 +479,7 @@ fn stomp_switch(ui: &mut Ui, center: Pos2, id_source: &str, size: f32) -> Respon
     let response = ui.interact(rect, Id::new(("footswitch", id_source)), Sense::click());
     let pressed = response.is_pointer_button_down_on();
 
-    let painter = ui.painter();
-    let ring = Stroke::new(1.0, Color32::from_black_alpha(110));
-    let disc = |center: Pos2, offset: Vec2, radius: f32, color: Color32| {
-        painter.circle_filled(center + offset * scale, radius * scale, color);
-    };
-    disc(center, vec2(0.0, 8.0), 38.0, SHADOW);
-    // Washer, nut, then the cap
-    disc(center, Vec2::ZERO, 37.0, CHROME_LIGHT);
-    painter.circle_stroke(center, 37.0 * scale, ring);
-    disc(center, Vec2::ZERO, 32.0, CHROME);
-    painter.circle_stroke(center, 32.0 * scale, ring);
-
-    let cap = if pressed { center + vec2(0.0, 1.5) * scale } else { center };
-    disc(cap, Vec2::ZERO, 26.0, CHROME_DARK);
-    disc(cap, vec2(-2.0, -2.5), 22.0, CHROME);
-    disc(cap, vec2(-4.5, -5.5), 15.0, CHROME_LIGHT);
-    if !pressed {
-        disc(cap, vec2(-7.0, -8.5), 7.0, CHROME_SHINE);
-    }
-    painter.circle_stroke(cap, 26.0 * scale, ring);
+    super::hardware::paint_stomp(ui.painter(), center, scale, pressed);
 
     response
 }
@@ -541,28 +504,7 @@ pub fn signal_lamp(painter: &Painter, center: Pos2, on: bool) {
 
 /// The measures in here are those of the full-size light
 fn lamp(painter: &Painter, center: Pos2, on: bool, off_color: Color32, socket: bool, scale: f32) {
-    if on {
-        for (radius, alpha) in [(15.0, 22), (11.5, 40), (8.5, 70)] {
-            painter.circle_filled(
-                center,
-                radius * scale,
-                LED_ON.gamma_multiply(alpha as f32 / 255.0),
-            );
-        }
-    }
-    painter.circle_filled(center, 8.5 * scale, CHROME_LIGHT);
-    painter.circle_stroke(center, 8.5 * scale, Stroke::new(1.0, Color32::from_black_alpha(110)));
-    if socket {
-        painter.circle_filled(center, 6.8 * scale, TAPE);
-    }
-    painter.circle_filled(center, 5.5 * scale, if on { LED_ON } else { off_color });
-    if on {
-        painter.circle_filled(
-            center + vec2(-1.2, -1.5) * scale,
-            2.0 * scale,
-            Color32::from_rgb(255, 208, 196),
-        );
-    }
+    super::hardware::paint_lamp(painter, center, on, off_color, socket, scale);
 }
 
 /// Screen-printed caption, centred on `center`
