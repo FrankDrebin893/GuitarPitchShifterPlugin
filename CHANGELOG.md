@@ -53,6 +53,8 @@ Three new instruments, each a pedal of its own:
   gives out is rounded off under full scale, and left alone below 70 % of it. The delay's
   last 28 dB of tail (everything under -72 dBFS) is cut, so a 1000 ms delay at full feedback
   falls idle after about 37 seconds instead of 62, and a 350 ms one after 14 instead of 22
+- Torden's palm mutes are tighter: about 6 dB less below 100 Hz against the mids than Brøl, up
+  from about 4, and a low E keeps a little more of its fundamental than before
 - Torden's Gain dial does more above 5: it is no longer squeezed flat by the middle of the dial,
   so 5 stays tighter and more dynamic and 5 to 10 grows into thicker, singing sustain. The
   dial is a little hotter at the top
