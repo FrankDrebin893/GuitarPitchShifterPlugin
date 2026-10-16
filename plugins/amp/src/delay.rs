@@ -37,10 +37,22 @@ const GLIDE_MAX: f64 = 0.5;
 // In samples
 const TIME_SETTLED: f64 = 1e-3;
 
-/// -100 dBFS. Below this the lines are fed exact zeros: nothing is left to turn into
-/// denormal numbers, and once the read positions have only zeros ahead of them the delay is
-/// idle. What is cut off there is under the noise of a 16-bit recording
+/// -100 dBFS. Below this the modulation pedals feed their lines exact zeros: nothing is left
+/// to turn into denormal numbers, and once the read positions have only zeros ahead of them
+/// the pedal is idle. What is cut off there is under the noise of a 16-bit recording
 pub(crate) const SILENCE: f32 = 1e-5;
+
+/// -72 dBFS: the same for the delay, whose repeats can go on for a minute. What is cut off
+/// is under the noise of a 12-bit recording, and well under the hiss of a guitar amp
+pub(crate) const TAIL_SILENCE: f32 = 2.5e-4;
+
+/// -60 dBFS. Repeats that have fallen below this are fed back with their level squared up
+/// to it, so the last of a long tail fades faster and the delay goes idle sooner
+const FADE_BELOW: f32 = 1e-3;
+
+// What leaves the effects for the output goes through `soft_limit`: it is left alone up to
+// this level and rounded off towards 1.0 above it
+const LIMIT_KNEE: f32 = 0.7;
 
 // Samples a line is longer than the longest delay, for the interpolation
 const LINE_MARGIN: usize = 8;
@@ -83,6 +95,21 @@ pub(crate) fn read_cubic(line: &[f32], write: usize, whole: usize, fraction: f32
     let c2 = xm1 - 2.5 * x0 + 2.0 * x1 - 0.5 * x2;
     let c3 = 0.5 * (x2 - xm1) + 1.5 * (x0 - x1);
     ((c3 * position + c2) * position + c1) * position + x0
+}
+
+/// The output of an effect, rounded off to stay under 1.0: what is quieter than
+/// `LIMIT_KNEE` passes as it is, so an effect at its maximum does not push the output stage
+/// into its safety clip
+pub(crate) fn soft_limit(input: f32) -> f32 {
+    let size = input.abs();
+    if size <= LIMIT_KNEE {
+        return input;
+    }
+    let room = 1.0 - LIMIT_KNEE;
+    // A rational curve that leaves the knee with the slope it came in with and reaches 1.0
+    // asymptotically
+    let over = (size - LIMIT_KNEE) / room;
+    (LIMIT_KNEE + room * over / (1.0 + over)).copysign(input)
 }
 
 /// Rounds off towards `SATURATION_LEVEL`. Leaves quiet signals as they are, so the feedback
@@ -208,7 +235,7 @@ impl Delay {
 
     /// True when the filters would put out nothing more by themselves
     fn filters_at_rest(&self) -> bool {
-        let quiet = |state: f32| state.abs() < SILENCE;
+        let quiet = |state: f32| state.abs() < TAIL_SILENCE;
         self.highpass.iter().all(|filter| quiet(filter.state()))
             && self.lowpass.iter().all(|filter| quiet(filter.state()))
     }
@@ -236,7 +263,7 @@ impl Delay {
                     return;
                 }
                 let Some(first) = (start..len)
-                    .find(|&index| (0.5 * (left[index] + right[index])).abs() >= SILENCE)
+                    .find(|&index| (0.5 * (left[index] + right[index])).abs() >= TAIL_SILENCE)
                 else {
                     return;
                 };
@@ -319,8 +346,12 @@ impl Delay {
             let mut quiet = true;
             for channel in 0..2 {
                 // Each line is fed the other one's repeats
-                let fed = input + saturate(self.feedback * repeats[1 - channel]);
-                self.lines[channel][self.write] = if fed.abs() >= SILENCE {
+                let mut returned = saturate(self.feedback * repeats[1 - channel]);
+                if returned.abs() < FADE_BELOW {
+                    returned *= returned.abs() * (1.0 / FADE_BELOW);
+                }
+                let fed = input + returned;
+                self.lines[channel][self.write] = if fed.abs() >= TAIL_SILENCE {
                     quiet = false;
                     fed
                 } else {
@@ -330,8 +361,8 @@ impl Delay {
             self.write = if self.write + 1 == line_len { 0 } else { self.write + 1 };
             self.valid = (self.valid + 1).min(line_len);
 
-            left[index] += self.mix * repeats[0];
-            right[index] += self.mix * repeats[1];
+            left[index] += self.mix * soft_limit(repeats[0]);
+            right[index] += self.mix * soft_limit(repeats[1]);
 
             if !quiet {
                 self.quiet_run = 0;
@@ -434,7 +465,10 @@ pub(crate) mod tests {
         // wide, and what a mono sum of two unrelated signals costs. Moving this moves the
         // width of every preset's delay
         for feedback in [0.3, 0.6] {
-            for (index, (mono_db, correlation)) in repeats_in_mono(feedback).into_iter().enumerate()
+            // At 0.3 the later repeats are under the -72 dBFS the tail is cut at
+            let heard = if feedback < 0.5 { 4 } else { 6 };
+            for (index, (mono_db, correlation)) in
+                repeats_in_mono(feedback).into_iter().take(heard).enumerate()
             {
                 let number = index + 1;
                 if number % 2 == 1 {
@@ -820,12 +854,40 @@ pub(crate) mod tests {
             assert!(idle_at < ms(time_ms + 40.0), "{} ms: idle after {} samples", time_ms, idle_at);
             // What was still coming out when it stopped is nothing
             assert!(
-                peak(&left[idle_at - 48..idle_at]) < 2.0 * SILENCE,
+                peak(&left[idle_at - 4..idle_at]) < 2.0 * TAIL_SILENCE,
                 "{} ms: cut at {}",
                 time_ms,
-                peak(&left[idle_at - 48..idle_at])
+                peak(&left[idle_at - 4..idle_at])
             );
         }
+    }
+
+    #[test]
+    fn test_repeats_at_full_feedback_stay_under_the_output_clip() {
+        // The repeats alone, from 30 s of full-scale noise at the longest feedback and mix:
+        // they pile up in the lines, but what leaves the delay stays under 1.0
+        let setting = settings(350.0, FEEDBACK_MAX, 1.0);
+        let input = noise(1.0, ms(30_000.0));
+        let (left, right) = run(&setting, &input, SAMPLE_RATE);
+        let wet = |heard: &[f32]| {
+            heard.iter().zip(&input).map(|(heard, dry)| (heard - dry).abs()).fold(0.0, f32::max)
+        };
+        assert!(wet(&left) < 1.0 && wet(&right) < 1.0, "{} {}", wet(&left), wet(&right));
+        // And a normal level is left alone
+        assert_eq!(soft_limit(0.5), 0.5);
+        assert!(soft_limit(0.8) > 0.7 && soft_limit(0.8) < 0.8);
+        assert!(soft_limit(100.0) < 1.0 && soft_limit(-100.0) > -1.0);
+    }
+
+    #[test]
+    fn test_longest_delay_at_full_feedback_goes_idle_in_under_a_minute() {
+        // It was 62 s from full-scale input; the last 28 dB of the tail are cut now. What
+        // is left is the first 60 dB at under 2 dB per repeat
+        let mut delay = new_delay(SAMPLE_RATE);
+        let setting = settings(TIME_MAX_MS, FEEDBACK_MAX, 1.0);
+        run_blocks(&mut delay, &setting, &noise(1.0, ms(1000.0)), BLOCK);
+        let (idle_at, _) = ring_out(&mut delay, &setting, ms(60_000.0));
+        assert!(idle_at < ms(45_000.0), "Idle after {} s", idle_at as f32 / SAMPLE_RATE);
     }
 
     #[test]
