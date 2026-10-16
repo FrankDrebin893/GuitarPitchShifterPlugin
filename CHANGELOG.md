@@ -53,6 +53,8 @@ Three new instruments, each a pedal of its own:
   selector: Dynamic (the cabinet as it was, and the default), Ribbon (warm, dark, a relaxed
   top) and Condenser (air on top, the lower mids scooped). The Mic dial still moves the
   microphone on the cone
+- A project with a large cabinet file on a slow disk no longer holds up the amp opening: the
+  file is read in the background, and the amp plays through its own cabinet until it has arrived
 - With a cabinet of your own, Mic and Resonance no longer follow the amp you picked: they work
   on the same frequencies for every amp (Mic a shelf up high, Resonance a bell at 110 Hz), and
   at their centre they leave your file as it is
