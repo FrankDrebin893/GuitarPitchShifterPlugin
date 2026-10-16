@@ -49,6 +49,10 @@ Three new instruments, each a pedal of its own:
   top one at full scale. The window is only redrawn while the lamps move
 - The clippers of the high-gain amp and the overdrive use less CPU. The sound is the same to the
   ear; only the last bits of the output move
+- Delay and reverb at their maximum no longer push the output into its safety clip: what each
+  gives out is rounded off under full scale, and left alone below 70 % of it. The delay's
+  last 28 dB of tail (everything under -72 dBFS) is cut, so a 1000 ms delay at full feedback
+  falls idle after about 37 seconds instead of 62, and a 350 ms one after 14 instead of 22
 - Torden's Gain dial does more above 5: it is no longer squeezed flat by the middle of the dial,
   so 5 stays tighter and more dynamic and 5 to 10 grows into thicker, singing sustain. The
   dial is a little hotter at the top

@@ -1,7 +1,7 @@
 //! Stereo reverb behind the delay: a smooth, dark tail that leaves the attack and the low
 //! notes of the guitar alone
 
-use crate::delay::{read_cubic, SILENCE};
+use crate::delay::{read_cubic, soft_limit, SILENCE};
 use crate::dsp::filters::{Biquad, BiquadCoeffs, ANTI_DENORMAL};
 use crate::dsp::smoothing_coeff;
 use std::f64::consts::TAU;
@@ -492,8 +492,8 @@ impl Reverb {
             }
 
             let level = self.mix * self.current.level;
-            left[index] += level * tail_left;
-            right[index] += level * tail_right;
+            left[index] += soft_limit(level * tail_left);
+            right[index] += soft_limit(level * tail_right);
 
             self.quiet_run = if quiet { self.quiet_run + 1 } else { 0 };
             if self.quiet_run >= self.idle_after {
@@ -703,6 +703,18 @@ mod tests {
             let (left, _) = run(&settings(decay_s, 1.0), &input, SAMPLE_RATE);
             let level = to_db(rms(&without(&left, &input)) / rms(&input));
             assert!((-12.0..4.0).contains(&level), "decay {} s: tail at {} dB", decay_s, level);
+        }
+    }
+
+    #[test]
+    fn test_tail_at_full_scale_stays_under_the_output_clip() {
+        // Full-scale noise for 10 s into the longest decay at mix 1.0: the tail alone is
+        // rounded off under 1.0 instead of reaching three times that
+        let input = noise(1.0, seconds(10.0, SAMPLE_RATE));
+        let (left, right) = run(&settings(DECAY_MAX_S, 1.0), &input, SAMPLE_RATE);
+        for channel in [&left, &right] {
+            let tail = peak(&without(channel, &input));
+            assert!(tail < 1.0, "Tail at {}", tail);
         }
     }
 
