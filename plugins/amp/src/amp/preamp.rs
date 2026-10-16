@@ -353,6 +353,23 @@ mod tests {
     }
 
     #[test]
+    fn test_torden_is_not_squeezed_flat_at_gain_5() {
+        // A soft and a hard note, 24 dB apart going in: how much of that is left coming out.
+        // Torden used to clip so early that Gain 5 was as squeezed as Gain 10
+        let soft = sine(440.0, 0.0094, SAMPLE_RATE, LEN);
+        let hard = sine(440.0, 0.15, SAMPLE_RATE, LEN);
+        let kept = |gain: f32| {
+            let level = |input: &[f32]| to_db(rms(&run(Amp::Torden, gain, input)[LEN / 2..]));
+            level(&hard) - level(&soft)
+        };
+        let (five, ten) = (kept(0.5), kept(1.0));
+        assert!(
+            five > 3.0 && five > ten + 2.0,
+            "Torden keeps {five:.1} dB at Gain 5 and {ten:.1} dB at Gain 10"
+        );
+    }
+
+    #[test]
     fn test_gain_range_is_as_the_model_says() {
         // A sine too quiet to clip, at a frequency none of the filters touch much
         for amp in Amp::ALL {

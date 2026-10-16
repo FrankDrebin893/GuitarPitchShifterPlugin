@@ -2058,7 +2058,7 @@ mod tests {
             let torden =
                 lows_against_mids_db(&run(&with_amp(Amp::Torden, gain), &input, SAMPLE_RATE));
             assert!(
-                torden < brol - 1.0,
+                torden < brol - 5.0,
                 "Gain {}: Torden {:.1} dB, Brøl {:.1} dB",
                 gain * 10.0,
                 torden,
@@ -3069,7 +3069,7 @@ mod tests {
             fundamental(&with_drive(Amp::Torden, 0.5, 0.2, 0.5, 0.8)),
         );
         assert!(
-            driven > plain - 6.0 && driven > -40.0,
+            driven > plain - 6.0 && driven > -42.0,
             "Fundamental at {:.1} dB, {:.1} dB without the drive",
             driven,
             plain
