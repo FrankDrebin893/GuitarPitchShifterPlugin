@@ -665,7 +665,7 @@ impl Tuner {
             let mut thinned = self.highpass.process(filtered);
             self.watch.listen(thinned);
             if self.watch.due() {
-                let at_rest = self.struck.map_or(true, |at| {
+                let at_rest = self.struck.is_none_or(|at| {
                     self.written.wrapping_sub(at) as f64 >= HUM_REST_MS as f64 * 0.001 * self.rate
                 });
                 if at_rest && self.watch.look() {
