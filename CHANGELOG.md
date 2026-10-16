@@ -53,6 +53,9 @@ Three new instruments, each a pedal of its own:
   gives out is rounded off under full scale, and left alone below 70 % of it. The delay's
   last 28 dB of tail (everything under -72 dBFS) is cut, so a 1000 ms delay at full feedback
   falls idle after about 37 seconds instead of 62, and a 350 ms one after 14 instead of 22
+- Own cabinets: a file that cannot be used shows as `!NAME` instead of BAD FILE, stepping where
+  the cabinets folder has no files says NO FILES for a moment, and hovering the Speaker
+  caption shows where the folder is (a double-click on it opens the folder)
 - The tuner keeps reading low strings through loud mains hum: once it has heard steady hum
   (50 or 60 Hz and its harmonics, -70 dBFS or louder) before a pluck, it takes the hum out in
   front of the detector, so a note no longer drops out at -45 dBFS hum. A string a note away
