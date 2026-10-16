@@ -1,5 +1,5 @@
 use nih_plug::prelude::*;
-use nih_plug_egui::egui::{vec2, Color32, Rect, Ui, Vec2};
+use nih_plug_egui::egui::{vec2, Color32, Id, Rect, Sense, Ui, Vec2};
 use nih_plug_egui::{create_egui_editor, EguiState};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, PoisonError};
@@ -9,7 +9,7 @@ use suite_common::ui::{
     BENCH_MARGIN, SLIM_KNOBS, SLIM_KNOB_RADIUS, SLIM_LED, SLIM_SWITCH,
 };
 
-use crate::cab_stage::{CabLoader, CabStatus};
+use crate::cab_stage::{CabLoader, CabStatus, NO_FILES_SHOWN};
 use crate::dial_memory;
 use crate::lamps::{LampReading, LampView};
 use crate::presets::{self, PRESETS};
@@ -239,6 +239,22 @@ impl Pedals<'_> {
             let chosen = params.cabinet.lock().unwrap_or_else(PoisonError::into_inner).clone();
             let shown = self.cab_loader.display_name(&chosen, CAB_NAME_CHARS);
             silk_label(ui.painter(), top + CAB_CAPTION, "Speaker", 13.0);
+            // Where the files go: shown when the caption is hovered, and opened by a
+            // double-click on it
+            if let Some(dir) = user_cab::cabinets_dir() {
+                let caption = Rect::from_center_size(top + CAB_CAPTION, vec2(70.0, 18.0));
+                let response = ui
+                    .interact(caption, Id::new("cabinet-folder"), Sense::click())
+                    .on_hover_text(format!("Cabinet files go in {}", dir.display()));
+                if response.double_clicked() {
+                    let _ = std::fs::create_dir_all(&dir);
+                    user_cab::open_folder(&dir);
+                }
+            }
+            if self.cab_loader.no_files_showing() {
+                // Draw once more when the note is over
+                ui.ctx().request_repaint_after(NO_FILES_SHOWN);
+            }
             if let Some(step) = stepper(ui, top + CAB_STEPPER, CAB_STEPPER_WIDTH, &shown, "cabinet")
             {
                 step_cabinet(params, self.cab_loader, self.async_executor, step == Step::Next);
@@ -263,7 +279,11 @@ fn step_cabinet(
     };
     let _ = std::fs::create_dir_all(&dir);
     let mut chosen = params.cabinet.lock().unwrap_or_else(PoisonError::into_inner);
-    *chosen = user_cab::neighbour(&user_cab::list(&dir), &chosen, forward);
+    let files = user_cab::list(&dir);
+    if files.is_empty() {
+        cab_loader.found_no_files();
+    }
+    *chosen = user_cab::neighbour(&files, &chosen, forward);
     drop(chosen);
     cab_loader.chosen();
     async_executor.execute_background(Task::LoadCabinet);
