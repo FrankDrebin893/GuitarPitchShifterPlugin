@@ -49,6 +49,8 @@ Three new instruments, each a pedal of its own:
   top one at full scale. The window is only redrawn while the lamps move
 - The clippers of the high-gain amp and the overdrive use less CPU. The sound is the same to the
   ear; only the last bits of the output move
+- Switching amp, or moving a pedal, dips the sound for about 7 ms instead of 10: the fade is
+  3.5 ms down and 3.5 ms up. It still does not click
 
 ### Guitar Amp, Shimmer Pad, Glass Bells
 

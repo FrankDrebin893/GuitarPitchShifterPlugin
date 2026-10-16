@@ -40,7 +40,7 @@ const BYPASS_FADE_MS: f32 = 10.0;
 
 // When another amp is picked, the amp's output fades to silence in this time, the stages are
 // set up as the new amp, and it fades back in as fast
-const AMP_FADE_MS: f32 = 5.0;
+const AMP_FADE_MS: f32 = 3.5;
 
 // When the pedals are put in another order, the output fades to silence in this time, the
 // pedals change places there, and it fades back in as fast
