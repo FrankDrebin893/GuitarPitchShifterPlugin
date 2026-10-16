@@ -82,7 +82,7 @@ How it behaves:
   project never opens with the tuner on
 - Besides its own cabinet an amp can play through a WAV impulse response from
   `Documents/Hojt Audio/Cabinets` (or the folder in `HOJT_CABINETS_DIR`), picked on the Cab pedal.
-  Mono or the left channel of stereo, 16/24/32-bit integer or 32-bit float, any rate; resampled,
+  Mono or the left channel of stereo, 8/16/24/32-bit integer or 32/64-bit float, any rate; resampled,
   trimmed so the sound arrives within 0.2 ms, cut to 40 ms, levelled like the built-in ones.
   Latency stays the same
 - The cabinet choice is a persisted file name, not a parameter and not part of a preset. It
