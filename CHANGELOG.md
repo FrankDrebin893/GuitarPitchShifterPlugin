@@ -53,6 +53,7 @@ Three new instruments, each a pedal of its own:
   gives out is rounded off under full scale, and left alone below 70 % of it. The delay's
   last 28 dB of tail (everything under -72 dBFS) is cut, so a 1000 ms delay at full feedback
   falls idle after about 37 seconds instead of 62, and a 350 ms one after 14 instead of 22
+- Your own cabinets can be 8-bit or 64-bit float WAV files, which showed BAD FILE before
 - The amp is picked with a stepper (a name on label tape with a button at each end) under the
   dials, instead of three switches. Each amp still keeps its own dials
 - Torden's palm mutes are tighter: about 6 dB less below 100 Hz against the mids than Brøl, up
