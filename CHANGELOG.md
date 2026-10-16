@@ -51,6 +51,7 @@ Three new instruments, each a pedal of its own:
   ear; only the last bits of the output move
 - Switching amp, or moving a pedal, dips the sound for about 9 ms instead of 10: the fade is
   4.5 ms down and 4.5 ms up. It still does not click
+- Your own cabinets can be 8-bit or 64-bit float WAV files, which showed BAD FILE before
 - The amp is picked with a stepper (a name on label tape with a button at each end) under the
   dials, instead of three switches. Each amp still keeps its own dials
 - Torden's palm mutes are tighter: about 6 dB less below 100 Hz against the mids than Brøl, up
