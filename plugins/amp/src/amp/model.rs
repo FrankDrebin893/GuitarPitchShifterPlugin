@@ -381,7 +381,7 @@ static TORDEN: AmpModel = AmpModel {
     stages: [
         StageModel {
             coupling_hz: 30.0,
-            gain_db: [10.0, 14.0, 18.0],
+            gain_db: [10.0, 12.0, 19.0],
             headroom: [2.5, 3.0],
             bias: 0.0,
             bias_shift: 0.2,
@@ -401,7 +401,7 @@ static TORDEN: AmpModel = AmpModel {
         },
         StageModel {
             coupling_hz: 150.0,
-            gain_db: [6.0, 12.0, 18.0],
+            gain_db: [6.0, 9.0, 18.0],
             headroom: [1.2, 0.9],
             bias: -0.1,
             bias_shift: 0.15,
@@ -411,7 +411,7 @@ static TORDEN: AmpModel = AmpModel {
         },
         StageModel {
             coupling_hz: 140.0,
-            gain_db: [6.0, 10.0, 14.0],
+            gain_db: [6.0, 8.0, 15.0],
             headroom: [1.0, 1.3],
             bias: 0.05,
             bias_shift: 0.1,
@@ -422,7 +422,7 @@ static TORDEN: AmpModel = AmpModel {
     ],
     fizz_hz: Some(7500.0),
     lowcut_hz: Some(120.0),
-    level_db: [2.0, 0.5, 0.0, 0.0, 0.0],
+    level_db: [2.0, 1.2, 0.8, 0.0, 0.0],
     makeup_db: [0.0; 5],
     tone: ToneModel {
         bass_hz: 110.0,

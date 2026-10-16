@@ -3069,7 +3069,7 @@ mod tests {
             fundamental(&with_drive(Amp::Torden, 0.5, 0.2, 0.5, 0.8)),
         );
         assert!(
-            driven > plain - 6.0 && driven > -40.0,
+            driven > plain - 6.0 && driven > -42.0,
             "Fundamental at {:.1} dB, {:.1} dB without the drive",
             driven,
             plain
