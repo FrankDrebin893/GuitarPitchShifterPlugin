@@ -53,6 +53,11 @@ Three new instruments, each a pedal of its own:
   gives out is rounded off under full scale, and left alone below 70 % of it. The delay's
   last 28 dB of tail (everything under -72 dBFS) is cut, so a 1000 ms delay at full feedback
   falls idle after about 37 seconds instead of 62, and a 350 ms one after 14 instead of 22
+- The tuner keeps reading low strings through loud mains hum: once it has heard steady hum
+  (50 or 60 Hz and its harmonics, -70 dBFS or louder) before a pluck, it takes the hum out in
+  front of the detector, so a note no longer drops out at -45 dBFS hum. A string a note away
+  from the hum (G1 against 50 Hz, B1 against 60 Hz) is read up to about 5 cents off while
+  the hum is there. Without hum nothing changes
 - A project with a large cabinet file on a slow disk no longer holds up the amp opening: the
   file is read in the background, and the amp plays through its own cabinet until it has arrived
 - With a cabinet of your own, Mic and Resonance no longer follow the amp you picked: they work
