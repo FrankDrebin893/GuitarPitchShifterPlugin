@@ -135,6 +135,27 @@ pub struct CabModel {
     pub ir_ms: f32,
 }
 
+/// What the Mic and Resonance dials work on while the player's own cabinet is picked: a
+/// file has its own mic position and resonance, so the dials shape the sound with the same
+/// frequencies whichever amp is chosen. Only the bite and resonance frequencies are used
+/// by the dials; the rest is not a cabinet
+pub static NEUTRAL_CAB: CabModel = CabModel {
+    resonance_hz: 110.0,
+    resonance_q: 1.0,
+    body: [250.0, 1.0, 0.0],
+    dip: [500.0, 1.0, 0.0],
+    // With the dial's corner at 1.1 times this, the Mic shelf sits at about 4.5 kHz at the
+    // bright end and 3.3 kHz at the dark one
+    bite: [4100.0, 1.0, 0.0],
+    rolloff_hz: 20000.0,
+    air_ratio: 1.0,
+    breakup_hz: [1000.0, 6000.0],
+    breakup_count: 0,
+    breakup_db: 0.0,
+    breakup_seed: 0,
+    ir_ms: 5.0,
+};
+
 /// Everything that makes one amp differ from another
 pub struct AmpModel {
     // Only the report prints it until the editor names the amps

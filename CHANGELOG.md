@@ -49,6 +49,9 @@ Three new instruments, each a pedal of its own:
   top one at full scale. The window is only redrawn while the lamps move
 - The clippers of the high-gain amp and the overdrive use less CPU. The sound is the same to the
   ear; only the last bits of the output move
+- With a cabinet of your own, Mic and Resonance no longer follow the amp you picked: they work
+  on the same frequencies for every amp (Mic a shelf up high, Resonance a bell at 110 Hz), and
+  at their centre they leave your file as it is
 - Torden's Gain dial does more above 5: it is no longer squeezed flat by the middle of the dial,
   so 5 stays tighter and more dynamic and 5 to 10 grows into thicker, singing sustain. The
   dial is a little hotter at the top
