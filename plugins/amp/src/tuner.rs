@@ -41,6 +41,26 @@ const LOWPASS_Q: [f32; 4] = [0.5098, 0.6013, 0.9000, 2.5629];
 // Behind it: keeps offsets and rumble out of the difference function
 const HIGHPASS_HZ: f32 = 30.0;
 
+// Mains hum is taken out in front of the detector: notches on both mains frequencies and
+// their 2nd and 3rd harmonics, as wide as this at the notch. That is narrow enough for a
+// string a note away, B1 against 60 Hz is 1.7 Hz, and wide enough for the mains frequency
+// to drift a little
+const HUM_HZ: [f32; 6] = [50.0, 100.0, 150.0, 60.0, 120.0, 180.0];
+const HUM_NOTCH_WIDTH_HZ: f32 = 0.5;
+// The notches bend the pitch of a string close to them, so they are only in the way once
+// there is hum. It is looked for while nothing has been struck for `HUM_REST_MS`, in a
+// steady component (changing by less than `HUM_STEADY` between looks, `HUM_LOOK_MS` apart:
+// a ringing string fades faster) at one of the three frequencies of a mains frequency, of
+// this amplitude in dBFS or more. It is let go of when what is there falls under the second
+// level
+const HUM_REST_MS: f32 = 1500.0;
+const HUM_LOOK_MS: f32 = 400.0;
+const HUM_STEADY: f64 = 0.15;
+const HUM_ON_DB: f64 = -70.0;
+const HUM_OFF_DB: f64 = -76.0;
+// How fast the amplitude of each hum frequency is followed, in seconds
+const HUM_FOLLOW_S: f64 = 0.4;
+
 // Notes the tuner reads: from a little under the low A of a drop tuning to the top of the neck
 const MIN_HZ: f32 = 48.0;
 const MAX_HZ: f32 = 1420.0;
@@ -345,6 +365,99 @@ enum Stage {
     ExactNewer,
 }
 
+/// How much of each hum frequency is in the signal, followed over about `HUM_FOLLOW_S`, and
+/// which of the two mains frequencies the notches are on for
+struct HumWatch {
+    // One turn of each frequency per sample, where it is now, and what has built up
+    step: [(f64, f64); HUM_HZ.len()],
+    turn: [(f64, f64); HUM_HZ.len()],
+    sum: [(f64, f64); HUM_HZ.len()],
+    follow: f64,
+    // Amplitude of the strongest of each mains frequency's three at the last look
+    last: [f64; 2],
+    looked: usize,
+    look_every: usize,
+    // Notches on for 50 Hz, for 60 Hz
+    engaged: [bool; 2],
+}
+
+impl HumWatch {
+    fn new() -> Self {
+        Self {
+            step: [(1.0, 0.0); HUM_HZ.len()],
+            turn: [(1.0, 0.0); HUM_HZ.len()],
+            sum: [(0.0, 0.0); HUM_HZ.len()],
+            follow: 0.0,
+            last: [0.0; 2],
+            looked: 0,
+            look_every: 1,
+            engaged: [false; 2],
+        }
+    }
+
+    fn set_rate(&mut self, rate: f64) {
+        for (step, hum_hz) in self.step.iter_mut().zip(HUM_HZ) {
+            let (sin, cos) = (TAU * hum_hz as f64 / rate).sin_cos();
+            *step = (cos, -sin);
+        }
+        self.follow = 1.0 / (HUM_FOLLOW_S * rate);
+        self.look_every = ((HUM_LOOK_MS as f64 * 0.001 * rate) as usize).max(1);
+        self.reset();
+    }
+
+    fn reset(&mut self) {
+        self.turn = [(1.0, 0.0); HUM_HZ.len()];
+        self.sum = [(0.0, 0.0); HUM_HZ.len()];
+        self.last = [0.0; 2];
+        self.looked = 0;
+        self.engaged = [false; 2];
+    }
+
+    /// Takes a sample into the amplitudes
+    fn listen(&mut self, sample: f64) {
+        for index in 0..HUM_HZ.len() {
+            let (re, im) = self.turn[index];
+            let (sum_re, sum_im) = &mut self.sum[index];
+            *sum_re += self.follow * (sample * re - *sum_re);
+            *sum_im += self.follow * (sample * im - *sum_im);
+            let (step_re, step_im) = self.step[index];
+            self.turn[index] = (re * step_re - im * step_im, re * step_im + im * step_re);
+        }
+        self.looked += 1;
+    }
+
+    /// Whether it is time to look
+    fn due(&self) -> bool {
+        self.looked >= self.look_every
+    }
+
+    /// The strongest amplitude of each mains frequency, and as dBFS 0.0 is full scale
+    fn amplitudes(&self) -> [f64; 2] {
+        let amplitude = |index: usize| 2.0 * self.sum[index].0.hypot(self.sum[index].1);
+        [0, 1].map(|mains| (0..3).map(|n| amplitude(mains * 3 + n)).fold(0.0, f64::max))
+    }
+
+    /// Looks, at rest: which notches are to be on. Returns whether that changed
+    fn look(&mut self) -> bool {
+        self.looked = 0;
+        let now = self.amplitudes();
+        let before = self.engaged;
+        let db = |amplitude: f64| 20.0 * amplitude.max(1e-12).log10();
+        for mains in 0..2 {
+            let steady = (now[mains] - self.last[mains]).abs() <= HUM_STEADY * now[mains];
+            if self.engaged[mains] {
+                if db(now[mains]) < HUM_OFF_DB {
+                    self.engaged[mains] = false;
+                }
+            } else if steady && db(now[mains]) >= HUM_ON_DB {
+                self.engaged[mains] = true;
+            }
+            self.last[mains] = now[mains];
+        }
+        self.engaged != before
+    }
+}
+
 pub struct Tuner {
     reading: Arc<TunerReading>,
 
@@ -355,6 +468,8 @@ pub struct Tuner {
     rate: f64,
     lowpass: [Biquad; 4],
     highpass: Biquad,
+    hum: [Biquad; HUM_HZ.len()],
+    watch: HumWatch,
     ring: [f32; RING],
     // Samples put into the ring so far. Positions in the ring count on from this
     written: usize,
@@ -424,6 +539,8 @@ impl Tuner {
             rate: TARGET_RATE_HZ as f64,
             lowpass: [Biquad::new(); 4],
             highpass: Biquad::new(),
+            hum: [Biquad::new(); HUM_HZ.len()],
+            watch: HumWatch::new(),
             ring: [0.0; RING],
             written: 0,
             min_lag: 2,
@@ -485,6 +602,10 @@ impl Tuner {
             filter.set(BiquadCoeffs::lowpass(LOWPASS_HZ, q, sample_rate));
         }
         self.highpass.set(BiquadCoeffs::highpass(HIGHPASS_HZ, 0.7071, rate));
+        self.watch.set_rate(rate as f64);
+        for (filter, hum_hz) in self.hum.iter_mut().zip(HUM_HZ) {
+            filter.set(BiquadCoeffs::notch(hum_hz, hum_hz / HUM_NOTCH_WIDTH_HZ, rate));
+        }
 
         self.min_lag = ((rate / MAX_HZ) as usize).max(2);
         self.max_lag = ((rate / MIN_HZ).ceil() as usize).min(MAX_LAG);
@@ -504,6 +625,10 @@ impl Tuner {
             filter.reset();
         }
         self.highpass.reset();
+        for filter in &mut self.hum {
+            filter.reset();
+        }
+        self.watch.reset();
         self.phase = 0;
         self.ring = [0.0; RING];
         self.written = 0;
@@ -537,7 +662,29 @@ impl Tuner {
                 continue;
             }
             self.phase = 0;
-            let thinned = self.highpass.process(filtered) as f32;
+            let mut thinned = self.highpass.process(filtered);
+            self.watch.listen(thinned);
+            if self.watch.due() {
+                let at_rest = self.struck.map_or(true, |at| {
+                    self.written.wrapping_sub(at) as f64 >= HUM_REST_MS as f64 * 0.001 * self.rate
+                });
+                if at_rest && self.watch.look() {
+                    for (index, filter) in self.hum.iter_mut().enumerate() {
+                        if !self.watch.engaged[index / 3] {
+                            filter.reset();
+                        }
+                    }
+                }
+                if !at_rest {
+                    self.watch.looked = 0;
+                }
+            }
+            for (index, filter) in self.hum.iter_mut().enumerate() {
+                if self.watch.engaged[index / 3] {
+                    thinned = filter.process(thinned);
+                }
+            }
+            let thinned = thinned as f32;
             self.ring[self.written & RING_MASK] = thinned;
             self.written = self.written.wrapping_add(1);
             self.listen_for_pluck(thinned);
@@ -1134,6 +1281,67 @@ pub(crate) mod tests {
             .iter()
             .fold(0.0f32, |worst, &off| if off.abs() > worst.abs() { off } else { worst });
         (worst, heard.len(), all.len() - from)
+    }
+
+    /// A string plucked `lead_s` into mains hum, worked on like the others: the worst reading
+    /// from 0.25 s after the pluck, the blocks with a reading and all the blocks
+    fn low_string_under_hum(
+        freq_hz: f32,
+        hum_hz: f32,
+        level_db: f32,
+        lead_s: f32,
+    ) -> (f32, usize, usize) {
+        let lead = (lead_s * 48000.0) as usize;
+        let mut signal = hum(hum_hz, level_db, 48000.0, lead_s + 1.0);
+        for (sample, note) in signal[lead..].iter_mut().zip(string(freq_hz, 48000.0, 1.0)) {
+            *sample += note;
+        }
+        worst_from(&signal, 48000.0, freq_hz, lead_s + 0.25)
+    }
+
+    #[test]
+    fn test_low_strings_are_read_through_loud_hum() {
+        // Hum at -45 dBFS RMS that has been there before the pluck: every block has a reading,
+        // and none is further off than the notches' pull on a string a note from the hum
+        // (G1 is 1 Hz from 50 Hz, B1 1.7 Hz from 60 Hz). Before, a lost note came back only
+        // with the next pluck
+        for hum_hz in [50.0, 60.0] {
+            for number in [31, 33, 35, 36, 38, 40, 45] {
+                let freq = note_hz(number);
+                let (worst, heard, blocks) = low_string_under_hum(freq, hum_hz, -45.0, 2.5);
+                assert_eq!(
+                    heard,
+                    blocks,
+                    "{} under {hum_hz} Hz: lost {}",
+                    name_of(number),
+                    blocks - heard
+                );
+                assert!(
+                    worst.abs() < 6.0,
+                    "{} under {hum_hz} Hz: {worst:+.2} cents",
+                    name_of(number)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_hum_that_is_not_there_leaves_the_notches_off() {
+        // A tuner that has only heard a string, and one that has heard hum far under the
+        // level it looks for, keeps its notches off: it reads exactly as it did
+        let mut tuner = new_tuner(48000.0);
+        let signal = string(82.41, 48000.0, 1.0);
+        let mut quiet = signal.clone();
+        for (sample, hum) in quiet.iter_mut().zip(hum(50.0, -90.0, 48000.0, 1.0)) {
+            *sample += hum;
+        }
+        for input in [&signal, &quiet] {
+            tuner.start();
+            for block in input.chunks(BLOCK) {
+                tuner.process(block);
+            }
+            assert_eq!(tuner.watch.engaged, [false, false]);
+        }
     }
 
     #[test]
@@ -1818,11 +2026,7 @@ pub(crate) mod tests {
             print!("{:<5}", name_of(number));
             for hum_hz in [50.0, 60.0] {
                 for level_db in [-57.0, -45.0, -36.0] {
-                    let mut note = string(freq, 48000.0, 1.0);
-                    for (sample, hum) in note.iter_mut().zip(hum(hum_hz, level_db, 48000.0, 1.0)) {
-                        *sample += hum;
-                    }
-                    let (worst, heard, blocks) = worst_from(&note, 48000.0, freq, 0.25);
+                    let (worst, heard, blocks) = low_string_under_hum(freq, hum_hz, level_db, 2.5);
                     if heard == blocks {
                         print!(" {worst:>+10.2}");
                     } else {
