@@ -52,6 +52,8 @@ Three new instruments, each a pedal of its own:
 - Own cabinets: a file that cannot be used shows as `!NAME` instead of BAD FILE, stepping where
   the cabinets folder has no files says NO FILES for a moment, and hovering the Speaker
   caption shows where the folder is (a double-click on it opens the folder)
+- A project with a large cabinet file on a slow disk no longer holds up the amp opening: the
+  file is read in the background, and the amp plays through its own cabinet until it has arrived
 - With a cabinet of your own, Mic and Resonance no longer follow the amp you picked: they work
   on the same frequencies for every amp (Mic a shelf up high, Resonance a bell at 110 Hz), and
   at their centre they leave your file as it is
