@@ -311,6 +311,57 @@ pub fn cents_meter(painter: &Painter, center: Pos2, width: f32, cents: Option<f3
     meter_lamps(painter, tape.shrink2(vec2(METER_PADDING, 0.0)), cents);
 }
 
+/// How many lamps a `level_meter` has, from the quietest to the one at full scale
+pub const LEVEL_LAMPS: usize = 10;
+/// The level of the quietest lamp, in dBFS; each lamp after it needs this much more
+const LEVEL_FLOOR_DB: f32 = -45.0;
+const LEVEL_STEP_DB: f32 = 5.0;
+/// Lowest level a `level_meter` can show: below it every lamp is dark
+pub const LEVEL_MIN_DB: f32 = LEVEL_FLOOR_DB - LEVEL_STEP_DB;
+
+/// How many lamps of a `level_meter` are lit at `dbfs`: the lowest at -45 dBFS, the last at 0
+pub fn lit_level_lamps(dbfs: f32) -> usize {
+    if dbfs.is_nan() {
+        return 0;
+    }
+    (((dbfs - LEVEL_FLOOR_DB) / LEVEL_STEP_DB).floor() + 1.0).clamp(0.0, LEVEL_LAMPS as f32)
+        as usize
+}
+
+/// A signal level as a column of `LEVEL_LAMPS` lamps on a strip of label tape `height` high,
+/// centred on `center`, filling from the bottom: the first is lit from -45 dBFS, each one
+/// above it 5 dB higher, the top one at full scale. Give it about 11 px of height per lamp.
+pub fn level_meter(painter: &Painter, center: Pos2, height: f32, dbfs: f32) {
+    let tape = Rect::from_center_size(center, vec2(STEPPER_TAPE_HEIGHT, height));
+    painter.rect_filled(tape.translate(vec2(0.0, 2.0)), 2.0, SHADOW);
+    painter.rect_filled(tape, 2.0, TAPE);
+
+    let rect = tape.shrink2(vec2(0.0, METER_PADDING));
+    let lit = lit_level_lamps(dbfs);
+    // Whole pixels from lamp to lamp and even sizes, so every lamp is as high as the next
+    let pitch = (rect.height() / LEVEL_LAMPS as f32).floor();
+    let even = |size: f32| (size / 2.0).round() * 2.0;
+    let size = vec2(even(rect.width() * 0.5), even(pitch * 0.6));
+    let middle_x = rect.center().x.round();
+    let bottom_y = (rect.center().y + pitch * (LEVEL_LAMPS as f32 - 1.0) / 2.0).round();
+    for lamp in 0..LEVEL_LAMPS {
+        let on = lamp < lit;
+        let lens =
+            Rect::from_center_size(Pos2::new(middle_x, bottom_y - lamp as f32 * pitch), size);
+        if on {
+            for (grow, alpha) in [(3.5, 0.16), (1.8, 0.3)] {
+                painter.rect_filled(lens.expand(grow), 1.5 + grow, LED_ON.gamma_multiply(alpha));
+            }
+        }
+        painter.rect_filled(lens, 1.5, if on { LED_ON } else { LED_OFF });
+        if on {
+            let shine =
+                Rect::from_min_size(lens.min + vec2(1.0, 1.0), vec2((size.x - 2.0).max(1.0), 2.0));
+            painter.rect_filled(shine, 1.0, Color32::from_rgb(255, 208, 196));
+        }
+    }
+}
+
 /// The lamps of a `cents_meter`, spread over the width of `rect`
 fn meter_lamps(painter: &Painter, rect: Rect, cents: Option<f32>) {
     let side = METER_SIDE_LAMPS as f32;
@@ -583,4 +634,23 @@ pub fn badge(painter: &Painter, right_bottom: Pos2, size: f32) {
     x += o_width + gap;
 
     painter.galley(Pos2::new(x, text_y), jt, SILK);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_level_lamps_light_from_the_bottom_five_decibels_apart() {
+        assert_eq!(lit_level_lamps(LEVEL_MIN_DB), 0);
+        assert_eq!(lit_level_lamps(-46.0), 0);
+        assert_eq!(lit_level_lamps(-45.0), 1);
+        assert_eq!(lit_level_lamps(-40.1), 1);
+        assert_eq!(lit_level_lamps(-40.0), 2);
+        assert_eq!(lit_level_lamps(-0.1), LEVEL_LAMPS - 1);
+        assert_eq!(lit_level_lamps(0.0), LEVEL_LAMPS);
+        assert_eq!(lit_level_lamps(6.0), LEVEL_LAMPS);
+        assert_eq!(lit_level_lamps(f32::NAN), 0);
+        assert_eq!(lit_level_lamps(f32::NEG_INFINITY), 0);
+    }
 }

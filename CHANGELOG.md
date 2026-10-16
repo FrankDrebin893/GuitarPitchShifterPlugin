@@ -43,6 +43,10 @@ Three new instruments, each a pedal of its own:
 - The tuner no longer shows mains hum as a note. A note is shown from a pluck on, and let go
   when what rang does not fade like a string; a string that already rings when the tuner is
   switched on is read from its next pluck
+- Level meters on the head: a column of lamps for the level the guitar comes in at, left of the
+  dials, and one for the output level in front of the safety clip, by the clip lamp. They jump
+  to a peak and fall over about a third of a second; the lowest lamp is lit from -45 dB and the
+  top one at full scale. The window is only redrawn while the lamps move
 - The clippers of the high-gain amp and the overdrive use less CPU. The sound is the same to the
   ear; only the last bits of the output move
 
