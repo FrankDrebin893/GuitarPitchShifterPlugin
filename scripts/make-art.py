@@ -236,30 +236,71 @@ def bells(w=1320, h=1200):
     return compose(layers, w, h)
 
 
+def contour_lines(field, levels, width):
+    """Thin lines where `field` crosses each level, like an engraver's contour of a cloud"""
+    out = np.zeros_like(field)
+    for level in levels:
+        out = np.maximum(out, np.clip(1 - np.abs(field - level) / width, 0, 1))
+    return out
+
+
+def fork(draw, rng, x, y, angle, length, width, depth):
+    """A forked lightning bolt: hard zig-zags that keep heading one way, splitting into
+    thinner branches"""
+    pts = [(x, y)]
+    side = 1
+    base = angle
+    for _ in range(int(length / 38)):
+        side = -side
+        step = rng.uniform(26, 54)
+        a = base + side * rng.uniform(0.35, 0.75)
+        x, y = x + np.sin(a) * step, y + np.cos(a) * step
+        pts.append((x, y))
+    draw.line(pts, fill=255, width=max(3, int(width)), joint="curve")
+    if depth > 0:
+        for i in range(2, len(pts) - 3, 3):
+            if rng.random() < 0.65:
+                fork(draw, rng, pts[i][0], pts[i][1], base + rng.choice([-1, 1]) * rng.uniform(0.5, 0.9),
+                     length * 0.4, width * 0.55, depth - 1)
+
+
 def amp(w=1920, h=708):
-    """Storm: rays from below the head, and a bolt struck on each side"""
+    """Storm: inked clouds with contour lines, forked lightning down each side, and a hatched
+    ridge of mountains along the foot of the head"""
     paint = (124, 28, 32)
     x, y = grid(w, h)
-    theta = np.arctan2(x - w * 0.5, (h * 1.9) - y)
-    rays = 0.5 + 0.5 * np.cos(theta * 46)
-    rays = smooth(0.35, 0.95, rays)
-    dist = np.sqrt((x - w * 0.5) ** 2 + ((h * 1.9) - y) ** 2)
-    field_a = rays * smooth(h * 2.25, h * 1.1, dist) * edges(w, h, 0.4)
-    a = halftone(field_a, 10, 45)
+    rng = np.random.default_rng(7)
+    edge = edges(w, h, 0.42)
 
+    # Clouds: two noise fields, a body in halftone and contour lines on top
+    cloud = noise(w, h, 240, 71) * 0.55 + noise(w, h, 90, 72) * 0.3 + noise(w, h, 34, 73) * 0.15
+    cloud_field = smooth(0.38, 0.72, cloud) * edge
+    body = halftone(cloud_field * 0.9, 10, 45)
+    lines = contour_lines(cloud, (0.44, 0.52, 0.60), 0.012) * edge
+
+    # Lightning: two forks from the top corners, with a wide soft glow under each
     img = Image.new("L", (w, h), 0)
     draw = ImageDraw.Draw(img)
-    for cx, tilt in ((w * 0.075, 0.18), (w * 0.925, -0.18)):
-        draw.polygon(bolt_polygon(cx, h * 0.5, h * 0.42, tilt), fill=255)
-    mask = np.asarray(img.filter(ImageFilter.GaussianBlur(0.8)), dtype=np.float32) / 255
-    bolts = hatch(mask, 6, 30, 2.4) * 0.9
-    outline = np.clip(
-        np.asarray(img.filter(ImageFilter.MaxFilter(7)), dtype=np.float32) / 255 - mask, 0, 1
-    )
+    for cx, lean in ((w * 0.07, 0.25), (w * 0.93, -0.25)):
+        fork(draw, rng, cx, -10, lean, h * 0.95, 13, 1)
+    mask = np.asarray(img.filter(ImageFilter.GaussianBlur(0.7)), dtype=np.float32) / 255
+    glow = np.asarray(img.filter(ImageFilter.GaussianBlur(14)), dtype=np.float32) / 255
+    glow = np.clip(glow * 3.0, 0, 1) * edge
+
+    # Mountains: a ridge from layered noise, hatched, with a lighter ridge line
+    peaks = np.abs(np.sin(np.arange(w) / 61.0 + 1.3)) * 0.6 + np.abs(np.sin(np.arange(w) / 23.0)) * 0.25         + noise(w, 2, 120, 74)[0] * 0.5
+    ridge_y = h * (0.93 - 0.17 * peaks)
+    ground = smooth(-1.5, 1.5, y - ridge_y[None, :])
+    ridge = np.clip(1 - np.abs(y - ridge_y[None, :]) / 1.6, 0, 1)
+    foot = hatch(ground, 6, 62, 2.4) * smooth(0.0, 0.1, (x / w) * (1 - x / w)) * 1.0
+
     layers = [
-        ink(a, tint(paint, 0.38), 0.6, w, h, 11),
-        ink(np.roll(np.maximum(bolts, outline), (3, 4), axis=(0, 1)), shadeof(paint, 0.6), 0.7, w, h, 13),
-        ink(mask * 0.5, tint(paint, 0.55), 0.55, w, h, 17),
+        ink(glow, tint(paint, 0.5), 0.35, w, h, 79),
+        ink(body, tint(paint, 0.38), 0.6, w, h, 81),
+        ink(np.roll(lines, (2, 3), axis=(0, 1)), shadeof(paint, 0.55), 0.7, w, h, 83),
+        ink(foot, shadeof(paint, 0.6), 0.65, w, h, 85),
+        ink(ridge, tint(paint, 0.55), 0.7, w, h, 87),
+        ink(np.maximum(mask, 0), CREAM, 0.85, w, h, 89),
     ]
     return compose(layers, w, h)
 
