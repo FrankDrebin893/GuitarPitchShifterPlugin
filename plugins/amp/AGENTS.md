@@ -75,7 +75,10 @@ How it behaves:
 - The tuner reads 48 Hz to 1420 Hz against A = 440 Hz (`REFERENCE_A_HZ`), a new reading every
   30 ms, none for silence, noise, hum or chords. A note is shown from a pluck on (a rise of
   12 dB within 50 ms; 6 dB to change notes or pluck again), and let go after a second if it
-  does not fade like a string. A loaded
+  does not fade like a string. Steady hum (50 or 60 Hz and its 2nd and 3rd harmonics, -70 dBFS
+  or more) heard at rest, with nothing struck for 1.5 s, switches on notches for it in front
+  of the detector, which pull a string within 2 Hz of them by a few cents; without hum they
+  are off and the readings are unchanged. A loaded
   project never opens with the tuner on
 - Besides its own cabinet an amp can play through a WAV impulse response from
   `Documents/Hojt Audio/Cabinets` (or the folder in `HOJT_CABINETS_DIR`), picked on the Cab pedal.
