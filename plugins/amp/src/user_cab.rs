@@ -31,7 +31,10 @@ const EXTENSION: &str = "wav";
 // What the display shows for the amp's own cabinet, for a file that could not be used,
 // and in front of the name of a file that is not there
 pub const OWN_NAME: &str = "OWN";
-pub const BAD_NAME: &str = "BAD FILE";
+/// Printed in front of the name of a file that cannot be used
+pub const BAD_MARK: char = '!';
+/// What the display says for a moment after stepping where the folder has no files
+pub const NO_FILES_NAME: &str = "NO FILES";
 pub const MISSING_MARK: char = '?';
 // A name too long for the display keeps its start and this many characters of its end,
 // where takes and microphone positions are told apart, with this between them
@@ -140,6 +143,18 @@ fn known_documents_dir() -> Option<PathBuf> {
         CoTaskMemFree(wide.cast());
         path.filter(|path| !path.as_os_str().is_empty())
     }
+}
+
+/// Shows the folder in the system's file manager. Nothing happens if there is none
+pub fn open_folder(dir: &Path) {
+    let program = if cfg!(target_os = "windows") {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    let _ = std::process::Command::new(program).arg(dir).spawn();
 }
 
 /// True for a plain file name: what is stored with a project never leads out of the folder

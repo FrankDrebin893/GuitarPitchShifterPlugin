@@ -17,6 +17,7 @@ use std::cell::UnsafeCell;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 const EMPTY: u8 = 0;
 const WRITING: u8 = 1;
@@ -127,6 +128,9 @@ pub enum CabStatus {
     Bad = 2,
 }
 
+/// How long the display says there are no files
+pub const NO_FILES_SHOWN: Duration = Duration::from_millis(1500);
+
 /// Reads the chosen cabinet and leaves it on the stage. Shared by the plugin, its
 /// background tasks and the editor; the audio thread only ever sees the stage
 pub struct CabLoader {
@@ -137,6 +141,8 @@ pub struct CabLoader {
     // One load at a time, start to finish: each reads the choice and the sample rate once
     // it has its turn, so the last one to run leaves what is wanted now
     working: Mutex<()>,
+    // When stepping found no files in the folder: the display says so for a moment
+    no_files_at: Mutex<Option<Instant>>,
 }
 
 impl CabLoader {
@@ -146,6 +152,7 @@ impl CabLoader {
             sample_rate: AtomicU32::new(sample_rate.to_bits()),
             status: AtomicU8::new(CabStatus::Fine as u8),
             working: Mutex::new(()),
+            no_files_at: Mutex::new(None),
         }
     }
 
@@ -167,14 +174,35 @@ impl CabLoader {
         self.status.store(CabStatus::Fine as u8, Ordering::Relaxed);
     }
 
+    /// Says that stepping found no files in the cabinets folder
+    pub fn found_no_files(&self) {
+        *self.no_files_at.lock().unwrap_or_else(PoisonError::into_inner) = Some(Instant::now());
+    }
+
+    /// True for a moment after `found_no_files`, while the display says so
+    pub fn no_files_showing(&self) -> bool {
+        let at = *self.no_files_at.lock().unwrap_or_else(PoisonError::into_inner);
+        at.is_some_and(|at| at.elapsed() < NO_FILES_SHOWN)
+    }
+
     /// What the display shows for a choice, in at most `max_chars` letters
     pub fn display_name(&self, chosen: &str, max_chars: usize) -> String {
         if chosen.is_empty() {
-            return user_cab::OWN_NAME.to_owned();
+            return if self.no_files_showing() {
+                user_cab::NO_FILES_NAME.to_owned()
+            } else {
+                user_cab::OWN_NAME.to_owned()
+            };
         }
         match self.status() {
             CabStatus::Fine => user_cab::display_name(chosen, max_chars),
-            CabStatus::Bad => user_cab::BAD_NAME.to_owned(),
+            CabStatus::Bad => {
+                format!(
+                    "{}{}",
+                    user_cab::BAD_MARK,
+                    user_cab::display_name(chosen, max_chars.saturating_sub(1))
+                )
+            }
             CabStatus::Missing => {
                 format!(
                     "{}{}",
@@ -337,7 +365,7 @@ mod tests {
         assert_eq!(choose("bad.wav"), (Vec::new(), 48000.0));
         assert_eq!(
             (loader.status(), loader.display_name("bad.wav", 10).as_str()),
-            (CabStatus::Bad, "BAD FILE")
+            (CabStatus::Bad, "!BAD")
         );
         assert_eq!(choose("gone.wav"), (Vec::new(), 48000.0));
         assert_eq!(
@@ -345,7 +373,20 @@ mod tests {
             (CabStatus::Missing, "?GONE")
         );
         assert_eq!(loader.display_name("a very long name.wav", 10), "?A VE~NAME");
+        // A file that cannot be used is named too
+        assert_eq!(choose("bad.wav"), (Vec::new(), 48000.0));
+        assert_eq!(loader.display_name("a very long name.wav", 10), "!A VE~NAME");
         assert_eq!(loader.display_name("a very long name.wav", 10).chars().count(), 10);
+        assert_eq!(loader.display_name("a very long name.wav", 10).chars().count(), 10);
+
+        // Stepping in an empty folder says so for a moment, and then it is the amp's own again
+        loader.chosen();
+        assert_eq!(loader.display_name("", 10), "OWN");
+        loader.found_no_files();
+        assert_eq!(loader.display_name("", 10), "NO FILES");
+        assert_eq!(loader.display_name("", 10).chars().count(), 8);
+        *loader.no_files_at.lock().unwrap() = Instant::now().checked_sub(NO_FILES_SHOWN);
+        assert_eq!(loader.display_name("", 10), "OWN");
 
         // A name that leads out of the folder is not followed, though the file is there
         std::fs::create_dir_all(dir.join("inner")).unwrap();
