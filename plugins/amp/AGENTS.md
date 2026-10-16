@@ -286,8 +286,9 @@ The style guide of the root `AGENTS.md` applies; these are the rules for a windo
   first (`OWN`). On a mini pedal the stepper takes the place of the third knob of a trio: two
   radius-17 knobs with the LED between them, caption at y+174, tape 100 px wide at y+198. The
   tape shows at most 10 characters: no extension, capitals, long names as the first 5 and last 4
-  with `~` between. `BAD FILE` for a file that cannot be used, `?` in front of the name of one
-  that is not there
+  with `~` between. `!` in front of the name of a file that cannot be used, `?` in front of the name of one
+  that is not there. Stepping in a folder with no files says `NO FILES` for 1.5 s. Hovering the
+  `Speaker` caption names the folder; a double-click on it opens the folder
 - **A file choice is never a parameter.** Keep the file name (not the path) in a `#[persist]` field
 - **Tuner:** a `small_footswitch` with `rig_led` and a `silk_label` on the head, beside the On
   switch and further from the amp stepper than the On switch is. While it is on, a

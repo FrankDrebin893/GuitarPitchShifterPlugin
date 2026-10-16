@@ -49,6 +49,9 @@ Three new instruments, each a pedal of its own:
   top one at full scale. The window is only redrawn while the lamps move
 - The clippers of the high-gain amp and the overdrive use less CPU. The sound is the same to the
   ear; only the last bits of the output move
+- Own cabinets: a file that cannot be used shows as `!NAME` instead of BAD FILE, stepping where
+  the cabinets folder has no files says NO FILES for a moment, and hovering the Speaker
+  caption shows where the folder is (a double-click on it opens the folder)
 - The tuner keeps reading low strings through loud mains hum: once it has heard steady hum
   (50 or 60 Hz and its harmonics, -70 dBFS or louder) before a pluck, it takes the hum out in
   front of the detector, so a note no longer drops out at -45 dBFS hum. A string a note away
