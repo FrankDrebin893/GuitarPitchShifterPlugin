@@ -1,7 +1,7 @@
 //! Two lamps for playing live: whether the gate is open, and whether the output reaches the
 //! safety clip, and two level meters, for the input and the output. The audio thread leaves
-//! what it knows in atomics once per block, and the editor reads them when it draws. Neither waits for the other, and the sound is the same
-//! whether anyone looks or not.
+//! what it knows in atomics once per block, and the editor reads them when it draws. Neither
+//! waits for the other, and the sound is the same whether anyone looks or not.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use suite_common::ui::{lit_level_lamps, LEVEL_MIN_DB};
