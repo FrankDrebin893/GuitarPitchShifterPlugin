@@ -49,6 +49,11 @@ Three new instruments, each a pedal of its own:
   top one at full scale. The window is only redrawn while the lamps move
 - The clippers of the high-gain amp and the overdrive use less CPU. The sound is the same to the
   ear; only the last bits of the output move
+- The tuner keeps reading low strings through loud mains hum: once it has heard steady hum
+  (50 or 60 Hz and its harmonics, -70 dBFS or louder) before a pluck, it takes the hum out in
+  front of the detector, so a note no longer drops out at -45 dBFS hum. A string a note away
+  from the hum (G1 against 50 Hz, B1 against 60 Hz) is read up to about 5 cents off while
+  the hum is there. Without hum nothing changes
 - A project with a large cabinet file on a slow disk no longer holds up the amp opening: the
   file is read in the background, and the amp plays through its own cabinet until it has arrived
 - With a cabinet of your own, Mic and Resonance no longer follow the amp you picked: they work

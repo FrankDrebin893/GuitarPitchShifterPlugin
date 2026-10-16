@@ -51,6 +51,12 @@ impl BiquadCoeffs {
         )
     }
 
+    /// Notch: nothing at the centre, flat away from it
+    pub fn notch(freq_hz: f32, q: f32, sample_rate: f32) -> Self {
+        let (cos, alpha) = Self::prototype(freq_hz, q, sample_rate);
+        Self::normalised([1.0, -2.0 * cos, 1.0], [1.0 + alpha, -2.0 * cos, 1.0 - alpha])
+    }
+
     /// Bell: `gain_db` at the centre, flat away from it
     pub fn peak(freq_hz: f32, q: f32, gain_db: f32, sample_rate: f32) -> Self {
         let (cos, alpha) = Self::prototype(freq_hz, q, sample_rate);
