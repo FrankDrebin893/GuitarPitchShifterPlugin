@@ -52,6 +52,8 @@ Three new instruments, each a pedal of its own:
 - With a cabinet of your own, Mic and Resonance no longer follow the amp you picked: they work
   on the same frequencies for every amp (Mic a shelf up high, Resonance a bell at 110 Hz), and
   at their centre they leave your file as it is
+- Switching amp, or moving a pedal, dips the sound for about 9 ms instead of 10: the fade is
+  4.5 ms down and 4.5 ms up. It still does not click
 - Your own cabinets can be 8-bit or 64-bit float WAV files, which showed BAD FILE before
 - The amp is picked with a stepper (a name on label tape with a button at each end) under the
   dials, instead of three switches. Each amp still keeps its own dials
