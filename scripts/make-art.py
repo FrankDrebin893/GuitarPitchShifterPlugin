@@ -263,19 +263,19 @@ def drums(w=1320, h=1200):
         beams = np.maximum(beams, smooth(0.55, 0.95, 0.5 + 0.5 * np.cos((a - 1.0) * 5.0)) * reach)
 
     def kit(draw):
-        for cx, sign in ((w * 0.14, 1), (w * 0.86, -1)):
+        for cx, sign in ((w * 0.05, 1), (w * 0.95, -1)):
             for tilt in (0.5, -0.5):
-                dx, dy = np.sin(tilt) * 230, np.cos(tilt) * 230
-                draw.line([(cx - dx * sign, h * 0.17 - dy), (cx + dx * sign, h * 0.17 + dy)], fill=255, width=30)
-                draw.ellipse([cx + dx * sign - 34, h * 0.17 + dy - 34, cx + dx * sign + 34, h * 0.17 + dy + 34],
+                dx, dy = np.sin(tilt) * 110, np.cos(tilt) * 110
+                draw.line([(cx - dx * sign, h * 0.13 - dy), (cx + dx * sign, h * 0.13 + dy)], fill=255, width=16)
+                draw.ellipse([cx + dx * sign - 20, h * 0.13 + dy - 20, cx + dx * sign + 20, h * 0.13 + dy + 20],
                              fill=255)
-        for cx in (w * 0.12, w * 0.88):
-            for r, wd in ((190, 14), (150, 5), (120, 5)):
+        for cx in (w * 0.05, w * 0.95):
+            for r, wd in ((110, 10), (84, 4), (62, 4)):
                 draw.ellipse([cx - r, h * 1.02 - r, cx + r, h * 1.02 + r], outline=255, width=wd)
             for i in range(10):
                 ang = i * 0.314
-                px, py = cx + np.cos(ang) * 170, h * 1.02 - abs(np.sin(ang)) * 170
-                draw.ellipse([px - 7, py - 7, px + 7, py + 7], fill=255)
+                px, py = cx + np.cos(ang) * 97, h * 1.02 - abs(np.sin(ang)) * 97
+                draw.ellipse([px - 5, py - 5, px + 5, py + 5], fill=255)
     img, mask, glow = sketch(kit, w, h)
     layers = [
         ink(halftone(beams * edge * 0.9, 12, 30), tint(paint, 0.45), 0.55, w, h, 101),
@@ -294,18 +294,18 @@ def bass(w=1320, h=1200):
 
     def neck(draw):
         for cx in (w * 0.075, w * 0.925):
-            draw.rectangle([cx - 78, 0, cx + 78, h], fill=255)
+            draw.rectangle([cx - 54, h * 0.62, cx + 54, h], fill=255)
     img, mask, _ = sketch(neck, w, h, 0.5)
     fret = np.zeros((h, w), np.float32)
-    for i in range(12):
-        fret = np.maximum(fret, np.clip(1 - np.abs(y - h * (0.03 + 0.08 * i)) / 2.4, 0, 1))
+    for i in range(9):
+        fret = np.maximum(fret, np.clip(1 - np.abs(y - h * (0.64 + 0.04 * i)) / 2.4, 0, 1))
     for cx in (w * 0.075, w * 0.925):
         for k in range(1, 5):
-            line = np.clip(1 - np.abs(x - (cx - 60 + k * 24)) / 1.4, 0, 1)
-            fret = np.maximum(fret, line * (np.abs(x - cx) < 80))
+            line = np.clip(1 - np.abs(x - (cx - 40 + k * 20)) / 1.4, 0, 1)
+            fret = np.maximum(fret, line * (np.abs(x - cx) < 56))
     inlay = np.zeros((h, w), np.float32)
     for cx in (w * 0.075, w * 0.925):
-        for row, r in ((0.2, 14), (0.4, 14), (0.55, 20), (0.74, 14)):
+        for row, r in ((0.7, 12), (0.82, 12), (0.93, 16)):
             inlay = np.maximum(inlay, np.clip(r - np.sqrt((x - cx) ** 2 + (y - h * row) ** 2) + 0.5, 0, 1))
     strings = np.zeros((h, w), np.float32)
     swing = smooth(0.05, 0.5, np.minimum(x, w - x) / w * 2)
@@ -315,7 +315,7 @@ def bass(w=1320, h=1200):
             strings = np.maximum(strings, np.clip(1 - np.abs(y - yy) / (1.3 + k * 0.5), 0, 1))
     waves = smooth(0.4, 1.0, 0.5 + 0.5 * np.cos(y / 14.0 + 2 * np.sin(x / 130.0))) * edge * 0.8 * (1 - mask)
     layers = [
-        ink(mask * 0.55, shadeof(paint, 0.55), 0.5, w, h, 111),
+        ink(mask * 0.55, shadeof(paint, 0.55), 0.4, w, h, 111),
         ink(fret * mask, tint(paint, 0.55), 0.7, w, h, 112),
         ink(inlay, CREAM, 0.8, w, h, 113),
         ink(halftone(waves, 11, 0), tint(paint, 0.4), 0.45, w, h, 114),
@@ -330,12 +330,12 @@ def pad(w=1320, h=1200):
     x, y = grid(w, h)
     edge = edges(w, h, 0.32)
     rng = np.random.default_rng(121)
-    mx, my, mr = w * 0.88, h * 0.17, 110
+    mx, my, mr = w * 0.76, h * 0.86, 62
     moon = np.clip(mr - np.sqrt((x - mx) ** 2 + (y - my) ** 2) + 0.5, 0, 1)
     crater = np.zeros((h, w), np.float32)
-    for _ in range(9):
-        a_, r_ = rng.uniform(0, 6.28), rng.uniform(0, mr * 0.7)
-        cr = rng.uniform(10, 26)
+    for _ in range(7):
+        a_, r_ = rng.uniform(0, 6.28), rng.uniform(0, mr * 0.6)
+        cr = rng.uniform(6, 15)
         d_ = np.sqrt((x - (mx + np.cos(a_) * r_)) ** 2 + (y - (my + np.sin(a_) * r_)) ** 2)
         crater = np.maximum(crater, np.clip(1 - np.abs(d_ - cr) / 1.6, 0, 1))
     curtain = 0.5 + 0.5 * np.sin(x / 70.0 + 2.2 * np.sin(y / 260.0) + noise(w, h, 150, 122) * 3)
@@ -368,24 +368,23 @@ def bells(w=1320, h=1200):
     edge = edges(w, h, 0.34)
     rings = np.zeros((h, w), np.float32)
     for cx in (w * 0.1, w * 0.9):
-        d = np.sqrt((x - cx) ** 2 + (y - h * 0.42) ** 2)
-        rings = np.maximum(rings, smooth(0.3, 0.9, 0.5 + 0.5 * np.cos(d / 22.0)) * smooth(h * 0.8, 120, d))
+        d = np.sqrt((x - cx) ** 2 + (y - h * 0.82) ** 2)
+        rings = np.maximum(rings, smooth(0.3, 0.9, 0.5 + 0.5 * np.cos(d / 22.0)) * smooth(h * 0.3, 90, d))
 
     def shapes(draw):
-        for cx in (w * 0.1, w * 0.9):
-            draw.line([(cx, 0), (cx, h * 0.1)], fill=255, width=8)
-            for k in range(5):
-                draw.ellipse([cx - 9, k * 24, cx + 9, k * 24 + 30], outline=255, width=4)
-            draw.ellipse([cx - 82, h * 0.1, cx + 82, h * 0.38], fill=255)
-            draw.polygon([(cx - 80, h * 0.26), (cx + 80, h * 0.26), (cx + 120, h * 0.41), (cx - 120, h * 0.41)],
-                         fill=255)
-            draw.ellipse([cx - 120, h * 0.395, cx + 120, h * 0.435], fill=255)
-            draw.ellipse([cx - 20, h * 0.43, cx + 20, h * 0.43 + 40], fill=255)
-            for gx, gy, r in ((0.7, 0.16, 38), (0.6, 0.55, 22), (-0.6, 0.52, 28), (-0.7, 0.2, 18), (0.2, 0.7, 16)):
-                draw.polygon(star_polygon(cx + gx * 170, h * gy, r), fill=255)
+        for cx in (w * 0.105, w * 0.895):
+            top = h * 0.70
+            draw.ellipse([cx - 52, top, cx + 52, top + h * 0.17], fill=255)
+            draw.polygon([(cx - 51, top + h * 0.09), (cx + 51, top + h * 0.09), (cx + 78, top + h * 0.2),
+                          (cx - 78, top + h * 0.2)], fill=255)
+            draw.ellipse([cx - 78, top + h * 0.185, cx + 78, top + h * 0.215], fill=255)
+            draw.ellipse([cx - 13, top + h * 0.21, cx + 13, top + h * 0.21 + 26], fill=255)
+            draw.ellipse([cx - 8, top - 18, cx + 8, top - 2], outline=255, width=4)
+            for gx, gy, r in ((0.95, 0.62, 26), (-0.9, 0.56, 20), (0.7, 0.93, 16), (-0.8, 0.96, 14)):
+                draw.polygon(star_polygon(cx + gx * 120, h * gy, r), fill=255)
     img, mask, glow = sketch(shapes, w, h)
     layers = [
-        ink(halftone(rings * edge * 0.9, 11, 60), tint(paint, 0.4), 0.5, w, h, 131),
+        ink(halftone(rings * smooth(0.6, 0.78, y / h) * 0.9, 11, 60), tint(paint, 0.4), 0.5, w, h, 131),
         ink(glow, tint(paint, 0.55), 0.3, w, h, 132),
         ink(np.roll(hatch(mask, 6, 60, 2.3), (3, 4), axis=(0, 1)), shadeof(paint, 0.6), 0.7, w, h, 133),
         ink(rim_of(img, mask), CREAM, 0.8, w, h, 134),
