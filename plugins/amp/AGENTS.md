@@ -16,7 +16,7 @@ gain). They share the six dials.
   `tonestack.rs`, `poweramp.rs`
 - `src/cab.rs` - Cabinet: impulse response designed in code at 48 kHz and resampled for other
   rates, direct FIR; a player's response of 641 taps or more keeps its first two blocks as a
-  direct FIR and runs the rest through the `Tail`; Mic and Resonance filters behind it
+  direct FIR and runs the rest through the `Tail`; Mic and Resonance filters behind it (on the amp's cabinet frequencies, or on `NEUTRAL_CAB` while a file is picked)
 - `src/user_cab.rs` - The player's own cabinets: folder, WAV reading, resampler, trim, cut, level
 - `src/cab_stage.rs` - `CabStage` (lock-free hand-off of a cabinet to the audio thread) and
   `CabLoader` (reads the chosen file on a background task)
