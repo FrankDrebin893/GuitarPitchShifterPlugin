@@ -5,9 +5,9 @@ reasons behind the amp's design are in `DESIGN.md` next to this file; open work 
 `plugin:amp` issues.
 
 A guitar amp with a full signal chain, all our own designs: own names, no real makers' names,
-trademarks or circuit names anywhere (code, comments, docs, commit messages). Three amps, each
+trademarks or circuit names anywhere (code, comments, docs, commit messages). Four amps, each
 with its own cabinet: Klar (clean, glassy), Brøl (mid-forward crunch), Torden (modern tight high
-gain). They share the six dials.
+gain), Glød (warm edge of breakup, between Klar and Brøl). They share the six dials.
 
 - `src/lib.rs` - Plugin entry point, parameters. Reads them once per block into `AmpSettings`
 - `src/chain.rs` - `AmpChain`: the whole chain, dial smoothing, bypass crossfade, amp switching
@@ -160,7 +160,7 @@ How it behaves:
 | Drive Gain (`drive_gain`) | 0.0-10.0 | 3.0 | Amount of clipping in the pedal |
 | Drive Tone (`drive_tone`) | 0.0-10.0 | 5.0 | The pedal's top end, 1.5 to 7 kHz |
 | Drive Level (`drive_level`) | 0.0-10.0 | 5.0 | The pedal's output, -20 to +20 dB into the amp |
-| Amp (`amp`) | Klar / Brøl / Torden | Brøl | Amp and its cabinet. Variant ids `klar`, `brol`, `torden` |
+| Amp (`amp`) | Klar / Brøl / Torden / Glød | Brøl | Amp and its cabinet. Variant ids `klar`, `brol`, `torden`, `glod`. New amps go at the end: a project remembers its amp by its number |
 | Gain, Bass, Mid, Treble, Presence, Master (`gain`, `bass`, `mid`, `treble`, `presence`, `master`) | 0.0-10.0 | 5.0 | The amp's dials |
 | Chorus, Phaser, Flanger, Tremolo (`chorus_on`, `phaser_on`, `flanger_on`, `trem_on`) | on / off | off | Modulation pedals |
 | Chorus Rate (`chorus_rate`) | 0.1-6 Hz | 0.8 Hz | Speed of the sweep, 7 to 12 ms |

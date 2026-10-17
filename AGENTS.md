@@ -201,8 +201,8 @@ Soft glassy bells with a ping-pong delay and a hall, twelve voices; note-off doe
 ### Guitar Amp (`plugins/amp`)
 
 A guitar amp with a full signal chain, all our own designs: own names, no real makers' names,
-trademarks or circuit names anywhere (code, comments, docs, commit messages). Three amps
-(Klar clean, Brøl crunch, Torden high gain), a gate, compressor, overdrive, four modulation
+trademarks or circuit names anywhere (code, comments, docs, commit messages). Four amps
+(Klar clean, Brøl crunch, Torden high gain, Glød edge of breakup), a gate, compressor, overdrive, four modulation
 pedals, delay and reverb, a cabinet (built-in or the player's own WAV), a tuner, factory
 presets and a pedal order the player sets.
 
