@@ -1068,7 +1068,8 @@ mod tests {
     // aliases at the usual sample rates
     const ALIAS_TONES_HZ: [f32; 2] = [1245.0, 4186.0];
     // Per amp, at each of the tones
-    const ALIAS_LIMITS_DB: [[f64; 2]; 3] = [[-90.0, -78.0], [-90.0, -78.0], [-84.0, -84.0]];
+    const ALIAS_LIMITS_DB: [[f64; 2]; 4] =
+        [[-90.0, -78.0], [-90.0, -78.0], [-84.0, -84.0], [-90.0, -78.0]];
 
     fn new_chain(sample_rate: f32) -> AmpChain {
         let mut chain = AmpChain::new();
@@ -2472,8 +2473,11 @@ mod tests {
         let mut chain = new_chain(SAMPLE_RATE);
         let mut output = input.clone();
         for (index, block) in output.chunks_mut(BLOCK).enumerate() {
-            let amp =
-                if (150..450).contains(&index) { Amp::ALL[(index / 2) % 3] } else { Amp::Torden };
+            let amp = if (150..450).contains(&index) {
+                Amp::ALL[(index / 2) % Amp::ALL.len()]
+            } else {
+                Amp::Torden
+            };
             chain.process(&with_amp(amp, 0.7), block, None);
         }
         let own_step = largest_step(&output[4800..150 * BLOCK]);
@@ -2538,7 +2542,7 @@ mod tests {
             let before = layout(&chain);
             let mut block = sine(220.0, 0.2, sample_rate, 96_000);
             for (index, piece) in block.chunks_mut(BLOCK).enumerate() {
-                chain.process(&with_amp(Amp::ALL[(index / 40) % 3], 0.5), piece, None);
+                chain.process(&with_amp(Amp::ALL[(index / 40) % Amp::ALL.len()], 0.5), piece, None);
             }
             assert_eq!(layout(&chain), before);
             assert_eq!(chain.cab_irs.len(), Amp::ALL.len());
@@ -3224,7 +3228,8 @@ mod tests {
             let without =
                 run(&AmpSettings { cab_on: false, ..with_amp(amp, 0.5) }, &chords, SAMPLE_RATE);
             let fizz = |output: &[f32]| band_level_db(output, SAMPLE_RATE, Some(8000.0), None);
-            if amp != Amp::Klar {
+            // Klar and Glød keep their tops dark in the stages themselves
+            if !matches!(amp, Amp::Klar | Amp::Glod) {
                 let (with, without) = (fizz(&with), fizz(&without));
                 assert!(
                     without > with + 6.0,
@@ -3405,7 +3410,7 @@ mod tests {
                         on: turn % 4 < 2,
                         ..reverb_on([0.3, 6.0][turn % 2], 1.0)
                     },
-                    ..with_amp(Amp::ALL[turn % 3], 0.5)
+                    ..with_amp(Amp::ALL[turn % Amp::ALL.len()], 0.5)
                 };
                 chain.process(&settings, piece, None);
             }
@@ -4208,8 +4213,8 @@ mod tests {
         for (input, amps) in [(&tone, &Amp::ALL[..]), (&chords, &[Amp::Brol][..])] {
             for &amp in amps {
                 let settings = with_amp(amp, 0.5);
-                let other = file_taps(Amp::ALL[(amp.index() + 1) % 3], SAMPLE_RATE);
-                let third = file_taps(Amp::ALL[(amp.index() + 2) % 3], SAMPLE_RATE);
+                let other = file_taps(Amp::ALL[(amp.index() + 1) % Amp::ALL.len()], SAMPLE_RATE);
+                let third = file_taps(Amp::ALL[(amp.index() + 2) % Amp::ALL.len()], SAMPLE_RATE);
                 // From the amp's own to a file, from file to file, and back to the amp's own
                 for (before, after) in [(&[][..], &other[..]), (&other, &third), (&third, &[])] {
                     let mut chain = chain_with_cab(before, SAMPLE_RATE);
@@ -4249,7 +4254,7 @@ mod tests {
     fn test_cabinets_arriving_during_a_crossfade_wait_and_the_last_one_stays() {
         let input = power_chords(SAMPLE_RATE, 1.0);
         let settings = with_amp(Amp::Brol, 0.5);
-        let [first, second, third] = Amp::ALL.map(|amp| file_taps(amp, SAMPLE_RATE));
+        let [first, second, third, _] = Amp::ALL.map(|amp| file_taps(amp, SAMPLE_RATE));
         let mut chain = new_chain(SAMPLE_RATE);
         let stage = chain.cab_stage();
         let before = buffer_layout(&chain);
@@ -4496,7 +4501,7 @@ mod tests {
                 let settings = AmpSettings {
                     bypass: turn % 5 == 4,
                     cab_on: turn % 3 != 0,
-                    ..with_amp(Amp::ALL[turn % 3], 0.5)
+                    ..with_amp(Amp::ALL[turn % Amp::ALL.len()], 0.5)
                 };
                 chain.process(&settings, piece, None);
                 assert!(piece.iter().all(|sample| sample.is_finite() && sample.abs() <= 1.0));

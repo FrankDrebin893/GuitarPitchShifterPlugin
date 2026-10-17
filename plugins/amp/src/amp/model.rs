@@ -15,16 +15,20 @@ pub enum Amp {
     #[id = "torden"]
     #[name = "Torden"]
     Torden,
+    #[id = "glod"]
+    #[name = "Glød"]
+    Glod,
 }
 
 impl Amp {
-    pub const ALL: [Amp; 3] = [Amp::Klar, Amp::Brol, Amp::Torden];
+    pub const ALL: [Amp; 4] = [Amp::Klar, Amp::Brol, Amp::Torden, Amp::Glod];
 
     pub fn model(self) -> &'static AmpModel {
         match self {
             Amp::Klar => &KLAR,
             Amp::Brol => &BROL,
             Amp::Torden => &TORDEN,
+            Amp::Glod => &GLOD,
         }
     }
 
@@ -382,6 +386,90 @@ static BROL: AmpModel = AmpModel {
         breakup_db: 3.5,
         breakup_seed: 50,
         ir_ms: 10.0,
+    },
+};
+
+/// Edge of breakup: warm and chiming, between Klar's headroom and Brøl's crunch. Two stages
+/// that bend early but softly, so a light touch stays clean and a hard pick or the Gain dial
+/// turned up leans into a round, compressed grind with a lot of even harmonics. A gentle
+/// bright lift that goes away as the gain comes up, mids a little forward, and a power stage
+/// that sags: playing harder squeezes and warms it, as it does a small old amp
+static GLOD: AmpModel = AmpModel {
+    name: "Glød",
+    model_number: "GL-40",
+    tight_hz: 70.0,
+    focus: [900.0, 0.7, 1.0],
+    bright_hz: 2200.0,
+    bright_db: 6.0,
+    stage_count: 2,
+    stages: [
+        StageModel {
+            coupling_hz: 25.0,
+            gain_db: [-2.0, 10.0, 14.0],
+            headroom: [2.2, 3.0],
+            bias: 0.05,
+            bias_shift: 0.5,
+            lowpass_hz: 14000.0,
+            second_order: false,
+            finer_when_driven: false,
+        },
+        StageModel {
+            coupling_hz: 60.0,
+            gain_db: [-4.0, 11.0, 17.0],
+            headroom: [1.6, 2.2],
+            bias: 0.1,
+            bias_shift: 0.5,
+            lowpass_hz: 9000.0,
+            second_order: false,
+            finer_when_driven: true,
+        },
+        UNUSED_STAGE,
+        UNUSED_STAGE,
+    ],
+    fizz_hz: None,
+    lowcut_hz: None,
+    level_db: [20.0, 12.0, -0.5, -0.5, -3.5],
+    makeup_db: [0.0, 0.0, 0.0, 0.0, 0.0],
+    tone: ToneModel {
+        bass_hz: 130.0,
+        bass_db: 10.0,
+        mid_hz: 600.0,
+        mid_q: 0.7,
+        mid_db: 8.0,
+        mid_centre_db: 1.0,
+        scoop_db: 4.0,
+        mid_shift_octaves: 0.4,
+        treble_hz: 3000.0,
+        treble_db: 10.0,
+        mid_level_db: 2.0,
+    },
+    power: PowerModel {
+        drive_db: [-22.0, -4.0, 12.0],
+        volume_db: [-8.0, -7.5, -8.0],
+        clean_to: 0.0,
+        sag: 0.18,
+        sag_attack_ms: 18.0,
+        sag_release_ms: 110.0,
+        driven_sag: 0.0,
+        driven_sag_from: 0.0,
+        resonance_hz: 90.0,
+        resonance_db: 3.0,
+        presence_hz: 4500.0,
+        presence_db: 8.0,
+    },
+    cab: CabModel {
+        resonance_hz: 88.0,
+        resonance_q: 1.2,
+        body: [180.0, 0.8, 2.0],
+        dip: [420.0, 0.9, -3.0],
+        bite: [3100.0, 0.8, 5.5],
+        rolloff_hz: 5800.0,
+        air_ratio: 1.6,
+        breakup_hz: [1100.0, 6500.0],
+        breakup_count: 26,
+        breakup_db: 2.6,
+        breakup_seed: 70,
+        ir_ms: 8.0,
     },
 };
 

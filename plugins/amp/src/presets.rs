@@ -71,7 +71,7 @@ const USUAL_ORDER: &[&str] =
 // the gate starts to close on the tail of every mute. The gate closes 3 dB under its
 // threshold, so that is -60 dB, which was -54 dB with the 6 dB it had before. How fast a
 // gate shuts in a rest is its release, not its threshold: 8 dB of threshold are 9 ms
-pub static PRESETS: [Preset; 17] = [
+pub static PRESETS: [Preset; 20] = [
     Preset {
         name: "Init",
         amp: Amp::Brol,
@@ -327,6 +327,51 @@ pub static PRESETS: [Preset; 17] = [
         order: &[
             "comp", "chorus", "drive", "phaser", "amp", "flanger", "tremolo", "reverb", "delay",
         ],
+    },
+    // Glød. Edge of breakup by the fire: the amp's own warmth at the middle of the Gain dial,
+    // where a light touch stays clean and picking harder starts to grind. A short room
+    Preset {
+        name: "Pejs",
+        amp: Amp::Glod,
+        dials: [5.0, 5.0, 5.5, 5.0, 5.0, 5.0],
+        gate: (ON, -62.0, 150.0),
+        drive: (OFF, [3.0, 5.0, 5.0]),
+        cab: (ON, [5.0, 5.0]),
+        delay: (OFF, 350.0, 30.0, 20.0),
+        reverb: (ON, 1.3, 14.0),
+        comp: COMP_OFF,
+        mods: MODS_OFF,
+        order: USUAL_ORDER,
+    },
+    // Glød. Chime: low on the Gain dial with the top and presence up, a brighter microphone
+    // and a short delay
+    Preset {
+        name: "Gnist",
+        amp: Amp::Glod,
+        dials: [3.5, 4.5, 5.0, 6.5, 6.5, 5.0],
+        gate: (ON, -64.0, 200.0),
+        drive: (OFF, [3.0, 5.0, 5.0]),
+        cab: (ON, [6.0, 5.0]),
+        delay: (ON, 300.0, 25.0, 18.0),
+        reverb: (ON, 1.5, 15.0),
+        comp: COMP_OFF,
+        mods: MODS_OFF,
+        order: USUAL_ORDER,
+    },
+    // Glød. Bonfire: high on the Gain dial, where it squeezes into a round, singing grind,
+    // with the mids up and a darker microphone
+    Preset {
+        name: "Bål",
+        amp: Amp::Glod,
+        dials: [7.5, 4.5, 6.5, 5.0, 5.0, 4.8],
+        gate: (ON, -58.0, 120.0),
+        drive: (OFF, [3.0, 5.0, 5.0]),
+        cab: (ON, [4.5, 5.0]),
+        delay: (OFF, 350.0, 30.0, 20.0),
+        reverb: (OFF, 1.5, 15.0),
+        comp: COMP_OFF,
+        mods: MODS_OFF,
+        order: USUAL_ORDER,
     },
 ];
 

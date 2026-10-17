@@ -37,6 +37,9 @@ Three new instruments, each a pedal of its own:
 
 ### Guitar Amp
 
+- A fourth amp, Glød: warm and chiming at the edge of breakup, between Klar's clean headroom
+  and Brøl's crunch. It has its own cabinet, remembers its own dials and has three presets
+  (Pejs, Gnist, Bål)
 - The noise gate closes behind a note on a noisy guitar: hiss only has to sit 3 dB under the
   threshold, not 6. A note's tail is cut 3 dB sooner, and the four presets that had the
   gate at -54 dB are at -57 dB, so they sound as before
