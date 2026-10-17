@@ -67,6 +67,37 @@ impl Default for Mix {
     }
 }
 
+// The stems, in the order of the aux outputs
+pub const KICK_STEM: usize = 0;
+pub const SNARE_STEM: usize = 1;
+pub const HAT_STEM: usize = 2;
+pub const TOMS_STEM: usize = 3;
+pub const CYMBALS_STEM: usize = 4;
+pub const ROOM_STEM: usize = 5;
+pub const STEM_COUNT: usize = 6;
+
+/// One stereo pair for each group of the kit, before the bus: what the aux outputs carry.
+/// For Rock and Jazz they add up to the stereo mix. Metal and Groove drive their bus, and
+/// their stems leave that out
+#[derive(Clone, Copy, Default)]
+pub struct Stems {
+    pub pairs: [(f32, f32); STEM_COUNT],
+}
+
+impl Stems {
+    pub fn add(&mut self, stem: usize, left: f32, right: f32) {
+        self.pairs[stem].0 += left;
+        self.pairs[stem].1 += right;
+    }
+
+    pub fn add_scaled(&mut self, other: &Stems, scale: f32) {
+        for (pair, other) in self.pairs.iter_mut().zip(other.pairs) {
+            pair.0 += other.0 * scale;
+            pair.1 += other.1 * scale;
+        }
+    }
+}
+
 #[derive(Default)]
 struct Bus {
     left: f32,
@@ -314,14 +345,26 @@ impl DrumKit {
     }
 
     /// One stereo frame
+    #[cfg(test)]
     pub fn process(&mut self) -> (f32, f32) {
+        self.process_stems(&mut Stems::default())
+    }
+
+    /// One stereo frame, and the same frame as the stems that make it up
+    pub fn process_stems(&mut self, stems: &mut Stems) -> (f32, f32) {
         let mix = &self.mix;
         let mut bus = Bus::default();
 
-        bus.add(self.kick.process_sample() * mix.kick * KICK_GAIN, self.center_pan, KICK_SEND);
-        bus.add(self.snare.process_sample() * mix.snare * SNARE_GAIN, self.center_pan, SNARE_SEND);
+        let kick = self.kick.process_sample() * mix.kick * KICK_GAIN;
+        bus.add(kick, self.center_pan, KICK_SEND);
+        stems.add(KICK_STEM, kick * self.center_pan.0, kick * self.center_pan.1);
+        let snare = self.snare.process_sample() * mix.snare * SNARE_GAIN;
+        bus.add(snare, self.center_pan, SNARE_SEND);
+        stems.add(SNARE_STEM, snare * self.center_pan.0, snare * self.center_pan.1);
         for (tom, pan) in self.toms.iter_mut().zip(self.tom_pans) {
-            bus.add(tom.process_sample() * mix.toms * TOM_GAIN, pan, TOM_SEND);
+            let tom = tom.process_sample() * mix.toms * TOM_GAIN;
+            bus.add(tom, pan, TOM_SEND);
+            stems.add(TOMS_STEM, tom * pan.0, tom * pan.1);
         }
         for (slot, (cymbal, pan)) in self.cymbals.iter_mut().zip(self.cymbal_pans).enumerate() {
             let (gain, send) = if slot == HAT {
@@ -329,15 +372,22 @@ impl DrumKit {
             } else {
                 (mix.cymbals * CYMBAL_GAIN, CYMBAL_SEND)
             };
-            bus.add(cymbal.process_sample() * gain, pan, send);
+            let sample = cymbal.process_sample() * gain;
+            bus.add(sample, pan, send);
+            stems.add(
+                if slot == HAT { HAT_STEM } else { CYMBALS_STEM },
+                sample * pan.0,
+                sample * pan.1,
+            );
         }
 
         let (wet_left, wet_right) = self.room.process(bus.send_left, bus.send_right);
         let room_gain = mix.room * self.room_level;
 
         // An engine that is not ringing costs nothing
-        let (metal_left, metal_right) = self.metal.process(mix);
-        let (groove_left, groove_right) = self.groove.process(mix);
+        let (metal_left, metal_right) = self.metal.process(mix, stems);
+        let (groove_left, groove_right) = self.groove.process(mix, stems);
+        stems.add(ROOM_STEM, wet_left * room_gain, wet_right * room_gain);
 
         // Single hits pass untouched. Peaks of a busy pattern are rounded off instead of
         // clipping.
@@ -436,6 +486,117 @@ mod tests {
 
     fn seconds(samples: &[f32], from: f32, to: f32) -> &[f32] {
         &samples[(from * SAMPLE_RATE) as usize..(to * SAMPLE_RATE) as usize]
+    }
+
+    fn render_stems(drums: &mut DrumKit, num_samples: usize) -> Vec<((f32, f32), Stems)> {
+        let output = (0..num_samples)
+            .map(|_| {
+                let mut stems = Stems::default();
+                (drums.process_stems(&mut stems), stems)
+            })
+            .collect();
+        drums.set_time(drums.now + num_samples as u64);
+        output
+    }
+
+    fn energy(frames: &[((f32, f32), Stems)], stem: usize) -> f32 {
+        frames.iter().map(|(_, s)| s.pairs[stem].0.powi(2) + s.pairs[stem].1.powi(2)).sum()
+    }
+
+    #[test]
+    fn test_stems_of_the_modal_kits_add_up_to_the_stereo_mix() {
+        for kit in [Kit::Rock, Kit::Jazz] {
+            let mut drums = DrumKit::new();
+            drums.set_sample_rate(SAMPLE_RATE);
+            drums.set_kit(kit);
+            for (note, velocity) in
+                [(36, 0.8), (38, 0.7), (45, 0.6), (42, 0.5), (49, 0.6), (51, 0.5)]
+            {
+                drums.note_on(note, velocity);
+            }
+            let frames = render_stems(&mut drums, SAMPLE_RATE as usize);
+            let mut largest = 0.0f32;
+            for ((left, right), stems) in &frames {
+                let (sum_left, sum_right) =
+                    stems.pairs.iter().fold((0.0, 0.0), |(l, r), p| (l + p.0, r + p.1));
+                // The bus clipper is the only thing between the stems and the mix
+                assert!((bus_clip(sum_left) - left).abs() < 1e-5, "{kit:?} left");
+                assert!((bus_clip(sum_right) - right).abs() < 1e-5, "{kit:?} right");
+                largest = largest.max(left.abs());
+            }
+            assert!(largest > 0.1, "{kit:?} played nothing");
+            assert!(energy(&frames, ROOM_STEM) > 0.0, "{kit:?} has no room stem");
+        }
+    }
+
+    #[test]
+    fn test_a_piece_is_only_in_its_own_stem_and_the_room() {
+        let pieces = [
+            (36, KICK_STEM),
+            (38, SNARE_STEM),
+            (37, SNARE_STEM),
+            (45, TOMS_STEM),
+            (42, HAT_STEM),
+            (46, HAT_STEM),
+            (49, CYMBALS_STEM),
+            (51, CYMBALS_STEM),
+            (52, CYMBALS_STEM),
+        ];
+        for kit in Kit::ALL {
+            for (note, stem) in pieces {
+                let mut drums = DrumKit::new();
+                drums.set_sample_rate(SAMPLE_RATE);
+                drums.set_kit(kit);
+                drums.note_on(note, 0.8);
+                let frames = render_stems(&mut drums, SAMPLE_RATE as usize / 2);
+                assert!(energy(&frames, stem) > 1e-4, "{kit:?} note {note} is not in its stem");
+                for other in (0..STEM_COUNT).filter(|&other| other != stem && other != ROOM_STEM) {
+                    assert_eq!(
+                        energy(&frames, other),
+                        0.0,
+                        "{kit:?} note {note} bleeds into {other}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_the_room_stem_is_the_tail_and_follows_the_room_dial() {
+        for kit in Kit::ALL {
+            let mut drums = dry_kit(kit, SAMPLE_RATE);
+            drums.note_on(38, 0.9);
+            let dry = render_stems(&mut drums, SAMPLE_RATE as usize / 2);
+            assert_eq!(energy(&dry, ROOM_STEM), 0.0, "{kit:?} room at zero");
+
+            let mut drums = dry_kit(kit, SAMPLE_RATE);
+            drums.mix.room = 0.5;
+            drums.note_on(38, 0.9);
+            let wet = render_stems(&mut drums, SAMPLE_RATE as usize / 2);
+            assert!(energy(&wet, ROOM_STEM) > 1e-4, "{kit:?} room at half");
+        }
+    }
+
+    #[test]
+    fn test_the_stems_of_metal_and_groove_are_clean_of_the_bus_drive() {
+        // The stems are taken before the bus drive, so for a loud hit they add up to more
+        // than the driven stereo mix has
+        for kit in [Kit::Metal, Kit::Groove] {
+            let mut drums = dry_kit(kit, SAMPLE_RATE);
+            drums.note_on(36, 1.0);
+            drums.note_on(38, 1.0);
+            let frames = render_stems(&mut drums, SAMPLE_RATE as usize / 4);
+            let mix_peak = frames.iter().map(|((l, _), _)| l.abs()).fold(0.0, f32::max);
+            let stems_peak = frames
+                .iter()
+                .map(|(_, s)| s.pairs.iter().map(|p| p.0).sum::<f32>().abs())
+                .fold(0.0, f32::max);
+            assert!(mix_peak > 0.05 && stems_peak > 0.05, "{kit:?}");
+            assert!(
+                (stems_peak - mix_peak).abs() > 1e-3,
+                "{kit:?}: stems {stems_peak}, mix {mix_peak}"
+            );
+        }
     }
 
     #[test]

@@ -18,6 +18,10 @@ Three new instruments, each a pedal of its own:
 
 ### Drum Synth
 
+- Six extra stereo outputs for a host that has multi-out: Kick, Snare, Hi-Hat, Toms, Cymbals and
+  Room, each on a track of its own to mix, EQ and compress apart. The main output is the whole
+  kit as before. On Metal and Groove the stems are taken before the kit's bus drive, so they are
+  cleaner than the main mix
 - The Metal kit is a new instrument: a clicking kick, a cracking snare, cymbals of square
   waves and noise, its own room and a saturated bus. It replaces the Metal kit there was;
   projects set to Metal play the new one

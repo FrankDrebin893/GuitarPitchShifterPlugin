@@ -99,6 +99,15 @@ at once, as a hand does, and a note-off on anything else does nothing. Hi-hats a
 
 Stereo positions are from the drummer's seat (hi-hat left, floor tom right).
 
+Outputs: the main stereo output is the whole kit, always. A host that wants the pieces apart
+can also connect six stereo auxiliary outputs, `Kick`, `Snare`, `Hi-Hat`, `Toms`, `Cymbals`
+and `Room` (`Stems` in `drum_kit.rs`; the order is `*_STEM`). They are taken with Gain and the
+group levels, in front of the bus clipper. For Rock and Jazz they add up to the stereo mix.
+Metal and Groove take theirs before their bus drive (and Groove's warmth filter), so those
+stems are clean and the stereo mix, which keeps the drive, differs from their sum. The shaker
+is in `Hi-Hat`; a side stick in `Snare`. A host that connects none of them hears what it did
+before, to the bit
+
 Not there yet: see the `plugin:drums` issues.
 
 Rock and Jazz are tuned in `src/kit.rs`, Metal and Groove in their engine's file; check `kit_report` and listen to `render_wavs`.

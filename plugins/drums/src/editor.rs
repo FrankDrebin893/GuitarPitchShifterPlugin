@@ -18,7 +18,7 @@ const STYLE: PedalStyle = PedalStyle {
     model: "DS-2",
     paint: ui::theme::PAINT_TEAL,
     ornament: Ornament::Rings,
-    jacks: ["Stereo Out", "MIDI In"],
+    jacks: ["Stereo / Multi Out", "MIDI In"],
     band_y: 394.0,
     art: Some(ui::artwork::DRUMS),
 };
