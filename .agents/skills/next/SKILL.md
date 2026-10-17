@@ -33,6 +33,8 @@ Build one approved issue of FrankDrebin893/hojt-audio, following "How work flows
    - The standalone window looked at, if an editor changed
    - Code review on the branch; fix what it finds
    - `CHANGELOG.md` under `Unreleased` says what a player will notice
+   - `/page`: the page and the changelog checked against the branch, ending with
+     `scripts/page-check.sh mark`
 6. **Pull request** with the template, never naming a person: no "Rasmus" or any other name
    in the title, description or comments. Say "somebody" or that something "needs to be
    manually reviewed" (for a sound change: the renders to listen to). Names are for chat only.
