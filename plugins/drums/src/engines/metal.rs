@@ -1,7 +1,9 @@
 use super::{
     advance, choked, coef, db, hat_time, sine, BusDrive, CombRoom, MetalCluster, Rest, ENV_FLOOR,
 };
-use crate::drum_kit::{tom_index, Mix};
+use crate::drum_kit::{
+    tom_index, Mix, Stems, CYMBALS_STEM, HAT_STEM, KICK_STEM, ROOM_STEM, SNARE_STEM, TOMS_STEM,
+};
 use crate::dsp::{Noise, Svf};
 use crate::voices::tom::TOM_COUNT;
 use crate::voices::Hit;
@@ -415,7 +417,7 @@ impl MetalKit {
     }
 
     /// One stereo frame
-    pub fn process(&mut self, mix: &Mix) -> (f32, f32) {
+    pub fn process(&mut self, mix: &Mix, stems: &mut Stems) -> (f32, f32) {
         if !self.active {
             return (0.0, 0.0);
         }
@@ -430,6 +432,8 @@ impl MetalKit {
         let mut left = 0.0;
         let mut right = 0.0;
         let mut send = 0.0;
+        // The pieces as they are before the bus, which is what the stems get
+        let mut own = Stems::default();
 
         // Kick: a sine that falls from 181 to 46 Hz, a click of a high sine and noise
         let mut kick = 0.0;
@@ -453,6 +457,7 @@ impl MetalKit {
         left += kick;
         right += kick;
         send += kick * 0.12;
+        own.add(KICK_STEM, kick, kick);
 
         // Snare: two sines for the head, filtered noise for the wires and the crack
         let mut snare = 0.0;
@@ -488,6 +493,7 @@ impl MetalKit {
         left += snare;
         right += snare;
         send += snare * 0.45;
+        own.add(SNARE_STEM, snare, snare);
 
         // Toms: a sine with a fifth above it that fades with the pitch drop, and stick noise
         let mut toms = 0.0;
@@ -508,8 +514,11 @@ impl MetalKit {
             if voice.env < ENV_FLOOR {
                 voice.on = false;
             }
-            left += tom * tom_gain * (0.5 - 0.5 * TOM_PANS[index]);
-            right += tom * tom_gain * (0.5 + 0.5 * TOM_PANS[index]);
+            let tom_left = tom * tom_gain * (0.5 - 0.5 * TOM_PANS[index]);
+            let tom_right = tom * tom_gain * (0.5 + 0.5 * TOM_PANS[index]);
+            left += tom_left;
+            right += tom_right;
+            own.add(TOMS_STEM, tom_left, tom_right);
             toms += tom;
         }
         send += toms * tom_gain * 0.35;
@@ -525,6 +534,7 @@ impl MetalKit {
         left += hat * 0.8;
         right += hat * 0.35;
         send += hat * 0.1;
+        own.add(HAT_STEM, hat * 0.8, hat * 0.35);
 
         // Ride, on the right: wash, the ping of the stick, and three sines for the bell
         let mut ride = 0.0;
@@ -549,6 +559,7 @@ impl MetalKit {
         left += ride * 0.35;
         right += ride * 0.85;
         send += ride * 0.12;
+        own.add(CYMBALS_STEM, ride * 0.35, ride * 0.85);
 
         // Crash 1 on the left, crash 2 on the right, splash between them
         let mut crashes = [0.0; 2];
@@ -567,6 +578,11 @@ impl MetalKit {
         left += crashes[0] * 0.85 + crashes[1] * 0.3 + splash * 0.7;
         right += crashes[0] * 0.3 + crashes[1] * 0.85 + splash * 0.4;
         send += (crashes[0] + crashes[1]) * 0.15;
+        own.add(
+            CYMBALS_STEM,
+            crashes[0] * 0.85 + crashes[1] * 0.3 + splash * 0.7,
+            crashes[0] * 0.3 + crashes[1] * 0.85 + splash * 0.4,
+        );
 
         // China, on the right: noise that the metal modulates, driven hard
         let mut china = 0.0;
@@ -579,12 +595,16 @@ impl MetalKit {
         left += china * 0.3;
         right += china * 0.9;
         send += china * 0.12;
+        own.add(CYMBALS_STEM, china * 0.3, china * 0.9);
 
         let room = mix.room * ROOM_SCALE;
         // Always run, so a tail keeps decaying while Room is at zero and does not resume
         let (room_left, room_right) = self.room.process(send * 0.2);
         left += room_left * room;
         right += room_right * room;
+        own.add(ROOM_STEM, room_left * room, room_right * room);
+        // Clean: the bus drive below is part of the stereo mix only
+        stems.add_scaled(&own, LEVEL);
 
         let left = self.drive.process(self.out_hps[0].process(left).high) * LEVEL;
         let right = self.drive.process(self.out_hps[1].process(right).high) * LEVEL;
@@ -620,7 +640,7 @@ mod tests {
     fn render(kit: &mut MetalKit, mix: &Mix, seconds: f32) -> Vec<f32> {
         (0..(seconds * SAMPLE_RATE) as usize)
             .map(|_| {
-                let (left, right) = kit.process(mix);
+                let (left, right) = kit.process(mix, &mut Stems::default());
                 (left + right) * 0.5
             })
             .collect()

@@ -1,7 +1,9 @@
 use super::{
     advance, choked, coef, db, hat_time, sine, BusDrive, CombRoom, MetalCluster, Rest, ENV_FLOOR,
 };
-use crate::drum_kit::{tom_index, Mix};
+use crate::drum_kit::{
+    tom_index, Mix, Stems, CYMBALS_STEM, HAT_STEM, KICK_STEM, ROOM_STEM, SNARE_STEM, TOMS_STEM,
+};
 use crate::dsp::{Noise, Svf};
 use crate::voices::tom::TOM_COUNT;
 use crate::voices::Hit;
@@ -421,7 +423,7 @@ impl GrooveKit {
     }
 
     /// One stereo frame
-    pub fn process(&mut self, mix: &Mix) -> (f32, f32) {
+    pub fn process(&mut self, mix: &Mix, stems: &mut Stems) -> (f32, f32) {
         if !self.active {
             return (0.0, 0.0);
         }
@@ -437,6 +439,8 @@ impl GrooveKit {
         let mut left = 0.0;
         let mut right = 0.0;
         let mut send = 0.0;
+        // The pieces as they are before the bus, which is what the stems get
+        let mut own = Stems::default();
 
         // Kick: a round sine that falls from 114 to 52 Hz, with a soft felt beater
         let mut kick = 0.0;
@@ -456,6 +460,7 @@ impl GrooveKit {
         left += kick;
         right += kick;
         send += kick * 0.08;
+        own.add(KICK_STEM, kick, kick);
 
         // Snare: warm body and soft wires
         let mut snare = 0.0;
@@ -494,6 +499,7 @@ impl GrooveKit {
         left += snare * 0.97;
         right += snare;
         send += snare * 0.5;
+        own.add(SNARE_STEM, snare * 0.97, snare);
 
         // Toms: a sine with a small pitch drop and a little skin noise
         let mut toms = 0.0;
@@ -513,8 +519,11 @@ impl GrooveKit {
             if voice.env < ENV_FLOOR {
                 voice.on = false;
             }
-            left += tom * tom_gain * (0.5 - 0.5 * TOM_PANS[index]);
-            right += tom * tom_gain * (0.5 + 0.5 * TOM_PANS[index]);
+            let tom_left = tom * tom_gain * (0.5 - 0.5 * TOM_PANS[index]);
+            let tom_right = tom * tom_gain * (0.5 + 0.5 * TOM_PANS[index]);
+            left += tom_left;
+            right += tom_right;
+            own.add(TOMS_STEM, tom_left, tom_right);
             toms += tom;
         }
         send += toms * tom_gain * 0.4;
@@ -531,6 +540,7 @@ impl GrooveKit {
         left += hat * 0.75;
         right += hat * 0.45;
         send += hat * 0.12;
+        own.add(HAT_STEM, hat * 0.75, hat * 0.45);
 
         // Ride, on the right
         let mut ride = 0.0;
@@ -551,6 +561,7 @@ impl GrooveKit {
         left += ride * 0.4;
         right += ride * 0.8;
         send += ride * 0.15;
+        own.add(CYMBALS_STEM, ride * 0.4, ride * 0.8);
 
         // Crash: dark, left of centre
         let mut crash = 0.0;
@@ -564,6 +575,7 @@ impl GrooveKit {
         left += crash * 0.8;
         right += crash * 0.5;
         send += crash * 0.2;
+        own.add(CYMBALS_STEM, crash * 0.8, crash * 0.5);
 
         // Shaker, on the right: it only starts to die away once it has swelled
         let mut shaker = 0.0;
@@ -579,12 +591,16 @@ impl GrooveKit {
         left += shaker * 0.35;
         right += shaker * 0.75;
         send += shaker * 0.2;
+        own.add(HAT_STEM, shaker * 0.35, shaker * 0.75);
 
         let room = mix.room * ROOM_SCALE;
         // Always run, so a tail keeps decaying while Room is at zero and does not resume
         let (room_left, room_right) = self.room.process(send * 0.18);
         left += room_left * room;
         right += room_right * room;
+        own.add(ROOM_STEM, room_left * room, room_right * room);
+        // Clean: the tape below is part of the stereo mix only
+        stems.add_scaled(&own, LEVEL);
 
         // Tape: saturation, then the warmth filter takes the top off
         let left = self.drive.process(self.out_hps[0].process(left).high);
@@ -623,7 +639,7 @@ mod tests {
     fn render(kit: &mut GrooveKit, mix: &Mix, seconds: f32) -> Vec<f32> {
         (0..(seconds * SAMPLE_RATE) as usize)
             .map(|_| {
-                let (left, right) = kit.process(mix);
+                let (left, right) = kit.process(mix, &mut Stems::default());
                 (left + right) * 0.5
             })
             .collect()

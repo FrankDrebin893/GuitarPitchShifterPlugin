@@ -11,7 +11,7 @@ mod reverb;
 #[cfg(test)]
 mod test_util;
 mod voices;
-use drum_kit::DrumKit;
+use drum_kit::{DrumKit, Stems, STEM_COUNT};
 use kit::Kit;
 
 const LEVEL_MIN_DB: f32 = -30.0;
@@ -133,10 +133,20 @@ impl Plugin for DrumSynthPlugin {
     const EMAIL: &'static str = "";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
+    // The main output is the whole kit. A host that wants the pieces apart can also take the
+    // six stems, each a stereo pair on an output of its own
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
         main_input_channels: None,
         main_output_channels: NonZeroU32::new(2),
-        ..AudioIOLayout::const_default()
+        aux_input_ports: &[],
+        aux_output_ports: &[new_nonzero_u32(2); STEM_COUNT],
+        names: PortNames {
+            layout: Some("Stereo, with stems"),
+            main_input: None,
+            main_output: Some("Stereo Out"),
+            aux_inputs: &[],
+            aux_outputs: &["Kick", "Snare", "Hi-Hat", "Toms", "Cymbals", "Room"],
+        },
     }];
 
     // CC4 is the hi-hat pedal
@@ -174,7 +184,7 @@ impl Plugin for DrumSynthPlugin {
     fn process(
         &mut self,
         buffer: &mut Buffer,
-        _aux: &mut AuxiliaryBuffers,
+        aux: &mut AuxiliaryBuffers,
         context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         // These only affect the next hits, so once per block is enough
@@ -222,10 +232,22 @@ impl Plugin for DrumSynthPlugin {
             mix.room = self.params.room.smoothed.next();
 
             let gain = self.params.gain.smoothed.next();
-            let (left, right) = self.drums.process();
+            let mut stems = Stems::default();
+            let (left, right) = self.drums.process_stems(&mut stems);
 
             for (channel, sample) in frame.iter_mut().enumerate() {
                 *sample = if channel == 0 { left } else { right } * gain;
+            }
+            // Only the outputs the host has connected have anything to write to
+            for (output, pair) in aux.outputs.iter_mut().zip(stems.pairs) {
+                if let [stem_left, stem_right, ..] = output.as_slice() {
+                    if let (Some(l), Some(r)) =
+                        (stem_left.get_mut(sample_id), stem_right.get_mut(sample_id))
+                    {
+                        *l = pair.0 * gain;
+                        *r = pair.1 * gain;
+                    }
+                }
             }
         }
 
