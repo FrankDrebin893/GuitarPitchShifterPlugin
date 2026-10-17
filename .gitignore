@@ -3,5 +3,6 @@ build.bat
 nul
 .claude/*
 !.claude/commands/
+!.claude/settings.json
 /dist
 .impeccable/

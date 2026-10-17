@@ -28,6 +28,11 @@ A suite of VST3/CLAP plugins built with Rust and the nih-plug framework. The bra
 - `scripts/sound-reports.sh` - The sound reports without their timings, for comparing two builds
 - `scripts/sync-labels.sh` - The backlog's labels on GitHub
 - `scripts/move-issue.sh` - Moves an issue to a state: its label and its place on the board
+- `scripts/page-check.sh` - Whether `/page` has looked at what changed since `main`, and whether
+  the page's links hold. The end-of-session hook runs it
+- `.agents/skills/` - The agent's skills (`/issue`, `/spec`, `/next`, `/groom`, `/release`,
+  `/page`); `.claude/commands/` mirrors them for Claude Code
+- `.claude/settings.json` - Claude Code's end-of-session hook (see End of a session)
 - `.github/workflows/` - `ci.yml` (tests), `release.yml` (builds and publishes a release),
   `pages.yml` (publishes `site/`), `approval-guard.yml` (see How work flows), `sound.yml` (on a
   pull request that touches a plugin: what its reports say changed against `main`, as a
@@ -70,6 +75,16 @@ and where; `from:user` marks issues from outside the project.
   `Sound` is not required: it only runs when a plugin changed
 - A large piece of work is a parent issue with one sub-issue per milestone
 - A decision the spec did not cover is asked on the issue, not guessed
+
+### End of a session
+
+Every session that changed something a player can notice ends with `/page`
+(`.agents/skills/page/SKILL.md`): it puts on the page (`site/`) what is true of the release
+now, makes sure `CHANGELOG.md` under `Unreleased` carries what is not released yet, checks the
+page's links and finishes with `scripts/page-check.sh mark`. Commit what it changed with the
+session's work. In Claude Code a Stop hook (`.claude/settings.json`) asks for it once when
+`scripts/page-check.sh` says the changes since `main` have not been looked at; an agent tool
+without hooks runs `scripts/page-check.sh` itself before it ends
 
 ## Build Commands
 
@@ -253,7 +268,9 @@ out; the HØJT name and logo are kept out of it (`NOTICE.md`).
 3. For every plugin whose sound changed in that section, run `scripts/site-audio.sh <plugin>`
    (`drums`, `amp`, `pitch_shifter`, `bass`, `pad`, `bells`) and listen to what changed in `site/audio/`. Redo a
    screenshot in `site/img/` if the plugin's look changed
-4. Commit, then tag `v<version>` and push the tag. `release.yml` tests, builds for Windows,
+4. Run `/page release <version>` so the page describes exactly that version: new plugins,
+   controls tables, sound examples
+5. Commit, then tag `v<version>` and push the tag. `release.yml` tests, builds for Windows,
    macOS (Intel and Apple Silicon in one binary, signed ad hoc) and Linux, and publishes the zips
 
 - The zips are named `<BundleName>-<windows|macos|linux>.zip`, without a version: the page
